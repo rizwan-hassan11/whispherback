@@ -19,6 +19,7 @@ class ScheduleEngine {
   final ScheduleRepository _schedules;
   final PlaybackCoordinator _coordinator;
   Timer? _timer;
+  final Map<String, DateTime> _lastFired = {};
 
   void start() {
     _timer?.cancel();
@@ -33,17 +34,52 @@ class ScheduleEngine {
     final all = await _schedules.getAll();
     final now = DateTime.now();
     for (final schedule in all) {
+      if (!schedule.enabled) continue;
       if (_shouldFire(schedule, now)) {
-        await _coordinator.playPlaylist(schedule.playlistId);
+        _lastFired[schedule.id] = now;
+        await _coordinator.playPlaylist(schedule.playlistId, fromSchedule: true);
       }
     }
   }
 
   bool _shouldFire(PlaybackSchedule schedule, DateTime now) {
+    if (!schedule.enabled) return false;
+    if (!schedule.runsOnWeekday(now.weekday)) return false;
     if (schedule.startTime.isAfter(now)) return false;
-    final elapsed = now.difference(schedule.startTime).inMinutes;
-    if (elapsed < 0) return false;
-    return elapsed % schedule.intervalMinutes == 0 && now.second < 20;
+
+    if (schedule.endTime != null) {
+      final endToday = DateTime(
+        now.year,
+        now.month,
+        now.day,
+        schedule.endTime!.hour,
+        schedule.endTime!.minute,
+      );
+      if (now.isAfter(endToday)) return false;
+    }
+
+    final startToday = DateTime(
+      now.year,
+      now.month,
+      now.day,
+      schedule.startTime.hour,
+      schedule.startTime.minute,
+    );
+    if (now.isBefore(startToday)) return false;
+
+    final elapsedMin = now.difference(startToday).inMinutes;
+    if (elapsedMin < 0) return false;
+    if (elapsedMin % schedule.intervalMinutes != 0) return false;
+
+    // Fire once per interval window (first half of the minute).
+    if (now.second >= 30) return false;
+
+    final last = _lastFired[schedule.id];
+    if (last != null && now.difference(last).inMinutes < schedule.intervalMinutes) {
+      return false;
+    }
+
+    return true;
   }
 }
 

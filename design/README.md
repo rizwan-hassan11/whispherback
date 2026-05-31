@@ -1,5 +1,9 @@
 # WhisperBack Design System
 
+## Interactive preview (no Flutter required)
+
+Open **[ui-preview.html](ui-preview.html)** in your browser — v3 with **light/dark theme toggle**, **Sign In / Sign Up** screens, glass UI, and all main app screens.
+
 ## Figma
 
 Create a Figma file matching [screen-specs.md](screen-specs.md) and link here:
@@ -14,12 +18,11 @@ Machine-readable tokens for Flutter theming: [tokens.json](tokens.json)
 
 | Component | Used on | Notes |
 |-----------|---------|-------|
-| ActiveToggle | S02 Home | Rotating power button, purple glow when ON |
-| NavBar | Shell | Icon-first; labels optional via Settings |
-| PlaylistCard | S03 | Name, clip count, schedule/shuffle badges |
-| ClipRow | S05 | Source icon, duration |
+| ActiveToggle | S02 Home | Gradient power button, pulse rings when ON |
+| GlassNavBar | Shell | Floating blurred nav; labels optional |
+| WhisperCard | S03, S05 | Glass cards with badges + progress |
 | ScheduleConflictDialog | S08 modal | Blocks save, names conflicting playlist |
-| PlaybackModal | S13 | Bottom sheet; close top-right |
+| PlaybackModal | S13 | Bottom sheet with art + scrubber |
 | ProgressBar | S07 Import | Real-time import progress |
 | SleepTimer | S10 | Countdown + end early |
 | PrayerMethodPicker | S11 | Method + madhab dropdowns |

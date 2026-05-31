@@ -73,6 +73,7 @@ flutter run --dart-define=FLAVOR=dev
 
 ## Documentation
 
+- [Project audit (May 2026)](docs/PROJECT_AUDIT.md)
 - [Playback state diagram](docs/playback-states.md)
 - [Screen specifications](design/screen-specs.md)
 - [Design tokens](design/tokens.json)

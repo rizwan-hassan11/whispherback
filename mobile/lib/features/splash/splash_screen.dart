@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import '../../core/theme/app_colors.dart';
-import '../../providers/settings_provider.dart';
 import '../../data/database/seed_service.dart';
+import '../../l10n/app_localizations.dart';
 
 class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({super.key});
@@ -32,53 +33,36 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
     return Scaffold(
       body: Container(
         width: double.infinity,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [AppColors.deep, AppColors.brand, AppColors.brandLight],
-          ),
-        ),
+        decoration: const BoxDecoration(gradient: AppColors.backgroundGradient),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Container(
-              width: 88,
-              height: 88,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.14),
-                borderRadius: BorderRadius.circular(22),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.32)),
-              ),
-              alignment: Alignment.center,
-              child: const Text(
-                'W',
-                style: TextStyle(
-                  fontSize: 42,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-              ),
-            ),
-            const SizedBox(height: 24),
-            const Text(
-              'WhisperBack',
-              style: TextStyle(
-                fontSize: 32,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-            ),
-            const SizedBox(height: 8),
             Text(
-              'Your Personalized Audio Whisperer',
+              'WhisperBack',
+              style: GoogleFonts.fraunces(
+                fontSize: 40,
+                fontWeight: FontWeight.w600,
+                letterSpacing: -0.5,
+                color: AppColors.soft,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              context.l10n.appTagline,
               style: TextStyle(
                 fontSize: 14,
-                color: AppColors.gold.withValues(alpha: 0.95),
+                color: AppColors.muted,
               ),
             ),
             const SizedBox(height: 48),
-            const CircularProgressIndicator(color: AppColors.gold),
+            const SizedBox(
+              width: 28,
+              height: 28,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: AppColors.accentBright,
+              ),
+            ),
           ],
         ),
       ),

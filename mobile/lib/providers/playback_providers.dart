@@ -5,9 +5,9 @@ import '../../data/repositories/playlist_repository.dart';
 import '../../data/repositories/schedule_repository.dart';
 import '../../data/repositories/sleep_repository.dart';
 import '../../domain/playback/playback_state.dart';
-import '../audio/audio_services.dart';
-import '../playback/playback_coordinator.dart';
-import '../prayer/prayer_service.dart';
+import '../services/audio/audio_services.dart';
+import '../services/playback/playback_coordinator.dart';
+import '../services/prayer/prayer_service.dart';
 import 'repository_providers.dart';
 
 final audioPlaybackServiceProvider = Provider<AudioPlaybackService>((ref) {

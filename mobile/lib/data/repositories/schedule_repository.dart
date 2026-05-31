@@ -21,7 +21,6 @@ class ScheduleRepository {
       SELECT s.*, p.name AS playlist_name
       FROM schedules s
       INNER JOIN playlists p ON p.id = s.playlist_id
-      WHERE s.enabled = 1
       ORDER BY s.start_time ASC
     ''');
     return rows.map(_fromRow).toList();
@@ -43,8 +42,11 @@ class ScheduleRepository {
     String? id,
     required String playlistId,
     required DateTime startTime,
+    DateTime? endTime,
     required int intervalMinutes,
     bool shuffleEnabled = false,
+    bool alarmEnabled = true,
+    int daysMask = 127,
   }) async {
     final db = await _db.database;
     final existing = await getAll();
@@ -62,8 +64,11 @@ class ScheduleRepository {
         'id': scheduleId,
         'playlist_id': playlistId,
         'start_time': startTime.toIso8601String(),
+        'end_time': endTime?.toIso8601String(),
         'interval_minutes': intervalMinutes,
         'shuffle_enabled': shuffleEnabled ? 1 : 0,
+        'alarm_enabled': alarmEnabled ? 1 : 0,
+        'days_mask': daysMask,
         'enabled': 1,
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
@@ -81,6 +86,16 @@ class ScheduleRepository {
   Future<void> remove(String playlistId) async {
     final db = await _db.database;
     await db.delete('schedules', where: 'playlist_id = ?', whereArgs: [playlistId]);
+  }
+
+  Future<void> setEnabled(String playlistId, bool enabled) async {
+    final db = await _db.database;
+    await db.update(
+      'schedules',
+      {'enabled': enabled ? 1 : 0},
+      where: 'playlist_id = ?',
+      whereArgs: [playlistId],
+    );
   }
 
   bool _wouldConflict(
@@ -103,12 +118,16 @@ class ScheduleRepository {
   }
 
   PlaybackSchedule _fromRow(Map<String, Object?> row) {
+    final endRaw = row['end_time'] as String?;
     return PlaybackSchedule(
       id: row['id']! as String,
       playlistId: row['playlist_id']! as String,
       startTime: DateTime.parse(row['start_time']! as String),
+      endTime: endRaw != null ? DateTime.parse(endRaw) : null,
       intervalMinutes: row['interval_minutes']! as int,
       shuffleEnabled: (row['shuffle_enabled'] as int) == 1,
+      alarmEnabled: (row['alarm_enabled'] as int?) != 0,
+      daysMask: row['days_mask'] as int? ?? 127,
       enabled: (row['enabled'] as int) == 1,
       playlistName: row['playlist_name']! as String,
     );

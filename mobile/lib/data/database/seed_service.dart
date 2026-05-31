@@ -16,19 +16,19 @@ class SeedService {
     final demoClips = <AudioClip>[
       await clipRepo.create(
         title: 'Morning affirmation',
-        filePath: 'asset://demo/morning.m4a',
+        filePath: 'demo://seed/morning.m4a',
         durationMs: 45000,
         source: ClipSource.recorded,
       ),
       await clipRepo.create(
         title: 'Focus reminder',
-        filePath: 'asset://demo/focus.m4a',
+        filePath: 'demo://seed/focus.m4a',
         durationMs: 30000,
         source: ClipSource.imported,
       ),
       await clipRepo.create(
         title: 'Evening gratitude',
-        filePath: 'asset://demo/evening.m4a',
+        filePath: 'demo://seed/evening.m4a',
         durationMs: 60000,
         source: ClipSource.recorded,
       ),

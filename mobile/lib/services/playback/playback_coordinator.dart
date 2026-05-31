@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:just_audio/just_audio.dart';
+
 import '../../data/repositories/app_state_repository.dart';
 import '../../data/repositories/playlist_repository.dart';
 import '../../data/repositories/schedule_repository.dart';
@@ -36,14 +38,15 @@ class PlaybackCoordinator {
   PlaybackSnapshot _snapshot = const PlaybackSnapshot(state: AppPlaybackState.inactive);
   final _shuffleEngines = <String, ShuffleEngine>{};
 
+  StreamSubscription<PlayerState>? _playerSub;
+  Timer? _modeCheckTimer;
+
   Stream<PlaybackSnapshot> get snapshotStream => _snapshotController.stream;
   PlaybackSnapshot get snapshot => _snapshot;
 
-  Timer? _modeCheckTimer;
-
   void startModeMonitoring() {
     _modeCheckTimer?.cancel();
-    _modeCheckTimer = Timer.periodic(const Duration(seconds: 30), (_) => _refreshModeState());
+    _modeCheckTimer = Timer.periodic(const Duration(seconds: 15), (_) => refreshModeState());
   }
 
   Future<void> initialize() async {
@@ -51,7 +54,27 @@ class PlaybackCoordinator {
     _emit(_snapshot.copyWith(
       state: active ? AppPlaybackState.activeIdle : AppPlaybackState.inactive,
     ));
+    _playerSub = _audio.playerStateStream.listen(_onPlayerState);
     startModeMonitoring();
+  }
+
+  void _onPlayerState(PlayerState state) {
+    if (state.processingState == ProcessingState.completed) {
+      unawaited(_onClipCompleted());
+    }
+  }
+
+  Future<void> _onClipCompleted() async {
+    if (_snapshot.playlistId == null) {
+      await stop();
+      return;
+    }
+    final clips = await _playlists.getClips(_snapshot.playlistId!);
+    if (clips.length <= 1) {
+      await stop();
+      return;
+    }
+    await playPlaylist(_snapshot.playlistId!);
   }
 
   Future<void> toggleActive() async {
@@ -62,11 +85,11 @@ class PlaybackCoordinator {
       _emit(const PlaybackSnapshot(state: AppPlaybackState.inactive));
     } else {
       await _appState.setActive(true);
-      await _refreshModeState();
+      await refreshModeState();
     }
   }
 
-  Future<void> playPlaylist(String playlistId) async {
+  Future<void> playPlaylist(String playlistId, {bool fromSchedule = false}) async {
     if (!await _canPlay()) return;
 
     final clips = await _playlists.getClips(playlistId);
@@ -76,15 +99,27 @@ class PlaybackCoordinator {
     final shuffle = playlist?.shuffleEnabled ?? false;
     final clip = shuffle ? _nextShuffledClip(playlistId, clips) : clips.first;
 
-    await _audio.playFile(clip.filePath);
+    if (!_isPlayablePath(clip.filePath)) return;
+
+    try {
+      await _audio.playFile(clip.filePath);
+    } catch (_) {
+      return;
+    }
+
     _emit(_snapshot.copyWith(
-      state: AppPlaybackState.manualPlaying,
+      state: fromSchedule ? AppPlaybackState.scheduledPlaying : AppPlaybackState.manualPlaying,
       playlistId: playlistId,
       playlistName: playlist?.name,
       clipTitle: clip.title,
       isPlaying: true,
       shuffleEnabled: shuffle,
+      modalVisible: true,
     ));
+  }
+
+  bool _isPlayablePath(String path) {
+    return !path.startsWith('asset://') && !path.startsWith('demo://');
   }
 
   Future<void> pause() async {
@@ -95,16 +130,21 @@ class PlaybackCoordinator {
   Future<void> resume() async {
     if (!await _canPlay()) return;
     await _audio.resume();
-    _emit(_snapshot.copyWith(isPlaying: true));
+    _emit(_snapshot.copyWith(isPlaying: true, modalVisible: true));
   }
 
   Future<void> stop() async {
     await _audio.stop();
     if (await _appState.isActive()) {
-      await _refreshModeState();
+      await refreshModeState();
     } else {
       _emit(const PlaybackSnapshot(state: AppPlaybackState.inactive));
     }
+  }
+
+  void dismissModal() {
+    if (_snapshot.state == AppPlaybackState.inactive) return;
+    _emit(_snapshot.copyWith(modalVisible: false));
   }
 
   Future<void> toggleShuffle(String playlistId, bool enabled) async {
@@ -136,7 +176,7 @@ class PlaybackCoordinator {
     return true;
   }
 
-  Future<void> _refreshModeState() async {
+  Future<void> refreshModeState() async {
     if (!await _appState.isActive()) {
       _emit(const PlaybackSnapshot(state: AppPlaybackState.inactive));
       return;
@@ -171,6 +211,7 @@ class PlaybackCoordinator {
 
   void dispose() {
     _modeCheckTimer?.cancel();
+    _playerSub?.cancel();
     _snapshotController.close();
   }
 }

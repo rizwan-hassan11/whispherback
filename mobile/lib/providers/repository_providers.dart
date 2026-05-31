@@ -1,12 +1,12 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'database_helper.dart';
-import '../repositories/app_state_repository.dart';
-import '../repositories/clip_repository.dart';
-import '../repositories/playlist_repository.dart';
-import '../repositories/prayer_repository.dart';
-import '../repositories/schedule_repository.dart';
-import '../repositories/sleep_repository.dart';
+import '../data/database/database_helper.dart';
+import '../data/repositories/app_state_repository.dart';
+import '../data/repositories/clip_repository.dart';
+import '../data/repositories/playlist_repository.dart';
+import '../data/repositories/prayer_repository.dart';
+import '../data/repositories/schedule_repository.dart';
+import '../data/repositories/sleep_repository.dart';
 
 final databaseHelperProvider = Provider<DatabaseHelper>((ref) {
   return DatabaseHelper.instance;

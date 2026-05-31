@@ -24,6 +24,7 @@ class PlaybackSnapshot extends Equatable {
     this.clipTitle,
     this.isPlaying = false,
     this.shuffleEnabled = false,
+    this.modalVisible = true,
   });
 
   final AppPlaybackState state;
@@ -32,6 +33,7 @@ class PlaybackSnapshot extends Equatable {
   final String? clipTitle;
   final bool isPlaying;
   final bool shuffleEnabled;
+  final bool modalVisible;
 
   bool get canPlay =>
       state == AppPlaybackState.activeIdle ||
@@ -45,6 +47,7 @@ class PlaybackSnapshot extends Equatable {
     String? clipTitle,
     bool? isPlaying,
     bool? shuffleEnabled,
+    bool? modalVisible,
   }) {
     return PlaybackSnapshot(
       state: state ?? this.state,
@@ -53,6 +56,7 @@ class PlaybackSnapshot extends Equatable {
       clipTitle: clipTitle ?? this.clipTitle,
       isPlaying: isPlaying ?? this.isPlaying,
       shuffleEnabled: shuffleEnabled ?? this.shuffleEnabled,
+      modalVisible: modalVisible ?? this.modalVisible,
     );
   }
 
@@ -64,5 +68,6 @@ class PlaybackSnapshot extends Equatable {
         clipTitle,
         isPlaying,
         shuffleEnabled,
+        modalVisible,
       ];
 }
