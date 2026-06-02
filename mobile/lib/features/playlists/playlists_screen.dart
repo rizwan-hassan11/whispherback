@@ -43,7 +43,8 @@ class PlaylistsScreen extends ConsumerWidget {
             height: 160,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: AppColors.brandLight.withValues(alpha: theme.isDark ? 0.08 : 0.12),
+              color: AppColors.brandLight
+                  .withValues(alpha: theme.isDark ? 0.08 : 0.12),
             ),
           ),
         ),
@@ -63,18 +64,19 @@ class PlaylistsScreen extends ConsumerWidget {
             ),
           ),
           floatingActionButton: playlistsAsync.maybeWhen(
-            data: (list) => list.isEmpty ? null : FloatingActionButton.extended(
-              onPressed: () => context.push('/playlists/new'),
-              icon: const Icon(AppIcons.add),
-              label: Text(l10n.newPlaylist),
-            ),
+            data: (list) => list.isEmpty
+                ? null
+                : FloatingActionButton.extended(
+                    onPressed: () => context.push('/playlists/new'),
+                    icon: const Icon(AppIcons.add),
+                    label: Text(l10n.newPlaylist),
+                  ),
             orElse: () => null,
           ),
         ),
       ],
     );
   }
-
 }
 
 class _PlaylistsBody extends StatelessWidget {
@@ -177,7 +179,8 @@ class _PlaylistsBody extends StatelessWidget {
             ),
           ),
           SliverPadding(
-            padding: EdgeInsets.fromLTRB(20, 0, 20, context.shellScrollPadding.bottom),
+            padding: EdgeInsets.fromLTRB(
+                20, 0, 20, context.shellScrollPadding.bottom),
             sliver: SliverList.separated(
               itemCount: otherList.length,
               separatorBuilder: (_, __) => const SizedBox(height: 12),

@@ -9,7 +9,6 @@ import '../theme/app_icons.dart';
 import '../theme/app_theme.dart';
 import 'adaptive_shell_nav.dart';
 import 'glass_nav_bar.dart';
-import 'glass_side_nav.dart';
 
 class MainShell extends ConsumerWidget {
   const MainShell({super.key, required this.child});

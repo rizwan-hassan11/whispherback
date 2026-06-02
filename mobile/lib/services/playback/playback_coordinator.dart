@@ -4,7 +4,6 @@ import 'package:just_audio/just_audio.dart';
 
 import '../../data/repositories/app_state_repository.dart';
 import '../../data/repositories/playlist_repository.dart';
-import '../../data/repositories/schedule_repository.dart';
 import '../../data/repositories/sleep_repository.dart';
 import '../../domain/entities/audio_clip.dart';
 import '../../domain/playback/playback_state.dart';
@@ -16,26 +15,24 @@ class PlaybackCoordinator {
   PlaybackCoordinator({
     required AppStateRepository appStateRepository,
     required PlaylistRepository playlistRepository,
-    required ScheduleRepository scheduleRepository,
     required SleepRepository sleepRepository,
     required PrayerService prayerService,
     required AudioPlaybackService playbackService,
   })  : _appState = appStateRepository,
         _playlists = playlistRepository,
-        _schedules = scheduleRepository,
         _sleep = sleepRepository,
         _prayer = prayerService,
         _audio = playbackService;
 
   final AppStateRepository _appState;
   final PlaylistRepository _playlists;
-  final ScheduleRepository _schedules;
   final SleepRepository _sleep;
   final PrayerService _prayer;
   final AudioPlaybackService _audio;
 
   final _snapshotController = StreamController<PlaybackSnapshot>.broadcast();
-  PlaybackSnapshot _snapshot = const PlaybackSnapshot(state: AppPlaybackState.inactive);
+  PlaybackSnapshot _snapshot =
+      const PlaybackSnapshot(state: AppPlaybackState.inactive);
   final _shuffleEngines = <String, ShuffleEngine>{};
 
   StreamSubscription<PlayerState>? _playerSub;
@@ -46,14 +43,17 @@ class PlaybackCoordinator {
 
   void startModeMonitoring() {
     _modeCheckTimer?.cancel();
-    _modeCheckTimer = Timer.periodic(const Duration(seconds: 15), (_) => refreshModeState());
+    _modeCheckTimer =
+        Timer.periodic(const Duration(seconds: 15), (_) => refreshModeState());
   }
 
   Future<void> initialize() async {
     final active = await _appState.isActive();
-    _emit(_snapshot.copyWith(
-      state: active ? AppPlaybackState.activeIdle : AppPlaybackState.inactive,
-    ));
+    _emit(
+      _snapshot.copyWith(
+        state: active ? AppPlaybackState.activeIdle : AppPlaybackState.inactive,
+      ),
+    );
     _playerSub = _audio.playerStateStream.listen(_onPlayerState);
     startModeMonitoring();
   }
@@ -89,7 +89,8 @@ class PlaybackCoordinator {
     }
   }
 
-  Future<void> playPlaylist(String playlistId, {bool fromSchedule = false}) async {
+  Future<void> playPlaylist(String playlistId,
+      {bool fromSchedule = false}) async {
     if (!await _canPlay()) return;
 
     final clips = await _playlists.getClips(playlistId);
@@ -107,15 +108,19 @@ class PlaybackCoordinator {
       return;
     }
 
-    _emit(_snapshot.copyWith(
-      state: fromSchedule ? AppPlaybackState.scheduledPlaying : AppPlaybackState.manualPlaying,
-      playlistId: playlistId,
-      playlistName: playlist?.name,
-      clipTitle: clip.title,
-      isPlaying: true,
-      shuffleEnabled: shuffle,
-      modalVisible: true,
-    ));
+    _emit(
+      _snapshot.copyWith(
+        state: fromSchedule
+            ? AppPlaybackState.scheduledPlaying
+            : AppPlaybackState.manualPlaying,
+        playlistId: playlistId,
+        playlistName: playlist?.name,
+        clipTitle: clip.title,
+        isPlaying: true,
+        shuffleEnabled: shuffle,
+        modalVisible: true,
+      ),
+    );
   }
 
   bool _isPlayablePath(String path) {
@@ -163,13 +168,15 @@ class PlaybackCoordinator {
 
     final sleep = await _sleep.getActive();
     if (_sleep.isSleepActive(sleep)) {
-      _emit(_snapshot.copyWith(state: AppPlaybackState.sleepPaused, isPlaying: false));
+      _emit(_snapshot.copyWith(
+          state: AppPlaybackState.sleepPaused, isPlaying: false));
       return false;
     }
 
     final prayer = await _prayer.getCurrentPrayerWindow();
     if (prayer != null) {
-      _emit(_snapshot.copyWith(state: AppPlaybackState.prayerPaused, isPlaying: false));
+      _emit(_snapshot.copyWith(
+          state: AppPlaybackState.prayerPaused, isPlaying: false));
       return false;
     }
 
@@ -185,20 +192,23 @@ class PlaybackCoordinator {
     final sleep = await _sleep.getActive();
     if (_sleep.isSleepActive(sleep)) {
       await _audio.pause();
-      _emit(_snapshot.copyWith(state: AppPlaybackState.sleepPaused, isPlaying: false));
+      _emit(_snapshot.copyWith(
+          state: AppPlaybackState.sleepPaused, isPlaying: false));
       return;
     }
 
     final prayer = await _prayer.getCurrentPrayerWindow();
     if (prayer != null) {
       await _audio.pause();
-      _emit(_snapshot.copyWith(state: AppPlaybackState.prayerPaused, isPlaying: false));
+      _emit(_snapshot.copyWith(
+          state: AppPlaybackState.prayerPaused, isPlaying: false));
       return;
     }
 
     if (_snapshot.state == AppPlaybackState.sleepPaused ||
         _snapshot.state == AppPlaybackState.prayerPaused) {
-      _emit(_snapshot.copyWith(state: AppPlaybackState.activeIdle, isPlaying: false));
+      _emit(_snapshot.copyWith(
+          state: AppPlaybackState.activeIdle, isPlaying: false));
     } else if (_snapshot.state == AppPlaybackState.inactive) {
       _emit(_snapshot.copyWith(state: AppPlaybackState.activeIdle));
     }

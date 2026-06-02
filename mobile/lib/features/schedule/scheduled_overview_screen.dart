@@ -86,8 +86,8 @@ class _ScheduleAmbience extends StatelessWidget {
               height: 180,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: AppColors.brandLight
-                    .withValues(alpha: isDark ? 0.1 : 0.06),
+                color:
+                    AppColors.brandLight.withValues(alpha: isDark ? 0.1 : 0.06),
               ),
             ),
           ),
@@ -99,7 +99,8 @@ class _ScheduleAmbience extends StatelessWidget {
               height: 140,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: AppColors.success.withValues(alpha: isDark ? 0.08 : 0.07),
+                color:
+                    AppColors.success.withValues(alpha: isDark ? 0.08 : 0.07),
               ),
             ),
           ),
@@ -218,7 +219,8 @@ class _ScheduleBody extends StatelessWidget {
                   Text(
                     l10n.customizeScheduleSubtitle,
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: theme.muted, fontSize: 13, height: 1.5),
+                    style: TextStyle(
+                        color: theme.muted, fontSize: 13, height: 1.5),
                   ),
                 ],
               ),
@@ -226,7 +228,8 @@ class _ScheduleBody extends StatelessWidget {
           )
         else
           SliverPadding(
-            padding: EdgeInsets.fromLTRB(20, 0, 20, context.shellScrollPadding.bottom),
+            padding: EdgeInsets.fromLTRB(
+                20, 0, 20, context.shellScrollPadding.bottom),
             sliver: SliverList.separated(
               itemCount: schedules.length,
               separatorBuilder: (_, __) => const SizedBox(height: 10),
@@ -546,7 +549,8 @@ class _ScheduleCard extends StatelessWidget {
                       ),
                       child: Icon(
                         AppIcons.playlists,
-                        color: theme.isDark ? AppColors.deep : AppColors.lightBg,
+                        color:
+                            theme.isDark ? AppColors.deep : AppColors.lightBg,
                         size: 20,
                       ),
                     ),

@@ -96,7 +96,8 @@ class AuthShell extends StatelessWidget {
                 height: 200,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: AppColors.brandLight.withValues(alpha: isDark ? 0.1 : 0.06),
+                  color: AppColors.brandLight
+                      .withValues(alpha: isDark ? 0.1 : 0.06),
                 ),
               ),
             ),
@@ -108,7 +109,8 @@ class AuthShell extends StatelessWidget {
                 height: 160,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: AppColors.success.withValues(alpha: isDark ? 0.08 : 0.06),
+                  color:
+                      AppColors.success.withValues(alpha: isDark ? 0.08 : 0.06),
                 ),
               ),
             ),
@@ -122,7 +124,8 @@ class AuthShell extends StatelessWidget {
                   ),
                   padding: EdgeInsets.fromLTRB(16, 6, 16, compact ? 20 : 32),
                   child: ConstrainedBox(
-                    constraints: BoxConstraints(minHeight: compact ? 0 : constraints.maxHeight - 40),
+                    constraints: BoxConstraints(
+                        minHeight: compact ? 0 : constraints.maxHeight - 40),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
@@ -260,7 +263,8 @@ class _AuthTopBar extends StatelessWidget {
             child: Container(
               padding: const EdgeInsets.all(4),
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: theme.isDark ? 0.06 : 0.5),
+                color:
+                    Colors.white.withValues(alpha: theme.isDark ? 0.06 : 0.5),
                 borderRadius: BorderRadius.circular(AppRadii.sm),
                 border: Border.all(color: theme.glassBorder),
               ),
@@ -715,7 +719,8 @@ class _AuthHeroPanel extends StatelessWidget {
                 Text(
                   subtitle,
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: theme.muted, fontSize: 14, height: 1.55),
+                  style:
+                      TextStyle(color: theme.muted, fontSize: 14, height: 1.55),
                 ),
                 if (chipItems != null && chipItems.isNotEmpty) ...[
                   const SizedBox(height: 16),
@@ -750,7 +755,8 @@ class AuthBenefitsRow extends StatelessWidget {
             child: Container(
               padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 6),
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: theme.isDark ? 0.07 : 0.6),
+                color:
+                    Colors.white.withValues(alpha: theme.isDark ? 0.07 : 0.6),
                 borderRadius: BorderRadius.circular(AppRadii.sm),
                 border: Border.all(color: theme.glassBorder),
               ),
@@ -1006,9 +1012,7 @@ class SocialAuthButton extends StatelessWidget {
     final theme = whisperTheme(context);
 
     return Material(
-      color: theme.isDark
-          ? Colors.white.withValues(alpha: 0.06)
-          : Colors.white,
+      color: theme.isDark ? Colors.white.withValues(alpha: 0.06) : Colors.white,
       elevation: theme.isDark ? 0 : 1,
       shadowColor: Colors.black.withValues(alpha: 0.06),
       shape: RoundedRectangleBorder(
@@ -1068,7 +1072,8 @@ class AuthPrimaryButton extends StatelessWidget {
       onPressed: loading ? null : onPressed,
       style: FilledButton.styleFrom(
         minimumSize: const Size(double.infinity, 48),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.sm)),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadii.sm)),
         backgroundColor: isDark ? AppColors.brand : AppColors.ink,
         foregroundColor: isDark ? AppColors.deep : AppColors.brand,
         elevation: 0,
@@ -1088,7 +1093,8 @@ class AuthPrimaryButton extends StatelessWidget {
               children: [
                 Icon(icon, size: 18),
                 const SizedBox(width: 8),
-                Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
+                Text(label,
+                    style: const TextStyle(fontWeight: FontWeight.w700)),
               ],
             ),
     );
@@ -1109,7 +1115,8 @@ class PasswordStrengthBar extends StatelessWidget {
     var s = 0;
     if (password.length >= 6) s++;
     if (password.length >= 8) s++;
-    if (RegExp(r'[A-Z]').hasMatch(password) && RegExp(r'[0-9]').hasMatch(password)) {
+    if (RegExp(r'[A-Z]').hasMatch(password) &&
+        RegExp(r'[0-9]').hasMatch(password)) {
       s++;
     }
     if (RegExp(r'[^A-Za-z0-9]').hasMatch(password)) s++;
@@ -1143,7 +1150,9 @@ class PasswordStrengthBar extends StatelessWidget {
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(2),
                     color: i < _score
-                        ? (_score < 3 ? AppColors.accentBright : AppColors.success)
+                        ? (_score < 3
+                            ? AppColors.accentBright
+                            : AppColors.success)
                         : theme.glassBorder,
                   ),
                 ),

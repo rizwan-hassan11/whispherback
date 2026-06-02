@@ -27,17 +27,20 @@ class PremiumScreenBackground extends StatelessWidget {
           Positioned(
             top: -80,
             right: -50,
-            child: _LightOrb(size: 220, color: AppColors.ink.withValues(alpha: 0.06)),
+            child: _LightOrb(
+                size: 220, color: AppColors.ink.withValues(alpha: 0.06)),
           ),
           Positioned(
             top: 120,
             left: -60,
-            child: _LightOrb(size: 160, color: AppColors.lightMuted.withValues(alpha: 0.08)),
+            child: _LightOrb(
+                size: 160, color: AppColors.lightMuted.withValues(alpha: 0.08)),
           ),
           Positioned(
             bottom: 120,
             right: -30,
-            child: _LightOrb(size: 140, color: AppColors.success.withValues(alpha: 0.06)),
+            child: _LightOrb(
+                size: 140, color: AppColors.success.withValues(alpha: 0.06)),
           ),
         ] else
           Positioned(

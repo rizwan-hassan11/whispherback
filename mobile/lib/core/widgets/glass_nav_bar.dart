@@ -104,21 +104,22 @@ class GlassNavBar extends StatelessWidget {
                             width: itemWidth,
                             child: DecoratedBox(
                               decoration: BoxDecoration(
-                                gradient: LinearGradient(
-                                  begin: Alignment.topCenter,
-                                  end: Alignment.bottomCenter,
-                                  colors: isDark
-                                      ? [AppColors.brand, const Color(0xEBF1F5F9)]
-                                      : [AppColors.ink, const Color(0xFF0A2048)],
-                                ),
+                                gradient: AppColors.neonGradient,
                                 borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.28),
+                                ),
                                 boxShadow: [
                                   BoxShadow(
-                                    color: isDark
-                                        ? AppColors.brandGlow
-                                        : AppColors.lightBrandGlow,
-                                    blurRadius: 18,
-                                    offset: const Offset(0, 4),
+                                    color: AppColors.neon.withValues(
+                                        alpha: isDark ? 0.55 : 0.42),
+                                    blurRadius: 22,
+                                    offset: const Offset(0, 5),
+                                  ),
+                                  BoxShadow(
+                                    color: AppColors.neonCyan
+                                        .withValues(alpha: 0.28),
+                                    blurRadius: 10,
                                   ),
                                 ],
                               ),
@@ -128,8 +129,8 @@ class GlassNavBar extends StatelessWidget {
                             children: List.generate(count, (i) {
                               final d = destinations[i];
                               final selected = i == selectedIndex;
-                              final showLabel =
-                                  showAllLabels || (selected && d.label.isNotEmpty);
+                              final showLabel = showAllLabels ||
+                                  (selected && d.label.isNotEmpty);
                               return Expanded(
                                 child: _NavItem(
                                   destination: d,
@@ -171,7 +172,7 @@ class _NavItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final inactiveColor = isDark ? AppColors.muted : AppColors.lightMuted;
-    final activeColor = isDark ? AppColors.deep : AppColors.lightBg;
+    const activeColor = Colors.white;
 
     return Semantics(
       button: true,
@@ -182,7 +183,7 @@ class _NavItem extends StatelessWidget {
         child: InkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(20),
-          splashColor: Colors.white.withValues(alpha: 0.06),
+          splashColor: AppColors.neon.withValues(alpha: 0.12),
           highlightColor: Colors.transparent,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 220),
@@ -194,13 +195,21 @@ class _NavItem extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 AnimatedScale(
-                  scale: selected ? 1.06 : 1,
+                  scale: selected ? 1.08 : 1,
                   duration: const Duration(milliseconds: 220),
                   curve: Curves.easeOutCubic,
                   child: Icon(
                     selected ? destination.selectedIcon : destination.icon,
                     size: 22,
                     color: selected ? activeColor : inactiveColor,
+                    shadows: selected
+                        ? const [
+                            Shadow(
+                              color: Color(0xCCFFFFFF),
+                              blurRadius: 10,
+                            ),
+                          ]
+                        : null,
                   ),
                 ),
                 AnimatedSize(
@@ -213,7 +222,8 @@ class _NavItem extends StatelessWidget {
                             duration: const Duration(milliseconds: 200),
                             style: TextStyle(
                               fontSize: 10,
-                              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                              fontWeight:
+                                  selected ? FontWeight.w700 : FontWeight.w500,
                               letterSpacing: 0.2,
                               color: selected ? activeColor : inactiveColor,
                             ),

@@ -5,11 +5,11 @@ import 'app_colors.dart';
 import 'app_radii.dart';
 
 abstract final class AppTheme {
-  static ThemeData dark({required bool showLabels, Locale? locale}) =>
-      _build(brightness: Brightness.dark, showLabels: showLabels, locale: locale);
+  static ThemeData dark({required bool showLabels, Locale? locale}) => _build(
+      brightness: Brightness.dark, showLabels: showLabels, locale: locale);
 
-  static ThemeData light({required bool showLabels, Locale? locale}) =>
-      _build(brightness: Brightness.light, showLabels: showLabels, locale: locale);
+  static ThemeData light({required bool showLabels, Locale? locale}) => _build(
+      brightness: Brightness.light, showLabels: showLabels, locale: locale);
 
   static bool _usesArabicScript(Locale? locale) {
     final code = locale?.languageCode;
@@ -27,7 +27,8 @@ abstract final class AppTheme {
     final muted = isDark ? AppColors.muted : AppColors.lightMuted;
     final surface = isDark ? AppColors.card : AppColors.lightCard;
     final glass = isDark ? AppColors.glass : AppColors.lightGlass;
-    final glassBorder = isDark ? AppColors.glassBorder : AppColors.lightGlassBorder;
+    final glassBorder =
+        isDark ? AppColors.glassBorder : AppColors.lightGlassBorder;
     final primary = AppColors.actionFill(isDark);
     final onPrimary = AppColors.onActionFill(isDark);
 
@@ -39,29 +40,29 @@ abstract final class AppTheme {
         .apply(bodyColor: fg, displayColor: fg)
         .copyWith(
           headlineLarge: (useArabicScript
-                  ? GoogleFonts.notoSansArabic(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w700,
-                      color: fg,
-                    )
-                  : GoogleFonts.fraunces(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: -0.4,
-                      color: fg,
-                    )),
+              ? GoogleFonts.notoSansArabic(
+                  fontSize: 28,
+                  fontWeight: FontWeight.w700,
+                  color: fg,
+                )
+              : GoogleFonts.fraunces(
+                  fontSize: 28,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.4,
+                  color: fg,
+                )),
           headlineMedium: (useArabicScript
-                  ? GoogleFonts.notoSansArabic(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w700,
-                      color: fg,
-                    )
-                  : GoogleFonts.fraunces(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: -0.3,
-                      color: fg,
-                    )),
+              ? GoogleFonts.notoSansArabic(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w700,
+                  color: fg,
+                )
+              : GoogleFonts.fraunces(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.3,
+                  color: fg,
+                )),
           titleMedium: useArabicScript
               ? GoogleFonts.notoSansArabic(
                   fontSize: 15,
@@ -145,7 +146,9 @@ abstract final class AppTheme {
               ),
       ),
       cardTheme: CardThemeData(
-        color: isDark ? AppColors.card.withValues(alpha: 0.92) : AppColors.lightCard,
+        color: isDark
+            ? AppColors.card.withValues(alpha: 0.92)
+            : AppColors.lightCard,
         elevation: isDark ? 0 : 1,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
@@ -164,7 +167,8 @@ abstract final class AppTheme {
         iconColor: muted,
         textColor: fg,
         contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.sm)),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadii.sm)),
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
@@ -174,8 +178,10 @@ abstract final class AppTheme {
           padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
           elevation: isDark ? 0 : 1,
           shadowColor: isDark ? AppColors.brandGlow : AppColors.lightBrandGlow,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.sm)),
-          textStyle: GoogleFonts.dmSans(fontWeight: FontWeight.w700, fontSize: 15, letterSpacing: -0.1),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppRadii.sm)),
+          textStyle: GoogleFonts.dmSans(
+              fontWeight: FontWeight.w700, fontSize: 15, letterSpacing: -0.1),
         ).copyWith(
           overlayColor: WidgetStateProperty.resolveWith((states) {
             if (states.contains(WidgetState.pressed)) {
@@ -191,16 +197,20 @@ abstract final class AppTheme {
           minimumSize: const Size(0, 48),
           side: BorderSide(color: glassBorder),
           padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 20),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.sm)),
-          textStyle: GoogleFonts.dmSans(fontWeight: FontWeight.w600, fontSize: 15),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppRadii.sm)),
+          textStyle:
+              GoogleFonts.dmSans(fontWeight: FontWeight.w600, fontSize: 15),
         ),
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
           foregroundColor: fg,
           padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.sm)),
-          textStyle: GoogleFonts.dmSans(fontWeight: FontWeight.w600, fontSize: 14),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppRadii.sm)),
+          textStyle:
+              GoogleFonts.dmSans(fontWeight: FontWeight.w600, fontSize: 14),
         ),
       ),
       floatingActionButtonTheme: FloatingActionButtonThemeData(
@@ -208,12 +218,14 @@ abstract final class AppTheme {
         foregroundColor: onPrimary,
         elevation: isDark ? 4 : 3,
         extendedSizeConstraints: const BoxConstraints(minHeight: 48),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.sm)),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadii.sm)),
       ),
       snackBarTheme: SnackBarThemeData(
         backgroundColor: isDark ? AppColors.cardElevated : AppColors.lightCard,
         contentTextStyle: GoogleFonts.dmSans(color: fg),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.sm)),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadii.sm)),
         behavior: SnackBarBehavior.floating,
       ),
       sliderTheme: SliderThemeData(
@@ -225,7 +237,9 @@ abstract final class AppTheme {
         style: ButtonStyle(
           backgroundColor: WidgetStateProperty.resolveWith((states) {
             if (states.contains(WidgetState.selected)) {
-              return isDark ? AppColors.brand.withValues(alpha: 0.2) : AppColors.ink;
+              return isDark
+                  ? AppColors.brand.withValues(alpha: 0.2)
+                  : AppColors.ink;
             }
             return isDark ? AppColors.glass : AppColors.lightBg2;
           }),
@@ -237,7 +251,8 @@ abstract final class AppTheme {
           }),
           side: WidgetStateProperty.all(BorderSide(color: glassBorder)),
           shape: WidgetStateProperty.all(
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.sm)),
+            RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppRadii.sm)),
           ),
         ),
       ),
@@ -252,7 +267,9 @@ abstract final class AppTheme {
           if (states.contains(WidgetState.selected)) {
             return isDark ? AppColors.brand : AppColors.ink;
           }
-          return isDark ? AppColors.muted2 : AppColors.lightMuted2.withValues(alpha: 0.45);
+          return isDark
+              ? AppColors.muted2
+              : AppColors.lightMuted2.withValues(alpha: 0.45);
         }),
         trackOutlineColor: WidgetStateProperty.all(Colors.transparent),
       ),
@@ -273,7 +290,8 @@ class WhisperThemeExtension extends ThemeExtension<WhisperThemeExtension> {
   Color get muted => isDark ? AppColors.muted : AppColors.lightMuted;
   Color get surface => isDark ? AppColors.surface : AppColors.lightSurface;
   Color get glass => isDark ? AppColors.glass : AppColors.lightGlass;
-  Color get glassBorder => isDark ? AppColors.glassBorder : AppColors.lightGlassBorder;
+  Color get glassBorder =>
+      isDark ? AppColors.glassBorder : AppColors.lightGlassBorder;
   Color get background => isDark ? AppColors.deep : AppColors.lightBg;
   Color get actionFill => AppColors.actionFill(isDark);
   Color get onActionFill => AppColors.onActionFill(isDark);
@@ -293,7 +311,8 @@ class WhisperThemeExtension extends ThemeExtension<WhisperThemeExtension> {
     double t,
   ) {
     if (other is! WhisperThemeExtension) return this;
-    return WhisperThemeExtension(showLabels: other.showLabels, isDark: other.isDark);
+    return WhisperThemeExtension(
+        showLabels: other.showLabels, isDark: other.isDark);
   }
 }
 

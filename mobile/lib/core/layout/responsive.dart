@@ -89,8 +89,8 @@ class Responsive {
         (sizeClass == AppSizeClass.expanded ||
             landscape ||
             width / height > 0.62);
-    final extendedSideNav = sizeClass == AppSizeClass.expanded ||
-        (width >= 720 && height >= 800);
+    final extendedSideNav =
+        sizeClass == AppSizeClass.expanded || (width >= 720 && height >= 800);
 
     return Responsive._(
       sizeClass: sizeClass,
@@ -104,13 +104,15 @@ class Responsive {
       hingePadding: _hingePadding(context, size),
       useSideNavigation: sideNav,
       useExtendedSideNav: extendedSideNav,
-      contentMaxWidth: sizeClass == AppSizeClass.expanded ? 720 : double.infinity,
+      contentMaxWidth:
+          sizeClass == AppSizeClass.expanded ? 720 : double.infinity,
       horizontalGutter: switch (sizeClass) {
         AppSizeClass.compact => flipCover ? 14 : 20,
         AppSizeClass.medium => 24,
         AppSizeClass.expanded => 32,
       },
-      heroControlSize: (shortest * (flipCover ? 0.48 : 0.55)).clamp(140.0, 220.0),
+      heroControlSize:
+          (shortest * (flipCover ? 0.48 : 0.55)).clamp(140.0, 220.0),
     );
   }
 
@@ -169,8 +171,8 @@ class ResponsiveContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final r = context.responsive;
-    final base = padding ??
-        EdgeInsets.symmetric(horizontal: r.horizontalGutter);
+    final base =
+        padding ?? EdgeInsets.symmetric(horizontal: r.horizontalGutter);
     final resolved = applyHingePadding ? base.add(r.hingePadding) : base;
 
     return Align(

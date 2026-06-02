@@ -30,7 +30,6 @@ final playbackCoordinatorProvider = Provider<PlaybackCoordinator>((ref) {
   final coordinator = PlaybackCoordinator(
     appStateRepository: ref.watch(appStateRepositoryProvider),
     playlistRepository: ref.watch(playlistRepositoryProvider),
-    scheduleRepository: ref.watch(scheduleRepositoryProvider),
     sleepRepository: ref.watch(sleepRepositoryProvider),
     prayerService: ref.watch(prayerServiceProvider),
     playbackService: ref.watch(audioPlaybackServiceProvider),

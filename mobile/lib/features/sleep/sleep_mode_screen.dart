@@ -364,11 +364,11 @@ class _MoonVisual extends StatelessWidget {
                 BoxShadow(
                   color: Colors.black.withValues(alpha: 0.35),
                   blurRadius: 24,
-                  offset: Offset(0, 8),
+                  offset: const Offset(0, 8),
                 ),
               ],
             ),
-            child: Stack(
+            child: const Stack(
               children: [
                 Positioned(
                   top: 28,
@@ -514,7 +514,8 @@ class _FeatureRow extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   hint,
-                  style: TextStyle(fontSize: 12, color: theme.muted, height: 1.35),
+                  style:
+                      TextStyle(fontSize: 12, color: theme.muted, height: 1.35),
                 ),
               ],
             ),
@@ -552,7 +553,9 @@ class _DurationGrid extends StatelessWidget {
       children: presets.map((m) {
         final isSelected = selected == m;
         return Material(
-          color: isSelected ? theme.actionFill : (theme.isDark ? theme.glass : Colors.white),
+          color: isSelected
+              ? theme.actionFill
+              : (theme.isDark ? theme.glass : Colors.white),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppRadii.sm),
             side: BorderSide(
@@ -617,7 +620,8 @@ class _ActiveSleepBanner extends StatelessWidget {
               borderRadius: BorderRadius.circular(AppRadii.sm),
               color: AppColors.brandLight.withValues(alpha: 0.18),
             ),
-            child: const Icon(AppIcons.bedtime, color: AppColors.brandLight, size: 20),
+            child: const Icon(AppIcons.bedtime,
+                color: AppColors.brandLight, size: 20),
           ),
           const SizedBox(width: 12),
           Expanded(

@@ -24,7 +24,8 @@ class PlaylistDetailScreen extends ConsumerStatefulWidget {
   final String playlistId;
 
   @override
-  ConsumerState<PlaylistDetailScreen> createState() => _PlaylistDetailScreenState();
+  ConsumerState<PlaylistDetailScreen> createState() =>
+      _PlaylistDetailScreenState();
 }
 
 class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
@@ -57,7 +58,9 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
   Future<void> _toggleShuffle() async {
     if (_playlist == null) return;
     final next = !_playlist!.shuffleEnabled;
-    await ref.read(playlistRepositoryProvider).setShuffle(widget.playlistId, next);
+    await ref
+        .read(playlistRepositoryProvider)
+        .setShuffle(widget.playlistId, next);
     setState(() => _playlist = _playlist!.copyWith(shuffleEnabled: next));
   }
 
@@ -104,7 +107,8 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                 end: Alignment.bottomRight,
                 colors: [
                   AppColors.brand.withValues(alpha: theme.isDark ? 0.45 : 0.2),
-                  AppColors.brandLight.withValues(alpha: theme.isDark ? 0.15 : 0.08),
+                  AppColors.brandLight
+                      .withValues(alpha: theme.isDark ? 0.15 : 0.08),
                   Colors.transparent,
                 ],
               ),
@@ -127,7 +131,8 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                   IconButton(
                     tooltip: l10n.schedules,
                     icon: Icon(AppIcons.schedule, color: theme.foreground),
-                    onPressed: () => context.push('/schedule/build/${widget.playlistId}'),
+                    onPressed: () =>
+                        context.push('/schedule/build/${widget.playlistId}'),
                   ),
                 ],
                 expandedHeight: 0,
@@ -143,7 +148,8 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                         theme: theme,
                         name: name,
                         clipCount: _clips.length,
-                        totalDuration: formatPlaylistDurationLocalized(context, _totalMs),
+                        totalDuration:
+                            formatPlaylistDurationLocalized(context, _totalMs),
                         hasSchedule: _schedule != null,
                       ),
                       const SizedBox(height: 16),
@@ -151,10 +157,10 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                         theme: theme,
                         shuffleOn: shuffle,
                         onShuffle: _toggleShuffle,
-                        onSchedule: () =>
-                            context.push('/schedule/build/${widget.playlistId}'),
-                        onAddClips: () =>
-                            context.push('/playlists/${widget.playlistId}/add-clips'),
+                        onSchedule: () => context
+                            .push('/schedule/build/${widget.playlistId}'),
+                        onAddClips: () => context
+                            .push('/playlists/${widget.playlistId}/add-clips'),
                       ),
                       if (_schedule != null) ...[
                         const SizedBox(height: 16),
@@ -180,13 +186,14 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                   hasScrollBody: false,
                   child: _EmptyClipsState(
                     theme: theme,
-                    onAdd: () =>
-                        context.push('/playlists/${widget.playlistId}/add-clips'),
+                    onAdd: () => context
+                        .push('/playlists/${widget.playlistId}/add-clips'),
                   ),
                 )
               else
                 SliverPadding(
-                  padding: EdgeInsets.fromLTRB(20, 0, 20, context.shellScrollPadding.bottom),
+                  padding: EdgeInsets.fromLTRB(
+                      20, 0, 20, context.shellScrollPadding.bottom),
                   sliver: SliverList.separated(
                     itemCount: _clips.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 10),
@@ -287,7 +294,8 @@ class _PlaylistHero extends StatelessWidget {
                     end: Alignment.bottomRight,
                     colors: [AppColors.card, AppColors.ink],
                   ),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
+                  border:
+                      Border.all(color: Colors.white.withValues(alpha: 0.2)),
                   boxShadow: [
                     BoxShadow(
                       color: Colors.black.withValues(alpha: 0.42),
@@ -328,7 +336,8 @@ class _PlaylistHero extends StatelessWidget {
                     decoration: BoxDecoration(
                       color: AppColors.deep.withValues(alpha: 0.92),
                       borderRadius: BorderRadius.circular(100),
-                      border: Border.all(color: AppColors.success.withValues(alpha: 0.45)),
+                      border: Border.all(
+                          color: AppColors.success.withValues(alpha: 0.45)),
                       boxShadow: [
                         BoxShadow(
                           color: Colors.black.withValues(alpha: 0.35),
@@ -348,7 +357,8 @@ class _PlaylistHero extends StatelessWidget {
                             color: AppColors.success,
                             boxShadow: [
                               BoxShadow(
-                                color: AppColors.success.withValues(alpha: 0.65),
+                                color:
+                                    AppColors.success.withValues(alpha: 0.65),
                                 blurRadius: 10,
                               ),
                             ],
@@ -572,9 +582,7 @@ class _ActionChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: selected
-          ? AppColors.goldSoft
-          : theme.glass,
+      color: selected ? AppColors.goldSoft : theme.glass,
       shape: StadiumBorder(
         side: BorderSide(
           color: selected
@@ -661,7 +669,8 @@ class _ScheduleCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  l10n.scheduleStartsEvery(time, schedule.intervalLabelL10n(context)),
+                  l10n.scheduleStartsEvery(
+                      time, schedule.intervalLabelL10n(context)),
                   style: TextStyle(fontSize: 12, color: theme.muted),
                 ),
               ],
@@ -777,7 +786,8 @@ class _PlayBar extends StatelessWidget {
                 onTap: onPlay,
                 customBorder: const StadiumBorder(),
                 child: Ink(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(100),
                     gradient: AppColors.brandGradient,

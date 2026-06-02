@@ -137,8 +137,8 @@ class _ActiveToggleState extends State<ActiveToggle>
                     shape: BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
-                        color: AppColors.neon
-                            .withValues(alpha: 0.55 * on * (0.7 + breathe * 0.3)),
+                        color: AppColors.neon.withValues(
+                            alpha: 0.55 * on * (0.7 + breathe * 0.3)),
                         blurRadius: 48 + breathe * 18,
                         spreadRadius: 2 + breathe * 4,
                       ),
@@ -224,7 +224,8 @@ class _ActiveToggleState extends State<ActiveToggle>
                                 begin: Alignment.topCenter,
                                 end: Alignment.bottomCenter,
                                 colors: [
-                                  Colors.white.withValues(alpha: 0.10 + 0.06 * on),
+                                  Colors.white
+                                      .withValues(alpha: 0.10 + 0.06 * on),
                                   Colors.white.withValues(alpha: 0),
                                 ],
                               ),
@@ -238,8 +239,8 @@ class _ActiveToggleState extends State<ActiveToggle>
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             border: Border.all(
-                              color: AppColors.neonCyan
-                                  .withValues(alpha: 0.5 * on * (0.6 + breathe * 0.4)),
+                              color: AppColors.neonCyan.withValues(
+                                  alpha: 0.5 * on * (0.6 + breathe * 0.4)),
                               width: 1.4,
                             ),
                           ),

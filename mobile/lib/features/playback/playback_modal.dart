@@ -135,7 +135,8 @@ class PlaybackModal extends ConsumerWidget {
                                 color: AppColors.glass,
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(12),
-                                  side: const BorderSide(color: AppColors.glassBorder),
+                                  side: const BorderSide(
+                                      color: AppColors.glassBorder),
                                 ),
                                 child: InkWell(
                                   onTap: coordinator.dismissModal,
@@ -177,7 +178,8 @@ class PlaybackModal extends ConsumerWidget {
                                       builder: (context, constraints) {
                                         final thumbLeft =
                                             (clamped * constraints.maxWidth - 7)
-                                                .clamp(0.0, constraints.maxWidth - 14);
+                                                .clamp(0.0,
+                                                    constraints.maxWidth - 14);
                                         return SizedBox(
                                           height: 14,
                                           child: Stack(
@@ -185,16 +187,21 @@ class PlaybackModal extends ConsumerWidget {
                                             alignment: Alignment.centerLeft,
                                             children: [
                                               ClipRRect(
-                                                borderRadius: BorderRadius.circular(4),
+                                                borderRadius:
+                                                    BorderRadius.circular(4),
                                                 child: SizedBox(
                                                   height: 4,
                                                   width: constraints.maxWidth,
                                                   child: Stack(
                                                     children: [
-                                                      Container(color: AppColors.glassBorder),
+                                                      Container(
+                                                          color: AppColors
+                                                              .glassBorder),
                                                       FractionallySizedBox(
                                                         widthFactor: clamped,
-                                                        child: Container(color: AppColors.brand),
+                                                        child: Container(
+                                                            color: AppColors
+                                                                .brand),
                                                       ),
                                                     ],
                                                   ),
@@ -212,7 +219,8 @@ class PlaybackModal extends ConsumerWidget {
                                                     boxShadow: [
                                                       BoxShadow(
                                                         color: AppColors.brand
-                                                            .withValues(alpha: 0.12),
+                                                            .withValues(
+                                                                alpha: 0.12),
                                                         blurRadius: 0,
                                                         spreadRadius: 4,
                                                       ),
@@ -227,7 +235,8 @@ class PlaybackModal extends ConsumerWidget {
                                     ),
                                     const SizedBox(height: 8),
                                     Row(
-                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
                                       children: [
                                         Text(
                                           _format(pos),
@@ -235,7 +244,9 @@ class PlaybackModal extends ConsumerWidget {
                                             fontSize: 11,
                                             fontWeight: FontWeight.w600,
                                             color: AppColors.soft,
-                                            fontFeatures: [FontFeature.tabularFigures()],
+                                            fontFeatures: [
+                                              FontFeature.tabularFigures()
+                                            ],
                                           ),
                                         ),
                                         Text(
@@ -246,7 +257,9 @@ class PlaybackModal extends ConsumerWidget {
                                             fontSize: 11,
                                             fontWeight: FontWeight.w600,
                                             color: AppColors.muted,
-                                            fontFeatures: [FontFeature.tabularFigures()],
+                                            fontFeatures: [
+                                              FontFeature.tabularFigures()
+                                            ],
                                           ),
                                         ),
                                       ],
@@ -271,9 +284,11 @@ class PlaybackModal extends ConsumerWidget {
                                   !snapshot.shuffleEnabled,
                                 ),
                               ),
-                            if (snapshot.playlistId != null) const SizedBox(width: 18),
+                            if (snapshot.playlistId != null)
+                              const SizedBox(width: 18),
                             _CtrlButton(
-                              semanticLabel: snapshot.isPlaying ? l10n.pause : l10n.play,
+                              semanticLabel:
+                                  snapshot.isPlaying ? l10n.pause : l10n.play,
                               icon: snapshot.isPlaying
                                   ? AppIcons.pause
                                   : AppIcons.play,
@@ -441,7 +456,8 @@ class _WaveformProgress extends StatelessWidget {
                             colors: [AppColors.brand, Color(0x8CF1F5F9)],
                           )
                         : null,
-                    color: played ? null : AppColors.muted.withValues(alpha: 0.28),
+                    color:
+                        played ? null : AppColors.muted.withValues(alpha: 0.28),
                   ),
                 ),
               ),
@@ -484,14 +500,14 @@ class _CtrlButton extends StatelessWidget {
             child: Ink(
               width: 68,
               height: 68,
-              decoration: BoxDecoration(
+              decoration: const BoxDecoration(
                 shape: BoxShape.circle,
                 color: AppColors.brand,
                 boxShadow: [
                   BoxShadow(
                     color: AppColors.brandGlow,
                     blurRadius: 28,
-                    offset: const Offset(0, 8),
+                    offset: Offset(0, 8),
                   ),
                 ],
               ),

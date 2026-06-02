@@ -16,7 +16,8 @@ class PrayerSettingsScreen extends ConsumerStatefulWidget {
   const PrayerSettingsScreen({super.key});
 
   @override
-  ConsumerState<PrayerSettingsScreen> createState() => _PrayerSettingsScreenState();
+  ConsumerState<PrayerSettingsScreen> createState() =>
+      _PrayerSettingsScreenState();
 }
 
 class _PrayerSettingsScreenState extends ConsumerState<PrayerSettingsScreen> {
@@ -99,8 +100,16 @@ class _PrayerSettingsScreenState extends ConsumerState<PrayerSettingsScreen> {
                           theme: theme,
                           items: [
                             (AppIcons.shield, l10n.private, l10n.onDeviceDesc),
-                            (AppIcons.prayer, l10n.accurateTimes, l10n.accurateTimesDesc),
-                            (AppIcons.volumeOff, l10n.autoPause, l10n.autoPausePrayerDesc),
+                            (
+                              AppIcons.prayer,
+                              l10n.accurateTimes,
+                              l10n.accurateTimesDesc
+                            ),
+                            (
+                              AppIcons.volumeOff,
+                              l10n.autoPause,
+                              l10n.autoPausePrayerDesc
+                            ),
                           ],
                         ),
                         const SizedBox(height: 24),
@@ -184,7 +193,8 @@ class _PrayerAmbience extends StatelessWidget {
                 height: 200,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: AppColors.brandLight.withValues(alpha: isDark ? 0.1 : 0.08),
+                  color: AppColors.brandLight
+                      .withValues(alpha: isDark ? 0.1 : 0.08),
                 ),
               ),
             ),
@@ -257,7 +267,8 @@ class _CompassHero extends StatelessWidget {
             height: 120,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: AppColors.brandLight.withValues(alpha: theme.isDark ? 0.14 : 0.1),
+              color: AppColors.brandLight
+                  .withValues(alpha: theme.isDark ? 0.14 : 0.1),
             ),
           ),
           Container(
@@ -274,7 +285,8 @@ class _CompassHero extends StatelessWidget {
                 ),
               ],
             ),
-            child: Icon(AppIcons.prayer, size: 32, color: AppColors.brandLight),
+            child: const Icon(AppIcons.prayer,
+                size: 32, color: AppColors.brandLight),
           ),
         ],
       ),
@@ -324,7 +336,8 @@ class _InfoCard extends StatelessWidget {
                         color: AppColors.brandLight.withValues(alpha: 0.2),
                       ),
                     ),
-                    child: Icon(items[i].$1, size: 18, color: AppColors.brandLight),
+                    child: Icon(items[i].$1,
+                        size: 18, color: AppColors.brandLight),
                   ),
                   const SizedBox(width: 14),
                   Expanded(
@@ -408,7 +421,9 @@ class _OptionGrid extends StatelessWidget {
         final option = options[i];
         final isSelected = option == selected;
         return Material(
-          color: isSelected ? theme.actionFill : (theme.isDark ? theme.glass : Colors.white),
+          color: isSelected
+              ? theme.actionFill
+              : (theme.isDark ? theme.glass : Colors.white),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppRadii.sm),
             side: BorderSide(
@@ -468,7 +483,8 @@ class _GpsToggleCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(AppRadii.sm),
                   color: AppColors.success.withValues(alpha: 0.1),
                 ),
-                child: const Icon(AppIcons.sunrise, color: AppColors.success, size: 20),
+                child: const Icon(AppIcons.sunrise,
+                    color: AppColors.success, size: 20),
               ),
               const SizedBox(width: 12),
               Expanded(

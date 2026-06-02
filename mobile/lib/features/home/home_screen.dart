@@ -77,7 +77,8 @@ class HomeScreen extends ConsumerWidget {
           child: LayoutBuilder(
             builder: (context, constraints) {
               final r = context.responsive;
-              final scrollable = r.isCompactHeight || constraints.maxHeight < 680;
+              final scrollable =
+                  r.isCompactHeight || constraints.maxHeight < 680;
 
               Widget buildContent({required bool useSpacers}) {
                 return Column(
@@ -94,7 +95,10 @@ class HomeScreen extends ConsumerWidget {
                       playlistCount: playlistsAsync.valueOrNull?.length ?? 0,
                       greetingPeriod: greetingPeriod,
                     ),
-                    if (useSpacers) const Spacer(flex: 2) else SizedBox(height: r.isFlipCover ? 16 : 24),
+                    if (useSpacers)
+                      const Spacer(flex: 2)
+                    else
+                      SizedBox(height: r.isFlipCover ? 16 : 24),
                     Center(
                       child: DepthScene(
                         child: Column(
@@ -104,8 +108,9 @@ class HomeScreen extends ConsumerWidget {
                             SizedBox(height: r.isFlipCover ? 10 : 16),
                             ActiveToggle(
                               isActive: isActive,
-                              onToggle: () =>
-                                  ref.read(playbackCoordinatorProvider).toggleActive(),
+                              onToggle: () => ref
+                                  .read(playbackCoordinatorProvider)
+                                  .toggleActive(),
                             ),
                             const SizedBox(height: 10),
                             const DepthPedestal(),
@@ -114,7 +119,8 @@ class HomeScreen extends ConsumerWidget {
                       ),
                     ),
                     SizedBox(height: r.isFlipCover ? 6 : 8),
-                    Center(child: _StatusPill(isActive: isActive, theme: theme)),
+                    Center(
+                        child: _StatusPill(isActive: isActive, theme: theme)),
                     SizedBox(height: r.isFlipCover ? 14 : 20),
                     _QuickStats(
                       theme: theme,
@@ -126,7 +132,10 @@ class HomeScreen extends ConsumerWidget {
                       const SizedBox(height: 14),
                       _NextWhisperCard(theme: theme),
                     ],
-                    if (useSpacers) const Spacer(flex: 3) else const SizedBox(height: 20),
+                    if (useSpacers)
+                      const Spacer(flex: 3)
+                    else
+                      const SizedBox(height: 20),
                     if (snapshot.state == AppPlaybackState.sleepPaused)
                       _ModeChip(
                         icon: AppIcons.bedtime,
@@ -141,7 +150,9 @@ class HomeScreen extends ConsumerWidget {
                         color: AppColors.gold,
                         theme: theme,
                       ),
-                    SizedBox(height: ShellMetrics.scrollBottomInset(context, extra: 4)),
+                    SizedBox(
+                        height:
+                            ShellMetrics.scrollBottomInset(context, extra: 4)),
                   ],
                 );
               }
@@ -154,7 +165,8 @@ class HomeScreen extends ConsumerWidget {
                           parent: AlwaysScrollableScrollPhysics(),
                         ),
                         child: ConstrainedBox(
-                          constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                          constraints:
+                              BoxConstraints(minHeight: constraints.maxHeight),
                           child: buildContent(useSpacers: false),
                         ),
                       )
@@ -259,7 +271,11 @@ class _GreetingCard extends StatelessWidget {
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
                 colors: theme.isDark
-                    ? [AppColors.cardElevated, AppColors.ink, const Color(0xFF040B1E)]
+                    ? [
+                        AppColors.cardElevated,
+                        AppColors.ink,
+                        const Color(0xFF040B1E)
+                      ]
                     : [AppColors.brand, AppColors.ink],
                 stops: theme.isDark ? const [0, 0.6, 1] : const [0, 1],
               ),
@@ -271,7 +287,8 @@ class _GreetingCard extends StatelessWidget {
               ),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: theme.isDark ? 0.35 : 0.14),
+                  color: Colors.black
+                      .withValues(alpha: theme.isDark ? 0.35 : 0.14),
                   offset: const Offset(0, 4),
                   blurRadius: 10,
                 ),
@@ -300,7 +317,8 @@ class _GreetingCard extends StatelessWidget {
                   playlistCount > 0
                       ? l10n.playlistsReady(playlistCount)
                       : l10n.createPlaylistToStart,
-                  style: TextStyle(fontSize: 12, color: theme.muted, height: 1.35),
+                  style:
+                      TextStyle(fontSize: 12, color: theme.muted, height: 1.35),
                 ),
               ],
             ),
@@ -401,9 +419,7 @@ class _StatusPill extends StatelessWidget {
       duration: const Duration(milliseconds: 300),
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
       decoration: BoxDecoration(
-        color: isActive
-            ? AppColors.neon.withValues(alpha: 0.14)
-            : theme.glass,
+        color: isActive ? AppColors.neon.withValues(alpha: 0.14) : theme.glass,
         borderRadius: BorderRadius.circular(100),
         border: Border.all(
           color: isActive
@@ -429,9 +445,7 @@ class _StatusPill extends StatelessWidget {
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w600,
-              color: isActive
-                  ? AppColors.neonBright
-                  : theme.muted,
+              color: isActive ? AppColors.neonBright : theme.muted,
             ),
           ),
         ],
@@ -511,6 +525,7 @@ class _QuickStats extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Expanded(
           child: _StatTile(
@@ -518,7 +533,8 @@ class _QuickStats extends StatelessWidget {
             icon: AppIcons.playlists,
             value: '$playlistCount',
             label: l10n.statPlaylists,
-            accent: AppColors.brandLight,
+            accent: AppColors.neonBright,
+            onTap: () => context.go('/playlists'),
           ),
         ),
         const SizedBox(width: 10),
@@ -529,6 +545,7 @@ class _QuickStats extends StatelessWidget {
             value: '$scheduleCount',
             label: l10n.statScheduled,
             accent: AppColors.gold,
+            onTap: () => context.go('/schedule'),
           ),
         ),
         const SizedBox(width: 10),
@@ -539,6 +556,7 @@ class _QuickStats extends StatelessWidget {
             value: '$clipCount',
             label: l10n.statClips,
             accent: AppColors.success,
+            onTap: () => context.go('/clips'),
           ),
         ),
       ],
@@ -553,6 +571,7 @@ class _StatTile extends StatelessWidget {
     required this.value,
     required this.label,
     required this.accent,
+    required this.onTap,
   });
 
   final WhisperThemeExtension theme;
@@ -560,36 +579,63 @@ class _StatTile extends StatelessWidget {
   final String value;
   final String label;
   final Color accent;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return DepthSurface(
+    return DepthTile(
       radius: AppRadii.sm,
-      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
-      tiltX: 0.03,
-      lift: 5,
+      onTap: onTap,
+      padding: const EdgeInsets.fromLTRB(10, 14, 10, 13),
       child: Column(
         children: [
           Container(
-            width: 32,
-            height: 32,
-            decoration: AppDepth.iconTile(isDark: theme.isDark, radius: 8),
-            child: Icon(icon, size: 16, color: accent),
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  accent.withValues(alpha: theme.isDark ? 0.30 : 0.22),
+                  accent.withValues(alpha: theme.isDark ? 0.12 : 0.10),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: accent.withValues(alpha: 0.42)),
+              boxShadow: [
+                BoxShadow(
+                  color: accent.withValues(alpha: theme.isDark ? 0.30 : 0.18),
+                  blurRadius: 14,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Icon(icon, size: 19, color: accent),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 11),
           Text(
             value,
             style: TextStyle(
-              fontSize: 20,
+              fontSize: 22,
               fontWeight: FontWeight.w800,
+              letterSpacing: -0.5,
+              height: 1,
               color: theme.foreground,
             ),
           ),
-          const SizedBox(height: 2),
+          const SizedBox(height: 4),
           Text(
             label,
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 10, color: theme.muted, letterSpacing: 0.2),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+              color: theme.muted,
+              letterSpacing: 0.2,
+            ),
           ),
         ],
       ),

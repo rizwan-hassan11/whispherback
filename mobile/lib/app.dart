@@ -43,7 +43,8 @@ class _WhisperBackAppState extends ConsumerState<WhisperBackApp> {
       locale: locale,
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
-      scrollBehavior: const MaterialScrollBehavior().copyWith(scrollbars: false),
+      scrollBehavior:
+          const MaterialScrollBehavior().copyWith(scrollbars: false),
       builder: (context, child) {
         final mq = MediaQuery.of(context);
         return MediaQuery(

@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-final sharedPreferencesProvider = FutureProvider<SharedPreferences>((ref) async {
+final sharedPreferencesProvider =
+    FutureProvider<SharedPreferences>((ref) async {
   return SharedPreferences.getInstance();
 });
 
@@ -65,13 +66,15 @@ class LocaleNotifier extends StateNotifier<Locale> {
   }
 }
 
-final showLabelsProvider = StateNotifierProvider<ShowLabelsNotifier, bool>((ref) {
+final showLabelsProvider =
+    StateNotifierProvider<ShowLabelsNotifier, bool>((ref) {
   return ShowLabelsNotifier();
 });
 
 enum AppThemeMode { dark, light, system }
 
-final themeModeProvider = StateNotifierProvider<ThemeModeNotifier, AppThemeMode>((ref) {
+final themeModeProvider =
+    StateNotifierProvider<ThemeModeNotifier, AppThemeMode>((ref) {
   return ThemeModeNotifier();
 });
 
@@ -123,11 +126,13 @@ Future<void> completeOnboarding() async {
   await prefs.setBool('onboarding_complete', true);
 }
 
-final defaultAlarmProvider = StateNotifierProvider<DefaultAlarmNotifier, bool>((ref) {
+final defaultAlarmProvider =
+    StateNotifierProvider<DefaultAlarmNotifier, bool>((ref) {
   return DefaultAlarmNotifier();
 });
 
-final defaultIntervalProvider = StateNotifierProvider<DefaultIntervalNotifier, int>((ref) {
+final defaultIntervalProvider =
+    StateNotifierProvider<DefaultIntervalNotifier, int>((ref) {
   return DefaultIntervalNotifier();
 });
 

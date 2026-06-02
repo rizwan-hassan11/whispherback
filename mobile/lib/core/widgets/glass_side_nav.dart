@@ -70,7 +70,8 @@ class GlassSideNav extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Padding(
-                  padding: EdgeInsets.fromLTRB(extended ? 18 : 12, 18, extended ? 18 : 12, 12),
+                  padding: EdgeInsets.fromLTRB(
+                      extended ? 18 : 12, 18, extended ? 18 : 12, 12),
                   child: extended
                       ? Text(
                           'WhisperBack',
@@ -78,7 +79,8 @@ class GlassSideNav extends StatelessWidget {
                             fontSize: 18,
                             fontWeight: FontWeight.w600,
                             letterSpacing: -0.35,
-                            color: isDark ? AppColors.soft : AppColors.lightSoft,
+                            color:
+                                isDark ? AppColors.soft : AppColors.lightSoft,
                           ),
                         )
                       : Center(
@@ -87,7 +89,8 @@ class GlassSideNav extends StatelessWidget {
                             style: GoogleFonts.fraunces(
                               fontSize: 20,
                               fontWeight: FontWeight.w700,
-                              color: isDark ? AppColors.brandLight : AppColors.ink,
+                              color:
+                                  isDark ? AppColors.brandLight : AppColors.ink,
                             ),
                           ),
                         ),
@@ -115,21 +118,22 @@ class GlassSideNav extends StatelessWidget {
                               height: _itemHeight,
                               child: DecoratedBox(
                                 decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    begin: Alignment.centerLeft,
-                                    end: Alignment.centerRight,
-                                    colors: isDark
-                                        ? [AppColors.brand, const Color(0xEBF1F5F9)]
-                                        : [AppColors.ink, const Color(0xFF0A2048)],
-                                  ),
+                                  gradient: AppColors.neonGradient,
                                   borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(
+                                    color: Colors.white.withValues(alpha: 0.28),
+                                  ),
                                   boxShadow: [
                                     BoxShadow(
-                                      color: isDark
-                                          ? AppColors.brandGlow
-                                          : AppColors.lightBrandGlow,
-                                      blurRadius: 16,
-                                      offset: const Offset(0, 3),
+                                      color: AppColors.neon.withValues(
+                                          alpha: isDark ? 0.5 : 0.38),
+                                      blurRadius: 18,
+                                      offset: const Offset(0, 4),
+                                    ),
+                                    BoxShadow(
+                                      color: AppColors.neonCyan
+                                          .withValues(alpha: 0.22),
+                                      blurRadius: 10,
                                     ),
                                   ],
                                 ),
@@ -182,7 +186,7 @@ class _RailNavItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final inactiveColor = isDark ? AppColors.muted : AppColors.lightMuted;
-    final activeColor = isDark ? AppColors.deep : AppColors.lightBg;
+    const activeColor = Colors.white;
 
     return Semantics(
       button: true,
@@ -204,6 +208,12 @@ class _RailNavItem extends StatelessWidget {
                         selected ? destination.selectedIcon : destination.icon,
                         size: 22,
                         color: selected ? activeColor : inactiveColor,
+                        shadows: selected
+                            ? const [
+                                Shadow(
+                                    color: Color(0xCCFFFFFF), blurRadius: 10),
+                              ]
+                            : null,
                       ),
                       const SizedBox(width: 12),
                       Expanded(
@@ -213,7 +223,8 @@ class _RailNavItem extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontSize: 13,
-                            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                            fontWeight:
+                                selected ? FontWeight.w700 : FontWeight.w500,
                             color: selected ? activeColor : inactiveColor,
                           ),
                         ),
@@ -227,6 +238,12 @@ class _RailNavItem extends StatelessWidget {
                         selected ? destination.selectedIcon : destination.icon,
                         size: 22,
                         color: selected ? activeColor : inactiveColor,
+                        shadows: selected
+                            ? const [
+                                Shadow(
+                                    color: Color(0xCCFFFFFF), blurRadius: 10),
+                              ]
+                            : null,
                       ),
                       if (selected) ...[
                         const SizedBox(height: 3),
@@ -234,7 +251,7 @@ class _RailNavItem extends StatelessWidget {
                           destination.label,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
+                          style: const TextStyle(
                             fontSize: 9,
                             fontWeight: FontWeight.w700,
                             letterSpacing: 0.15,

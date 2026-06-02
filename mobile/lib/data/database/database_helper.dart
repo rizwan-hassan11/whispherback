@@ -36,7 +36,7 @@ class DatabaseHelper {
   }
 
   Future<void> _createSchema(Database db) async {
-        await db.execute('''
+    await db.execute('''
           CREATE TABLE clips (
             id TEXT PRIMARY KEY,
             title TEXT NOT NULL,
@@ -46,7 +46,7 @@ class DatabaseHelper {
             source TEXT NOT NULL
           )
         ''');
-        await db.execute('''
+    await db.execute('''
           CREATE TABLE playlists (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL UNIQUE,
@@ -55,7 +55,7 @@ class DatabaseHelper {
             shuffle_enabled INTEGER NOT NULL DEFAULT 0
           )
         ''');
-        await db.execute('''
+    await db.execute('''
           CREATE TABLE playlist_clips (
             playlist_id TEXT NOT NULL,
             clip_id TEXT NOT NULL,
@@ -65,7 +65,7 @@ class DatabaseHelper {
             FOREIGN KEY (clip_id) REFERENCES clips(id) ON DELETE CASCADE
           )
         ''');
-        await db.execute('''
+    await db.execute('''
           CREATE TABLE schedules (
             id TEXT PRIMARY KEY,
             playlist_id TEXT NOT NULL UNIQUE,
@@ -79,7 +79,7 @@ class DatabaseHelper {
             FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE
           )
         ''');
-        await db.execute('''
+    await db.execute('''
           CREATE TABLE sleep_windows (
             id TEXT PRIMARY KEY,
             start_time TEXT NOT NULL,
@@ -88,7 +88,7 @@ class DatabaseHelper {
             active INTEGER NOT NULL DEFAULT 0
           )
         ''');
-        await db.execute('''
+    await db.execute('''
           CREATE TABLE prayer_settings (
             id INTEGER PRIMARY KEY CHECK (id = 1),
             calculation_method TEXT NOT NULL DEFAULT 'Karachi',
@@ -97,20 +97,21 @@ class DatabaseHelper {
             manual_city TEXT
           )
         ''');
-        await db.execute('''
+    await db.execute('''
           CREATE TABLE app_state (
             id INTEGER PRIMARY KEY CHECK (id = 1),
             is_active INTEGER NOT NULL DEFAULT 0,
             global_shuffle_enabled INTEGER NOT NULL DEFAULT 0
           )
         ''');
-        await db.insert('app_state', {'id': 1, 'is_active': 0, 'global_shuffle_enabled': 0});
-        await db.insert('prayer_settings', {
-          'id': 1,
-          'calculation_method': 'Karachi',
-          'madhab': 'Shafi',
-          'use_gps': 1,
-        });
+    await db.insert(
+        'app_state', {'id': 1, 'is_active': 0, 'global_shuffle_enabled': 0});
+    await db.insert('prayer_settings', {
+      'id': 1,
+      'calculation_method': 'Karachi',
+      'madhab': 'Shafi',
+      'use_gps': 1,
+    });
   }
 
   Future<void> close() async {

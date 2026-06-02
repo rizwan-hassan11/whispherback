@@ -28,12 +28,17 @@ class ScheduleRepository {
 
   Future<PlaybackSchedule?> getForPlaylist(String playlistId) async {
     final db = await _db.database;
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
       SELECT s.*, p.name AS playlist_name
       FROM schedules s
       INNER JOIN playlists p ON p.id = s.playlist_id
       WHERE s.playlist_id = ?
-    ''', [playlistId]);
+    ''',
+      [
+        playlistId,
+      ],
+    );
     if (rows.isEmpty) return null;
     return _fromRow(rows.first);
   }
@@ -74,18 +79,24 @@ class ScheduleRepository {
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
 
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
       SELECT s.*, p.name AS playlist_name
       FROM schedules s
       INNER JOIN playlists p ON p.id = s.playlist_id
       WHERE s.id = ?
-    ''', [scheduleId]);
+    ''',
+      [
+        scheduleId,
+      ],
+    );
     return _fromRow(rows.first);
   }
 
   Future<void> remove(String playlistId) async {
     final db = await _db.database;
-    await db.delete('schedules', where: 'playlist_id = ?', whereArgs: [playlistId]);
+    await db
+        .delete('schedules', where: 'playlist_id = ?', whereArgs: [playlistId]);
   }
 
   Future<void> setEnabled(String playlistId, bool enabled) async {

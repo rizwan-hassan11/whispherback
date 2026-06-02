@@ -21,6 +21,7 @@ class PlaybackSchedule extends Equatable {
   final int intervalMinutes;
   final bool shuffleEnabled;
   final bool alarmEnabled;
+
   /// Bit mask: bit 0 = Monday … bit 6 = Sunday. 127 = every day.
   final int daysMask;
   final bool enabled;

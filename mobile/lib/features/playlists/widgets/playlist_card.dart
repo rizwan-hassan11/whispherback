@@ -100,7 +100,8 @@ class PlaylistCard extends StatelessWidget {
                 Text(
                   l10n.clipsSummary(
                     playlist.clipCount,
-                    formatPlaylistDurationLocalized(context, playlist.totalDurationMs),
+                    formatPlaylistDurationLocalized(
+                        context, playlist.totalDurationMs),
                   ),
                   style: TextStyle(fontSize: 12, color: theme.muted),
                 ),
@@ -166,7 +167,8 @@ class PlaylistCard extends StatelessWidget {
                         : AppColors.ink.withValues(alpha: 0.08),
                   ),
                 ),
-                child: Icon(AppIcons.chevronRight, color: theme.foreground, size: 16),
+                child: Icon(AppIcons.chevronRight,
+                    color: theme.foreground, size: 16),
               ),
             ],
           ),

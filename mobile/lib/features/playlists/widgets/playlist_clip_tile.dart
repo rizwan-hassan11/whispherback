@@ -100,7 +100,7 @@ class PlaylistClipTile extends StatelessWidget {
                         ],
                       ),
                       const SizedBox(height: 8),
-                      _MiniWaveform(active: false),
+                      const _MiniWaveform(active: false),
                     ],
                   ),
                 ),

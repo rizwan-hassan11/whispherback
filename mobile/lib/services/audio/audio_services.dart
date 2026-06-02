@@ -17,8 +17,13 @@ class AudioRecordingService {
   final _recorder = AudioRecorder();
   final _uuid = const Uuid();
 
-  Stream<Amplitude>? get amplitudeStream =>
-      _recorder.isRecording().then((r) => r ? _recorder.onAmplitudeChanged(const Duration(milliseconds: 100)) : null).asStream().asyncExpand((s) => s ?? const Stream.empty());
+  Stream<Amplitude>? get amplitudeStream => _recorder
+      .isRecording()
+      .then((r) => r
+          ? _recorder.onAmplitudeChanged(const Duration(milliseconds: 100))
+          : null)
+      .asStream()
+      .asyncExpand((s) => s ?? const Stream.empty());
 
   Future<bool> get isRecording => _recorder.isRecording();
 
@@ -29,7 +34,8 @@ class AudioRecordingService {
     final filePath = p.join(clipsDir.path, '${_uuid.v4()}.m4a');
 
     await _recorder.start(
-      const RecordConfig(encoder: AudioEncoder.aacLc, sampleRate: 44100, numChannels: 1),
+      const RecordConfig(
+          encoder: AudioEncoder.aacLc, sampleRate: 44100, numChannels: 1),
       path: filePath,
     );
     _pendingPath = filePath;

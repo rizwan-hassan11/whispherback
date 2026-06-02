@@ -39,12 +39,17 @@ class PlaylistRepository {
 
   Future<List<AudioClip>> getClips(String playlistId) async {
     final db = await _db.database;
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
       SELECT c.* FROM clips c
       INNER JOIN playlist_clips pc ON pc.clip_id = c.id
       WHERE pc.playlist_id = ?
       ORDER BY pc.sort_order ASC
-    ''', [playlistId]);
+    ''',
+      [
+        playlistId,
+      ],
+    );
     return rows.map((row) {
       return AudioClip(
         id: row['id']! as String,
@@ -101,10 +106,15 @@ class PlaylistRepository {
 
   Future<void> addClip(String playlistId, String clipId) async {
     final db = await _db.database;
-    final count = Sqflite.firstIntValue(await db.rawQuery(
-      'SELECT COUNT(*) FROM playlist_clips WHERE playlist_id = ?',
-      [playlistId],
-    )) ?? 0;
+    final count = Sqflite.firstIntValue(
+          await db.rawQuery(
+            'SELECT COUNT(*) FROM playlist_clips WHERE playlist_id = ?',
+            [
+              playlistId,
+            ],
+          ),
+        ) ??
+        0;
     await db.insert('playlist_clips', {
       'playlist_id': playlistId,
       'clip_id': clipId,
@@ -135,7 +145,8 @@ class PlaylistRepository {
       whereArgs: [id],
     );
     if (schedule.isNotEmpty) return false;
-    await db.delete('playlist_clips', where: 'playlist_id = ?', whereArgs: [id]);
+    await db
+        .delete('playlist_clips', where: 'playlist_id = ?', whereArgs: [id]);
     await db.delete('schedules', where: 'playlist_id = ?', whereArgs: [id]);
     await db.delete('playlists', where: 'id = ?', whereArgs: [id]);
     return true;

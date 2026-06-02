@@ -64,6 +64,23 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
       highlights: highlights,
       onBack: () => context.go('/sign-in'),
       guestAction: () => context.go('/home'),
+      footer: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(l10n.alreadyHaveAccount,
+              style: TextStyle(color: theme.muted, fontSize: 13)),
+          GestureDetector(
+            onTap: () => context.go('/sign-in'),
+            child: Text(
+              l10n.signIn,
+              style: TextStyle(
+                  color: theme.foreground,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13),
+            ),
+          ),
+        ],
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -116,19 +133,6 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
           ),
           const AuthDivider(compact: true),
           SocialAuthRow(onGoogle: _signUp, onApple: _signUp, compact: true),
-        ],
-      ),
-      footer: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(l10n.alreadyHaveAccount, style: TextStyle(color: theme.muted, fontSize: 13)),
-          GestureDetector(
-            onTap: () => context.go('/sign-in'),
-            child: Text(
-              l10n.signIn,
-              style: TextStyle(color: theme.foreground, fontWeight: FontWeight.w700, fontSize: 13),
-            ),
-          ),
         ],
       ),
     );

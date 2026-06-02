@@ -41,7 +41,8 @@ class ScheduleEngine {
       if (!schedule.enabled) continue;
       if (_shouldFire(schedule, now)) {
         _lastFired[schedule.id] = now;
-        await _coordinator.playPlaylist(schedule.playlistId, fromSchedule: true);
+        await _coordinator.playPlaylist(schedule.playlistId,
+            fromSchedule: true);
       }
     }
   }
@@ -79,7 +80,8 @@ class ScheduleEngine {
     if (now.second >= 30) return false;
 
     final last = _lastFired[schedule.id];
-    if (last != null && now.difference(last).inMinutes < schedule.intervalMinutes) {
+    if (last != null &&
+        now.difference(last).inMinutes < schedule.intervalMinutes) {
       return false;
     }
 

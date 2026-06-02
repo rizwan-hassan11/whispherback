@@ -1,5 +1,4 @@
 import 'dart:math' as math;
-import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
@@ -41,16 +40,56 @@ class _HomeAmbiencePainter extends CustomPainter {
   void _drawOrbs(Canvas canvas, Size size) {
     final orbs = isDark
         ? [
-            (Offset(size.width * 0.85, size.height * 0.12), 90.0, AppColors.gold, 0.08),
-            (Offset(size.width * 0.08, size.height * 0.22), 70.0, AppColors.brandLight, 0.10),
-            (Offset(size.width * 0.92, size.height * 0.55), 120.0, AppColors.brandDark, 0.08),
-            (Offset(size.width * 0.05, size.height * 0.72), 55.0, AppColors.gold, 0.06),
+            (
+              Offset(size.width * 0.85, size.height * 0.12),
+              90.0,
+              AppColors.gold,
+              0.08
+            ),
+            (
+              Offset(size.width * 0.08, size.height * 0.22),
+              70.0,
+              AppColors.brandLight,
+              0.10
+            ),
+            (
+              Offset(size.width * 0.92, size.height * 0.55),
+              120.0,
+              AppColors.brandDark,
+              0.08
+            ),
+            (
+              Offset(size.width * 0.05, size.height * 0.72),
+              55.0,
+              AppColors.gold,
+              0.06
+            ),
           ]
         : [
-            (Offset(size.width * 0.88, size.height * 0.10), 100.0, AppColors.ink, 0.07),
-            (Offset(size.width * 0.06, size.height * 0.20), 80.0, AppColors.lightMuted, 0.09),
-            (Offset(size.width * 0.90, size.height * 0.52), 130.0, AppColors.success, 0.06),
-            (Offset(size.width * 0.04, size.height * 0.70), 60.0, AppColors.ink, 0.05),
+            (
+              Offset(size.width * 0.88, size.height * 0.10),
+              100.0,
+              AppColors.ink,
+              0.07
+            ),
+            (
+              Offset(size.width * 0.06, size.height * 0.20),
+              80.0,
+              AppColors.lightMuted,
+              0.09
+            ),
+            (
+              Offset(size.width * 0.90, size.height * 0.52),
+              130.0,
+              AppColors.success,
+              0.06
+            ),
+            (
+              Offset(size.width * 0.04, size.height * 0.70),
+              60.0,
+              AppColors.ink,
+              0.05
+            ),
           ];
 
     for (final (center, radius, color, alpha) in orbs) {

@@ -31,7 +31,8 @@ class SettingsScreen extends ConsumerWidget {
         backgroundColor: Colors.transparent,
         body: SafeArea(
           child: ListView(
-            padding: EdgeInsets.fromLTRB(20, 8, 20, context.shellScrollPadding.bottom + 12),
+            padding: EdgeInsets.fromLTRB(
+                20, 8, 20, context.shellScrollPadding.bottom + 12),
             children: [
               Text(
                 l10n.settings,
@@ -55,7 +56,8 @@ class SettingsScreen extends ConsumerWidget {
                   _SettingsThemeSection(
                     theme: theme,
                     themeMode: themeMode,
-                    onThemeChanged: (mode) => ref.read(themeModeProvider.notifier).setMode(mode),
+                    onThemeChanged: (mode) =>
+                        ref.read(themeModeProvider.notifier).setMode(mode),
                   ),
                   Divider(height: 1, color: theme.glassBorder),
                   _SettingsLinkRow(
@@ -72,7 +74,8 @@ class SettingsScreen extends ConsumerWidget {
                     title: l10n.showLabels,
                     subtitle: l10n.showLabelsSubtitle,
                     value: showLabels,
-                    onChanged: (v) => ref.read(showLabelsProvider.notifier).toggle(v),
+                    onChanged: (v) =>
+                        ref.read(showLabelsProvider.notifier).toggle(v),
                   ),
                 ],
               ),
@@ -87,7 +90,8 @@ class SettingsScreen extends ConsumerWidget {
                     title: l10n.alarmsByDefault,
                     subtitle: l10n.alarmsByDefaultSubtitle,
                     value: defaultAlarm,
-                    onChanged: (v) => ref.read(defaultAlarmProvider.notifier).set(v),
+                    onChanged: (v) =>
+                        ref.read(defaultAlarmProvider.notifier).set(v),
                   ),
                   Divider(height: 1, color: theme.glassBorder),
                   _SettingsLinkRow(
@@ -161,7 +165,8 @@ class SettingsScreen extends ConsumerWidget {
               Center(
                 child: Text(
                   l10n.versionFooter,
-                  style: TextStyle(fontSize: 11, color: theme.muted.withValues(alpha: 0.85)),
+                  style: TextStyle(
+                      fontSize: 11, color: theme.muted.withValues(alpha: 0.85)),
                 ),
               ),
             ],
@@ -229,7 +234,8 @@ class SettingsScreen extends ConsumerWidget {
     );
   }
 
-  Future<void> _pickInterval(BuildContext context, WidgetRef ref, int current) async {
+  Future<void> _pickInterval(
+      BuildContext context, WidgetRef ref, int current) async {
     final l10n = context.l10n;
     final theme = whisperTheme(context);
     final picked = await showModalBottomSheet<int>(
@@ -276,7 +282,8 @@ class SettingsScreen extends ConsumerWidget {
     if (picked != null) ref.read(defaultIntervalProvider.notifier).set(picked);
   }
 
-  static TextStyle _languageNativeStyle(BuildContext context, AppLanguage lang) {
+  static TextStyle _languageNativeStyle(
+      BuildContext context, AppLanguage lang) {
     final muted = whisperTheme(context).muted;
     switch (lang) {
       case AppLanguage.arabic:
@@ -357,7 +364,9 @@ class _SettingsCard extends StatelessWidget {
         ),
         borderRadius: BorderRadius.circular(AppRadii.sm),
         border: Border.all(
-          color: theme.isDark ? const Color(0x24FFFFFF) : AppColors.ink.withValues(alpha: 0.1),
+          color: theme.isDark
+              ? const Color(0x24FFFFFF)
+              : AppColors.ink.withValues(alpha: 0.1),
         ),
         boxShadow: theme.isDark
             ? null
@@ -415,7 +424,8 @@ class _SettingsThemeSection extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       l10n.themeSubtitle,
-                      style: TextStyle(fontSize: 12, color: theme.muted, height: 1.35),
+                      style: TextStyle(
+                          fontSize: 12, color: theme.muted, height: 1.35),
                     ),
                   ],
                 ),
@@ -446,7 +456,8 @@ class _SettingsThemeSection extends StatelessWidget {
             onSelectionChanged: (s) => onThemeChanged(s.first),
             style: ButtonStyle(
               visualDensity: VisualDensity.compact,
-              padding: WidgetStateProperty.all(const EdgeInsets.symmetric(horizontal: 8, vertical: 10)),
+              padding: WidgetStateProperty.all(
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 10)),
               textStyle: WidgetStateProperty.all(
                 const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
               ),
@@ -502,7 +513,8 @@ class _SettingsToggleRow extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       subtitle,
-                      style: TextStyle(fontSize: 12, color: theme.muted, height: 1.35),
+                      style: TextStyle(
+                          fontSize: 12, color: theme.muted, height: 1.35),
                     ),
                   ],
                 ),
@@ -559,12 +571,31 @@ class _SettingsLinkRow extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       subtitle,
-                      style: TextStyle(fontSize: 12, color: theme.muted, height: 1.35),
+                      style: TextStyle(
+                          fontSize: 12, color: theme.muted, height: 1.35),
                     ),
                   ],
                 ),
               ),
-              Icon(AppIcons.chevronRight, color: theme.muted, size: 18),
+              const SizedBox(width: 8),
+              Container(
+                width: 30,
+                height: 30,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: theme.isDark
+                      ? Colors.white.withValues(alpha: 0.06)
+                      : AppColors.ink.withValues(alpha: 0.04),
+                  borderRadius: BorderRadius.circular(9),
+                  border: Border.all(
+                    color: theme.isDark
+                        ? Colors.white.withValues(alpha: 0.10)
+                        : AppColors.ink.withValues(alpha: 0.07),
+                  ),
+                ),
+                child:
+                    Icon(AppIcons.chevronRight, color: theme.muted, size: 16),
+              ),
             ],
           ),
         ),
@@ -615,7 +646,8 @@ class _SettingsSwitch extends StatelessWidget {
               color: value ? theme.onActionFill : Colors.white,
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: theme.isDark ? 0.22 : 0.12),
+                  color: Colors.black
+                      .withValues(alpha: theme.isDark ? 0.22 : 0.12),
                   blurRadius: 4,
                   offset: const Offset(0, 1),
                 ),
@@ -637,18 +669,35 @@ class _IconBox extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 34,
-      height: 34,
+      width: 36,
+      height: 36,
       decoration: BoxDecoration(
-        color: theme.isDark
-            ? AppColors.brandLight.withValues(alpha: 0.12)
-            : AppColors.ink.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(10),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: theme.isDark
+              ? [
+                  Colors.white.withValues(alpha: 0.16),
+                  Colors.white.withValues(alpha: 0.05),
+                ]
+              : [
+                  AppColors.ink.withValues(alpha: 0.08),
+                  AppColors.ink.withValues(alpha: 0.03),
+                ],
+        ),
+        borderRadius: BorderRadius.circular(11),
+        border: Border.all(
+          color: theme.isDark
+              ? Colors.white.withValues(alpha: 0.14)
+              : AppColors.ink.withValues(alpha: 0.08),
+        ),
       ),
       child: Icon(
         icon,
-        size: 17,
-        color: theme.isDark ? AppColors.brandLight : AppColors.ink.withValues(alpha: 0.72),
+        size: 18,
+        color: theme.isDark
+            ? AppColors.brandLight
+            : AppColors.ink.withValues(alpha: 0.75),
       ),
     );
   }

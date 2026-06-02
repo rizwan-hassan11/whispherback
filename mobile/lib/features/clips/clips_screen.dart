@@ -62,7 +62,8 @@ class _ClipsScreenState extends ConsumerState<ClipsScreen> {
             height: 180,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: AppColors.success.withValues(alpha: theme.isDark ? 0.08 : 0.12),
+              color: AppColors.success
+                  .withValues(alpha: theme.isDark ? 0.08 : 0.12),
             ),
           ),
         ),
@@ -74,7 +75,8 @@ class _ClipsScreenState extends ConsumerState<ClipsScreen> {
             height: 140,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: AppColors.brandLight.withValues(alpha: theme.isDark ? 0.1 : 0.14),
+              color: AppColors.brandLight
+                  .withValues(alpha: theme.isDark ? 0.1 : 0.14),
             ),
           ),
         ),
@@ -222,7 +224,8 @@ class _ClipsBody extends StatelessWidget {
           )
         else
           SliverPadding(
-            padding: EdgeInsets.fromLTRB(20, 0, 20, context.shellScrollPadding.bottom),
+            padding: EdgeInsets.fromLTRB(
+                20, 0, 20, context.shellScrollPadding.bottom),
             sliver: SliverList.separated(
               itemCount: filtered.length,
               separatorBuilder: (_, __) => const SizedBox(height: 10),

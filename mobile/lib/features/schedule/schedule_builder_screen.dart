@@ -19,7 +19,8 @@ class ScheduleBuilderScreen extends ConsumerStatefulWidget {
   final String playlistId;
 
   @override
-  ConsumerState<ScheduleBuilderScreen> createState() => _ScheduleBuilderScreenState();
+  ConsumerState<ScheduleBuilderScreen> createState() =>
+      _ScheduleBuilderScreenState();
 }
 
 class _ScheduleBuilderScreenState extends ConsumerState<ScheduleBuilderScreen> {
@@ -137,7 +138,8 @@ class _ScheduleBuilderScreenState extends ConsumerState<ScheduleBuilderScreen> {
           title: Text(l10n.scheduleConflict),
           content: Text(l10n.scheduleConflictMessage(e.existingPlaylistName)),
           actions: [
-            FilledButton(onPressed: () => Navigator.pop(ctx), child: Text(l10n.ok)),
+            FilledButton(
+                onPressed: () => Navigator.pop(ctx), child: Text(l10n.ok)),
           ],
         ),
       );
@@ -172,7 +174,8 @@ class _ScheduleBuilderScreenState extends ConsumerState<ScheduleBuilderScreen> {
           actions: [
             TextButton(
               onPressed: _remove,
-              child: Text(l10n.remove, style: TextStyle(color: AppColors.error)),
+              child: Text(l10n.remove,
+                  style: const TextStyle(color: AppColors.error)),
             ),
           ],
         ),
@@ -323,7 +326,8 @@ class _ScheduleBuilderScreenState extends ConsumerState<ScheduleBuilderScreen> {
               onPressed: _save,
               style: FilledButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16)),
               ),
               child: Text(l10n.saveSchedule),
             ),
@@ -392,7 +396,8 @@ class _TimeTile extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(label, style: TextStyle(fontSize: 12, color: theme.muted)),
+                    Text(label,
+                        style: TextStyle(fontSize: 12, color: theme.muted)),
                     Text(
                       value,
                       style: TextStyle(
@@ -443,11 +448,14 @@ class _SwitchTile extends StatelessWidget {
         ),
         child: SwitchListTile(
           secondary: Icon(icon, color: AppColors.brandLight),
-          title: Text(title, style: TextStyle(color: theme.foreground, fontWeight: FontWeight.w600)),
-          subtitle: Text(subtitle, style: TextStyle(fontSize: 12, color: theme.muted)),
+          title: Text(title,
+              style: TextStyle(
+                  color: theme.foreground, fontWeight: FontWeight.w600)),
+          subtitle: Text(subtitle,
+              style: TextStyle(fontSize: 12, color: theme.muted)),
           value: value,
           onChanged: onChanged,
-          activeColor: AppColors.brandLight,
+          activeThumbColor: AppColors.brandLight,
         ),
       ),
     );

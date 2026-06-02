@@ -5,7 +5,8 @@ linter:
     prefer_const_constructors: true
     prefer_const_declarations: true
     avoid_print: true
-    require_trailing_commas: true
+    # Trailing commas conflict with dart format on large files; enforce in PR review instead.
+    require_trailing_commas: false
 
 analyzer:
   exclude:

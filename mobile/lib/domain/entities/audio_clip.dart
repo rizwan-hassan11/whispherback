@@ -42,5 +42,6 @@ class AudioClip extends Equatable {
   }
 
   @override
-  List<Object?> get props => [id, title, filePath, durationMs, createdAt, source];
+  List<Object?> get props =>
+      [id, title, filePath, durationMs, createdAt, source];
 }

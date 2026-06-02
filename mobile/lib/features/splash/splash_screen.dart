@@ -49,7 +49,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
             const SizedBox(height: 10),
             Text(
               context.l10n.appTagline,
-              style: TextStyle(
+              style: const TextStyle(
                 fontSize: 14,
                 color: AppColors.muted,
               ),

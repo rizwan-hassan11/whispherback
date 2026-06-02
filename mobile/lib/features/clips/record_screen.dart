@@ -66,7 +66,9 @@ class _RecordScreenState extends ConsumerState<RecordScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              clip != null ? l10n.savedClip(clip.title) : l10n.recordingCancelled,
+              clip != null
+                  ? l10n.savedClip(clip.title)
+                  : l10n.recordingCancelled,
             ),
           ),
         );
@@ -201,8 +203,10 @@ class _RecordScreenState extends ConsumerState<RecordScreen> {
                       const SizedBox(height: 32),
                       FilledButton.icon(
                         style: FilledButton.styleFrom(
-                          backgroundColor: _recording ? AppColors.error : AppColors.brand,
-                          foregroundColor: _recording ? Colors.white : AppColors.ink,
+                          backgroundColor:
+                              _recording ? AppColors.error : AppColors.brand,
+                          foregroundColor:
+                              _recording ? Colors.white : AppColors.ink,
                           minimumSize: const Size(double.infinity, 52),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(AppRadii.sm),
@@ -210,7 +214,9 @@ class _RecordScreenState extends ConsumerState<RecordScreen> {
                         ),
                         onPressed: _toggleRecord,
                         icon: Icon(_recording ? AppIcons.stop : AppIcons.mic),
-                        label: Text(_recording ? l10n.stopAndSave : l10n.startRecording),
+                        label: Text(_recording
+                            ? l10n.stopAndSave
+                            : l10n.startRecording),
                       ),
                       if (!_recording) ...[
                         const SizedBox(height: 12),
@@ -288,7 +294,9 @@ class _SubTopBar extends StatelessWidget {
             icon: Icon(AppIcons.back, color: theme.foreground),
             style: IconButton.styleFrom(
               backgroundColor: theme.isDark ? theme.glass : Colors.white,
-              disabledBackgroundColor: theme.isDark ? theme.glass.withValues(alpha: 0.4) : Colors.white.withValues(alpha: 0.5),
+              disabledBackgroundColor: theme.isDark
+                  ? theme.glass.withValues(alpha: 0.4)
+                  : Colors.white.withValues(alpha: 0.5),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(13),
                 side: BorderSide(color: theme.glassBorder),
@@ -410,7 +418,8 @@ class _MicHero extends StatelessWidget {
             height: 120,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: AppColors.brandLight.withValues(alpha: theme.isDark ? 0.14 : 0.1),
+              color: AppColors.brandLight
+                  .withValues(alpha: theme.isDark ? 0.14 : 0.1),
             ),
           ),
           Container(
@@ -427,7 +436,8 @@ class _MicHero extends StatelessWidget {
                 ),
               ],
             ),
-            child: Icon(AppIcons.mic, size: 32, color: AppColors.brandLight),
+            child:
+                const Icon(AppIcons.mic, size: 32, color: AppColors.brandLight),
           ),
         ],
       ),

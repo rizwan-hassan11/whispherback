@@ -42,7 +42,8 @@ abstract final class AppDepth {
         blurRadius: 0,
       ),
       BoxShadow(
-        color: const Color(0xFF061331).withValues(alpha: (elevated ? 0.12 : 0.08) * a),
+        color: const Color(0xFF061331)
+            .withValues(alpha: (elevated ? 0.12 : 0.08) * a),
         offset: Offset(0, elevated ? 12 : 8),
         blurRadius: elevated ? 28 : 20,
         spreadRadius: -2,
@@ -85,7 +86,8 @@ abstract final class AppDepth {
           color: borderColor ??
               (isDark ? const Color(0x33FFFFFF) : AppColors.lightGlassBorder),
         ),
-        boxShadow: shadows(isDark: isDark, intensity: intensity, elevated: elevated),
+        boxShadow:
+            shadows(isDark: isDark, intensity: intensity, elevated: elevated),
       );
 
   static BoxDecoration iconTile({required bool isDark, double radius = 10}) =>
@@ -95,7 +97,11 @@ abstract final class AppDepth {
           end: Alignment.bottomRight,
           colors: isDark
               ? [AppColors.cardElevated, AppColors.ink, const Color(0xFF040B1E)]
-              : [AppColors.lightBg2, AppColors.lightBg, const Color(0xFFE2E8F0)],
+              : [
+                  AppColors.lightBg2,
+                  AppColors.lightBg,
+                  const Color(0xFFE2E8F0)
+                ],
           stops: const [0, 0.6, 1],
         ),
         borderRadius: BorderRadius.circular(radius),
@@ -175,6 +181,7 @@ class DepthSurface extends StatelessWidget {
         ..setEntry(3, 2, 0.001)
         ..rotateX(tiltX)
         ..rotateY(tiltY)
+        // ignore: deprecated_member_use
         ..translate(0.0, 0.0, lift),
       child: DecoratedBox(
         decoration: AppDepth.surface(
@@ -243,9 +250,12 @@ class _DepthTileState extends State<DepthTile> {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTapDown: widget.onTap != null ? (_) => setState(() => _pressed = true) : null,
-      onTapUp: widget.onTap != null ? (_) => setState(() => _pressed = false) : null,
-      onTapCancel: widget.onTap != null ? () => setState(() => _pressed = false) : null,
+      onTapDown:
+          widget.onTap != null ? (_) => setState(() => _pressed = true) : null,
+      onTapUp:
+          widget.onTap != null ? (_) => setState(() => _pressed = false) : null,
+      onTapCancel:
+          widget.onTap != null ? () => setState(() => _pressed = false) : null,
       onTap: widget.onTap,
       child: AnimatedScale(
         scale: _pressed ? 0.97 : 1,
@@ -287,6 +297,13 @@ class DepthOrb extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    // Dark theme: bright, luminous orbs. Light theme: keep them subtle so the
+    // dark accent colors don't turn into heavy blobs on a pale background.
+    final coreAlpha = isDark ? 0.9 : 0.42;
+    final midAlpha = isDark ? 0.4 : 0.16;
+    final shadowAlpha = isDark ? 0.3 : 0.14;
+
     return Positioned(
       top: top,
       left: left,
@@ -299,18 +316,18 @@ class DepthOrb extends StatelessWidget {
           shape: BoxShape.circle,
           gradient: RadialGradient(
             center: const Alignment(-0.35, -0.35),
-            radius: 0.85,
+            radius: 0.9,
             colors: [
-              color.withValues(alpha: 0.55),
-              color.withValues(alpha: 0.18),
+              color.withValues(alpha: coreAlpha),
+              color.withValues(alpha: midAlpha),
               color.withValues(alpha: 0),
             ],
-            stops: const [0, 0.45, 1],
+            stops: const [0, 0.5, 1],
           ),
           boxShadow: [
             BoxShadow(
-              color: color.withValues(alpha: 0.22),
-              blurRadius: blur > 0 ? blur : size * 0.35,
+              color: color.withValues(alpha: shadowAlpha),
+              blurRadius: blur > 0 ? blur : size * 0.4,
               spreadRadius: size * 0.02,
             ),
           ],

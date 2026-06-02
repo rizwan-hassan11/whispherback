@@ -12,38 +12,38 @@ class BatterySettingsScreen extends StatelessWidget {
   const BatterySettingsScreen({super.key});
 
   static List<_OemGuide> _guides(AppLocalizations l10n) => [
-    _OemGuide(
-      title: l10n.samsungGuide,
-      steps: const [
-        'Settings → Apps → WhisperBack',
-        'Battery → Unrestricted',
-        'Allow background activity',
-      ],
-    ),
-    _OemGuide(
-      title: l10n.xiaomiGuide,
-      steps: const [
-        'Settings → Apps → Manage apps → WhisperBack',
-        'Battery saver → No restrictions',
-        'Autostart → Enable',
-      ],
-    ),
-    _OemGuide(
-      title: l10n.huaweiGuide,
-      steps: const [
-        'Settings → Apps → WhisperBack',
-        'Battery → App launch → Manage manually',
-        'Enable all three toggles',
-      ],
-    ),
-    _OemGuide(
-      title: l10n.stockAndroidGuide,
-      steps: const [
-        'Settings → Apps → WhisperBack → Battery',
-        'Select Unrestricted',
-      ],
-    ),
-  ];
+        _OemGuide(
+          title: l10n.samsungGuide,
+          steps: const [
+            'Settings → Apps → WhisperBack',
+            'Battery → Unrestricted',
+            'Allow background activity',
+          ],
+        ),
+        _OemGuide(
+          title: l10n.xiaomiGuide,
+          steps: const [
+            'Settings → Apps → Manage apps → WhisperBack',
+            'Battery saver → No restrictions',
+            'Autostart → Enable',
+          ],
+        ),
+        _OemGuide(
+          title: l10n.huaweiGuide,
+          steps: const [
+            'Settings → Apps → WhisperBack',
+            'Battery → App launch → Manage manually',
+            'Enable all three toggles',
+          ],
+        ),
+        _OemGuide(
+          title: l10n.stockAndroidGuide,
+          steps: const [
+            'Settings → Apps → WhisperBack → Battery',
+            'Select Unrestricted',
+          ],
+        ),
+      ];
 
   @override
   Widget build(BuildContext context) {
@@ -118,9 +118,21 @@ class BatterySettingsScreen extends StatelessWidget {
                       _InfoCard(
                         theme: theme,
                         items: [
-                          (AppIcons.schedule, l10n.onTimePlayback, l10n.onTimePlaybackDesc),
-                          (AppIcons.alarm, l10n.reliableAlarms, l10n.reliableAlarmsDesc),
-                          (AppIcons.shield, l10n.noDataCollection, l10n.noDataCollectionDesc),
+                          (
+                            AppIcons.schedule,
+                            l10n.onTimePlayback,
+                            l10n.onTimePlaybackDesc
+                          ),
+                          (
+                            AppIcons.alarm,
+                            l10n.reliableAlarms,
+                            l10n.reliableAlarmsDesc
+                          ),
+                          (
+                            AppIcons.shield,
+                            l10n.noDataCollection,
+                            l10n.noDataCollectionDesc
+                          ),
                         ],
                       ),
                       const SizedBox(height: 24),
@@ -144,7 +156,8 @@ class BatterySettingsScreen extends StatelessWidget {
                       FilledButton.icon(
                         onPressed: () {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text(l10n.openSystemSettingsSnack)),
+                            SnackBar(
+                                content: Text(l10n.openSystemSettingsSnack)),
                           );
                         },
                         icon: const Icon(AppIcons.settings, size: 18),
@@ -338,7 +351,8 @@ class _InfoCard extends StatelessWidget {
                         color: AppColors.success.withValues(alpha: 0.2),
                       ),
                     ),
-                    child: Icon(items[i].$1, size: 18, color: AppColors.success),
+                    child:
+                        Icon(items[i].$1, size: 18, color: AppColors.success),
                   ),
                   const SizedBox(width: 14),
                   Expanded(
@@ -417,7 +431,8 @@ class _GuideCard extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w700,
-                        color: theme.isDark ? AppColors.brandLight : AppColors.ink,
+                        color:
+                            theme.isDark ? AppColors.brandLight : AppColors.ink,
                       ),
                     ),
                   ),
@@ -425,7 +440,8 @@ class _GuideCard extends StatelessWidget {
                   Expanded(
                     child: Text(
                       guide.steps[i],
-                      style: TextStyle(fontSize: 13, color: theme.muted, height: 1.4),
+                      style: TextStyle(
+                          fontSize: 13, color: theme.muted, height: 1.4),
                     ),
                   ),
                 ],

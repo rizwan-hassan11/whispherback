@@ -45,11 +45,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         routes: [
           GoRoute(
             path: '/home',
-            pageBuilder: (context, state) => const NoTransitionPage(child: HomeScreen()),
+            pageBuilder: (context, state) =>
+                const NoTransitionPage(child: HomeScreen()),
           ),
           GoRoute(
             path: '/playlists',
-            pageBuilder: (context, state) => const NoTransitionPage(child: PlaylistsScreen()),
+            pageBuilder: (context, state) =>
+                const NoTransitionPage(child: PlaylistsScreen()),
           ),
           GoRoute(
             path: '/playlists/new',
@@ -69,7 +71,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(
             path: '/clips',
-            pageBuilder: (context, state) => const NoTransitionPage(child: ClipsScreen()),
+            pageBuilder: (context, state) =>
+                const NoTransitionPage(child: ClipsScreen()),
           ),
           GoRoute(
             path: '/clips/record',
@@ -81,7 +84,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(
             path: '/schedule',
-            pageBuilder: (context, state) => const NoTransitionPage(child: ScheduledOverviewScreen()),
+            pageBuilder: (context, state) =>
+                const NoTransitionPage(child: ScheduledOverviewScreen()),
           ),
           GoRoute(
             path: '/schedule/build/:playlistId',
@@ -103,7 +107,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(
             path: '/settings',
-            pageBuilder: (context, state) => const NoTransitionPage(child: SettingsScreen()),
+            pageBuilder: (context, state) =>
+                const NoTransitionPage(child: SettingsScreen()),
           ),
         ],
       ),
