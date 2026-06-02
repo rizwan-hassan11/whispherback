@@ -22,6 +22,7 @@ import '../../features/splash/splash_screen.dart';
 import '../widgets/main_shell.dart';
 
 final _rootKey = GlobalKey<NavigatorState>();
+final _shellKey = GlobalKey<NavigatorState>();
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -40,7 +41,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/sign-up',
         builder: (context, state) => const SignUpScreen(),
       ),
+      // The five primary tabs live inside the shell (bottom nav visible).
       ShellRoute(
+        navigatorKey: _shellKey,
         builder: (context, state, child) => MainShell(child: child),
         routes: [
           GoRoute(
@@ -54,33 +57,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 const NoTransitionPage(child: PlaylistsScreen()),
           ),
           GoRoute(
-            path: '/playlists/new',
-            builder: (context, state) => const NewPlaylistScreen(),
-          ),
-          GoRoute(
-            path: '/playlists/:id/add-clips',
-            builder: (context, state) => AddClipsToPlaylistScreen(
-              playlistId: state.pathParameters['id']!,
-            ),
-          ),
-          GoRoute(
-            path: '/playlists/:id',
-            builder: (context, state) => PlaylistDetailScreen(
-              playlistId: state.pathParameters['id']!,
-            ),
-          ),
-          GoRoute(
             path: '/clips',
             pageBuilder: (context, state) =>
                 const NoTransitionPage(child: ClipsScreen()),
-          ),
-          GoRoute(
-            path: '/clips/record',
-            builder: (context, state) => const RecordScreen(),
-          ),
-          GoRoute(
-            path: '/clips/import',
-            builder: (context, state) => const ImportScreen(),
           ),
           GoRoute(
             path: '/schedule',
@@ -88,29 +67,64 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 const NoTransitionPage(child: ScheduledOverviewScreen()),
           ),
           GoRoute(
-            path: '/schedule/build/:playlistId',
-            builder: (context, state) => ScheduleBuilderScreen(
-              playlistId: state.pathParameters['playlistId']!,
-            ),
-          ),
-          GoRoute(
-            path: '/sleep',
-            builder: (context, state) => const SleepModeScreen(),
-          ),
-          GoRoute(
-            path: '/prayer',
-            builder: (context, state) => const PrayerSettingsScreen(),
-          ),
-          GoRoute(
-            path: '/battery',
-            builder: (context, state) => const BatterySettingsScreen(),
-          ),
-          GoRoute(
             path: '/settings',
             pageBuilder: (context, state) =>
                 const NoTransitionPage(child: SettingsScreen()),
           ),
         ],
+      ),
+      // Detail / builder pages open full-screen on the root navigator so the
+      // bottom nav bar never overlaps their content or action buttons.
+      GoRoute(
+        path: '/playlists/new',
+        parentNavigatorKey: _rootKey,
+        builder: (context, state) => const NewPlaylistScreen(),
+      ),
+      GoRoute(
+        path: '/playlists/:id/add-clips',
+        parentNavigatorKey: _rootKey,
+        builder: (context, state) => AddClipsToPlaylistScreen(
+          playlistId: state.pathParameters['id']!,
+        ),
+      ),
+      GoRoute(
+        path: '/playlists/:id',
+        parentNavigatorKey: _rootKey,
+        builder: (context, state) => PlaylistDetailScreen(
+          playlistId: state.pathParameters['id']!,
+        ),
+      ),
+      GoRoute(
+        path: '/clips/record',
+        parentNavigatorKey: _rootKey,
+        builder: (context, state) => const RecordScreen(),
+      ),
+      GoRoute(
+        path: '/clips/import',
+        parentNavigatorKey: _rootKey,
+        builder: (context, state) => const ImportScreen(),
+      ),
+      GoRoute(
+        path: '/schedule/build/:playlistId',
+        parentNavigatorKey: _rootKey,
+        builder: (context, state) => ScheduleBuilderScreen(
+          playlistId: state.pathParameters['playlistId']!,
+        ),
+      ),
+      GoRoute(
+        path: '/sleep',
+        parentNavigatorKey: _rootKey,
+        builder: (context, state) => const SleepModeScreen(),
+      ),
+      GoRoute(
+        path: '/prayer',
+        parentNavigatorKey: _rootKey,
+        builder: (context, state) => const PrayerSettingsScreen(),
+      ),
+      GoRoute(
+        path: '/battery',
+        parentNavigatorKey: _rootKey,
+        builder: (context, state) => const BatterySettingsScreen(),
       ),
     ],
   );

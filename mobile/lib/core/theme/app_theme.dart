@@ -26,7 +26,6 @@ abstract final class AppTheme {
     final fg = isDark ? AppColors.soft : AppColors.lightSoft;
     final muted = isDark ? AppColors.muted : AppColors.lightMuted;
     final surface = isDark ? AppColors.card : AppColors.lightCard;
-    final glass = isDark ? AppColors.glass : AppColors.lightGlass;
     final glassBorder =
         isDark ? AppColors.glassBorder : AppColors.lightGlassBorder;
     final primary = AppColors.actionFill(isDark);
@@ -107,24 +106,18 @@ abstract final class AppTheme {
         surface: surface,
         onSurface: fg,
       ),
+      // Fields across the app wrap their own bordered container, so the
+      // global decoration is borderless/unfilled to avoid double borders
+      // (a rectangle outline stacked on the custom rounded container).
       inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: glass,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(AppRadii.sm),
-          borderSide: BorderSide(color: glassBorder),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(AppRadii.sm),
-          borderSide: BorderSide(color: glassBorder),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(AppRadii.sm),
-          borderSide: BorderSide(
-            color: isDark ? AppColors.brandLight : AppColors.ink,
-            width: 1.5,
-          ),
-        ),
+        filled: false,
+        isDense: true,
+        border: InputBorder.none,
+        enabledBorder: InputBorder.none,
+        focusedBorder: InputBorder.none,
+        errorBorder: InputBorder.none,
+        focusedErrorBorder: InputBorder.none,
+        disabledBorder: InputBorder.none,
         labelStyle: TextStyle(color: muted),
         hintStyle: TextStyle(color: muted.withValues(alpha: 0.85)),
       ),

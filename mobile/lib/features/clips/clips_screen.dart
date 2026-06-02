@@ -100,6 +100,8 @@ class _ClipsScreenState extends ConsumerState<ClipsScreen> {
                   onFilter: (f) => setState(() => _filter = f),
                   onRecord: () => context.push('/clips/record'),
                   onImport: () => context.push('/clips/import'),
+                  onPlayClip: (clip) =>
+                      ref.read(playbackCoordinatorProvider).playClip(clip),
                 );
               },
               loading: () => const Center(child: CircularProgressIndicator()),
@@ -121,6 +123,7 @@ class _ClipsBody extends StatelessWidget {
     required this.onFilter,
     required this.onRecord,
     required this.onImport,
+    required this.onPlayClip,
   });
 
   final List<AudioClip> clips;
@@ -130,6 +133,7 @@ class _ClipsBody extends StatelessWidget {
   final ValueChanged<_ClipFilter> onFilter;
   final VoidCallback onRecord;
   final VoidCallback onImport;
+  final void Function(AudioClip clip) onPlayClip;
 
   int get _recordedCount =>
       clips.where((c) => c.source == ClipSource.recorded).length;
@@ -231,7 +235,7 @@ class _ClipsBody extends StatelessWidget {
               separatorBuilder: (_, __) => const SizedBox(height: 10),
               itemBuilder: (context, i) => ClipLibraryTile(
                 clip: filtered[i],
-                onPlay: () {},
+                onPlay: () => onPlayClip(filtered[i]),
               ),
             ),
           ),
@@ -312,32 +316,48 @@ class _ToolbarButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: primary ? theme.actionFill : Colors.transparent,
-      borderRadius: BorderRadius.circular(8),
-      child: InkWell(
-        onTap: onTap,
+    final fg = primary ? Colors.white : AppColors.neonBright;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: primary ? AppColors.neonGradient : null,
         borderRadius: BorderRadius.circular(8),
-        child: SizedBox(
-          height: 44,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                icon,
-                size: 17,
-                color: primary ? theme.onActionFill : theme.foreground,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: primary ? theme.onActionFill : theme.foreground,
+        border: primary
+            ? null
+            : Border.all(color: AppColors.neon.withValues(alpha: 0.45)),
+        boxShadow: primary
+            ? [
+                BoxShadow(
+                  color: AppColors.neon.withValues(alpha: 0.45),
+                  blurRadius: 18,
+                  offset: const Offset(0, 4),
                 ),
-              ),
-            ],
+              ]
+            : null,
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          splashColor: AppColors.neonCyan.withValues(alpha: 0.18),
+          child: SizedBox(
+            height: 44,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, size: 17, color: fg),
+                const SizedBox(width: 8),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: fg,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -457,16 +477,27 @@ class _EmptyClipsState extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Container(
-            width: 80,
-            height: 80,
+            width: 88,
+            height: 88,
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(24),
-              gradient: AppColors.brandGradient,
-              boxShadow: const [
-                BoxShadow(color: AppColors.brandGlow, blurRadius: 24),
+              borderRadius: BorderRadius.circular(26),
+              gradient: AppColors.neonGradient,
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.25),
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.neon.withValues(alpha: 0.55),
+                  blurRadius: 34,
+                  spreadRadius: 2,
+                ),
+                BoxShadow(
+                  color: AppColors.neonCyan.withValues(alpha: 0.35),
+                  blurRadius: 16,
+                ),
               ],
             ),
-            child: const Icon(AppIcons.mic, size: 36, color: Colors.white),
+            child: const Icon(AppIcons.mic, size: 38, color: Colors.white),
           ),
           const SizedBox(height: 24),
           Text(

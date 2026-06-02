@@ -2,12 +2,20 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
+import 'particle_field.dart';
 
 /// Gradient backdrop with soft ambient orbs for premium screens.
 class PremiumScreenBackground extends StatelessWidget {
-  const PremiumScreenBackground({super.key, required this.child});
+  const PremiumScreenBackground({
+    super.key,
+    required this.child,
+    this.showParticles = true,
+  });
 
   final Widget child;
+
+  /// Subtle drifting particle layer for an immersive feel.
+  final bool showParticles;
 
   @override
   Widget build(BuildContext context) {
@@ -55,6 +63,7 @@ class PremiumScreenBackground extends StatelessWidget {
               ),
             ),
           ),
+        if (showParticles) const ParticleField(),
         child,
       ],
     );

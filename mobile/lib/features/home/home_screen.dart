@@ -13,6 +13,7 @@ import '../../domain/playback/playback_state.dart';
 import '../../l10n/app_localizations.dart';
 import '../../providers/playback_providers.dart';
 import '../../core/widgets/depth_surface.dart';
+import '../../core/widgets/particle_field.dart';
 import '../widgets/active_toggle.dart';
 import 'widgets/home_ambience.dart';
 
@@ -59,6 +60,7 @@ class HomeScreen extends ConsumerWidget {
         RepaintBoundary(
           child: HomeAmbience(isActive: isActive),
         ),
+        ParticleField(active: isActive),
         Stack(
           children: [
             DepthOrb(
@@ -389,19 +391,40 @@ class _ZzzButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: theme.glass,
-      shape: RoundedRectangleBorder(
+    return DecoratedBox(
+      decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: theme.glassBorder),
+        color: AppColors.neon.withValues(alpha: theme.isDark ? 0.16 : 0.12),
+        border: Border.all(color: AppColors.neon.withValues(alpha: 0.45)),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.neon.withValues(alpha: theme.isDark ? 0.4 : 0.28),
+            blurRadius: 16,
+          ),
+        ],
       ),
-      child: InkWell(
-        onTap: onPressed,
+      child: Material(
+        color: Colors.transparent,
         borderRadius: BorderRadius.circular(14),
-        child: SizedBox(
-          width: 48,
-          height: 48,
-          child: Icon(AppIcons.bedtime, size: 20, color: theme.muted),
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(14),
+          splashColor: AppColors.neonCyan.withValues(alpha: 0.18),
+          child: SizedBox(
+            width: 48,
+            height: 48,
+            child: Icon(
+              AppIcons.bedtime,
+              size: 21,
+              color: AppColors.neonBright,
+              shadows: [
+                Shadow(
+                  color: AppColors.neonCyan.withValues(alpha: 0.7),
+                  blurRadius: 10,
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

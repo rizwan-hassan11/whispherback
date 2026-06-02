@@ -201,22 +201,39 @@ class _RecordScreenState extends ConsumerState<RecordScreen> {
                         _TitleField(theme: theme, controller: _titleController),
                       ],
                       const SizedBox(height: 32),
-                      FilledButton.icon(
-                        style: FilledButton.styleFrom(
-                          backgroundColor:
-                              _recording ? AppColors.error : AppColors.brand,
-                          foregroundColor:
-                              _recording ? Colors.white : AppColors.ink,
-                          minimumSize: const Size(double.infinity, 52),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(AppRadii.sm),
-                          ),
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient:
+                              _recording ? null : AppColors.neonGradient,
+                          color: _recording ? AppColors.error : null,
+                          borderRadius: BorderRadius.circular(AppRadii.sm),
+                          boxShadow: [
+                            BoxShadow(
+                              color: (_recording
+                                      ? AppColors.error
+                                      : AppColors.neon)
+                                  .withValues(alpha: 0.45),
+                              blurRadius: 22,
+                              offset: const Offset(0, 6),
+                            ),
+                          ],
                         ),
-                        onPressed: _toggleRecord,
-                        icon: Icon(_recording ? AppIcons.stop : AppIcons.mic),
-                        label: Text(_recording
-                            ? l10n.stopAndSave
-                            : l10n.startRecording),
+                        child: FilledButton.icon(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: Colors.transparent,
+                            foregroundColor: Colors.white,
+                            shadowColor: Colors.transparent,
+                            minimumSize: const Size(double.infinity, 52),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(AppRadii.sm),
+                            ),
+                          ),
+                          onPressed: _toggleRecord,
+                          icon: Icon(_recording ? AppIcons.stop : AppIcons.mic),
+                          label: Text(_recording
+                              ? l10n.stopAndSave
+                              : l10n.startRecording),
+                        ),
                       ),
                       if (!_recording) ...[
                         const SizedBox(height: 12),
@@ -390,7 +407,11 @@ class _WaveformBars extends StatelessWidget {
                 duration: const Duration(milliseconds: 100),
                 height: h,
                 decoration: BoxDecoration(
-                  color: AppColors.brandLight,
+                  gradient: const LinearGradient(
+                    begin: Alignment.bottomCenter,
+                    end: Alignment.topCenter,
+                    colors: [AppColors.neon, AppColors.neonCyan],
+                  ),
                   borderRadius: BorderRadius.circular(3),
                 ),
               ),
@@ -427,17 +448,19 @@ class _MicHero extends StatelessWidget {
             height: 72,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(AppRadii.sm),
-              color: theme.isDark ? theme.glass : Colors.white,
-              border: Border.all(color: theme.glassBorder),
+              gradient: AppColors.neonGradient,
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.25),
+              ),
               boxShadow: [
                 BoxShadow(
-                  color: AppColors.brandGlow.withValues(alpha: 0.3),
-                  blurRadius: 24,
+                  color: AppColors.neon.withValues(alpha: 0.5),
+                  blurRadius: 26,
+                  spreadRadius: 1,
                 ),
               ],
             ),
-            child:
-                const Icon(AppIcons.mic, size: 32, color: AppColors.brandLight),
+            child: const Icon(AppIcons.mic, size: 32, color: Colors.white),
           ),
         ],
       ),

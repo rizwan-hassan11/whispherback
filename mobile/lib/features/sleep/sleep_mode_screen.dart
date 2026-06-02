@@ -618,10 +618,11 @@ class _ActiveSleepBanner extends StatelessWidget {
             height: 40,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(AppRadii.sm),
-              color: AppColors.brandLight.withValues(alpha: 0.18),
+              color: AppColors.neon.withValues(alpha: 0.16),
+              border: Border.all(color: AppColors.neon.withValues(alpha: 0.4)),
             ),
             child: const Icon(AppIcons.bedtime,
-                color: AppColors.brandLight, size: 20),
+                color: AppColors.neonBright, size: 20),
           ),
           const SizedBox(width: 12),
           Expanded(

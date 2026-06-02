@@ -92,20 +92,28 @@ class ClipLibraryTile extends StatelessWidget {
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(10),
                         color: isRecorded
-                            ? AppColors.brand.withValues(
-                                alpha: theme.isDark ? 0.12 : 0.08,
+                            ? AppColors.neon.withValues(
+                                alpha: theme.isDark ? 0.16 : 0.12,
                               )
-                            : AppColors.success.withValues(alpha: 0.1),
+                            : AppColors.success.withValues(alpha: 0.12),
                         border: Border.all(
                           color: isRecorded
-                              ? AppColors.brandLight.withValues(alpha: 0.2)
-                              : AppColors.success.withValues(alpha: 0.2),
+                              ? AppColors.neon.withValues(alpha: 0.4)
+                              : AppColors.success.withValues(alpha: 0.3),
                         ),
+                        boxShadow: isRecorded
+                            ? [
+                                BoxShadow(
+                                  color: AppColors.neon.withValues(alpha: 0.25),
+                                  blurRadius: 12,
+                                ),
+                              ]
+                            : null,
                       ),
                       child: Icon(
                         isRecorded ? AppIcons.mic : AppIcons.audioFile,
                         color: isRecorded
-                            ? AppColors.brandLight
+                            ? AppColors.neonBright
                             : AppColors.success,
                         size: 20,
                       ),

@@ -123,6 +123,45 @@ class PlaybackCoordinator {
     );
   }
 
+  /// Plays a single clip on demand (library preview). Unlike scheduled or
+  /// playlist playback this does not require the master toggle to be Active,
+  /// but it still respects Sleep and Prayer quiet windows.
+  Future<void> playClip(AudioClip clip) async {
+    if (!_isPlayablePath(clip.filePath)) return;
+
+    final sleep = await _sleep.getActive();
+    if (_sleep.isSleepActive(sleep)) {
+      _emit(_snapshot.copyWith(
+        state: AppPlaybackState.sleepPaused,
+        isPlaying: false,
+      ));
+      return;
+    }
+    final prayer = await _prayer.getCurrentPrayerWindow();
+    if (prayer != null) {
+      _emit(_snapshot.copyWith(
+        state: AppPlaybackState.prayerPaused,
+        isPlaying: false,
+      ));
+      return;
+    }
+
+    try {
+      await _audio.playFile(clip.filePath);
+    } catch (_) {
+      return;
+    }
+
+    // Fresh snapshot so playlistId is null → completion stops cleanly.
+    _emit(PlaybackSnapshot(
+      state: AppPlaybackState.manualPlaying,
+      playlistName: clip.title,
+      clipTitle: clip.title,
+      isPlaying: true,
+      modalVisible: true,
+    ));
+  }
+
   bool _isPlayablePath(String path) {
     return !path.startsWith('asset://') && !path.startsWith('demo://');
   }

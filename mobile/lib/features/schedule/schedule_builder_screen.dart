@@ -230,21 +230,42 @@ class _ScheduleBuilderScreenState extends ConsumerState<ScheduleBuilderScreen> {
                 return Expanded(
                   child: Padding(
                     padding: EdgeInsets.only(right: i < 6 ? 6 : 0),
-                    child: Material(
-                      color: on ? AppColors.brand : theme.glass,
-                      shape: const CircleBorder(),
-                      child: InkWell(
-                        customBorder: const CircleBorder(),
-                        onTap: () => _toggleDay(i),
-                        child: SizedBox(
-                          height: 40,
-                          child: Center(
-                            child: Text(
-                              labels[i],
-                              style: TextStyle(
-                                fontWeight: FontWeight.w700,
-                                fontSize: 12,
-                                color: on ? Colors.white : theme.muted,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: on ? AppColors.neonGradient : null,
+                        color: on ? null : theme.glass,
+                        border: Border.all(
+                          color: on
+                              ? Colors.white.withValues(alpha: 0.25)
+                              : theme.glassBorder,
+                        ),
+                        boxShadow: on
+                            ? [
+                                BoxShadow(
+                                  color:
+                                      AppColors.neon.withValues(alpha: 0.4),
+                                  blurRadius: 12,
+                                ),
+                              ]
+                            : null,
+                      ),
+                      child: Material(
+                        color: Colors.transparent,
+                        shape: const CircleBorder(),
+                        child: InkWell(
+                          customBorder: const CircleBorder(),
+                          onTap: () => _toggleDay(i),
+                          child: SizedBox(
+                            height: 40,
+                            child: Center(
+                              child: Text(
+                                labels[i],
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 12,
+                                  color: on ? Colors.white : theme.muted,
+                                ),
                               ),
                             ),
                           ),
@@ -284,12 +305,16 @@ class _ScheduleBuilderScreenState extends ConsumerState<ScheduleBuilderScreen> {
                 final label = l10n.intervalLabel(m);
                 return ChoiceChip(
                   label: Text(label),
+                  labelStyle: TextStyle(
+                    color: selected ? AppColors.neonBright : theme.foreground,
+                    fontWeight: FontWeight.w600,
+                  ),
                   selected: selected,
                   onSelected: (_) => setState(() => _intervalMinutes = m),
-                  selectedColor: AppColors.brandLight.withValues(alpha: 0.25),
+                  selectedColor: AppColors.neon.withValues(alpha: 0.18),
                   backgroundColor: theme.glass,
                   side: BorderSide(
-                    color: selected ? AppColors.brandLight : theme.glassBorder,
+                    color: selected ? AppColors.neon : theme.glassBorder,
                   ),
                 );
               }).toList(),
@@ -322,15 +347,32 @@ class _ScheduleBuilderScreenState extends ConsumerState<ScheduleBuilderScreen> {
               onChanged: (v) => setState(() => _alarm = v),
             ),
             const SizedBox(height: 28),
-            FilledButton(
-              onPressed: _save,
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16)),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: AppColors.neonGradient,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.neon.withValues(alpha: 0.45),
+                    blurRadius: 22,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
               ),
-              child: Text(l10n.saveSchedule),
+              child: FilledButton(
+                onPressed: _save,
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.transparent,
+                  foregroundColor: Colors.white,
+                  shadowColor: Colors.transparent,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16)),
+                ),
+                child: Text(l10n.saveSchedule),
+              ),
             ),
+            SizedBox(height: MediaQuery.paddingOf(context).bottom + 8),
           ],
         ),
       ),
@@ -390,7 +432,7 @@ class _TimeTile extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           child: Row(
             children: [
-              Icon(icon, color: AppColors.gold, size: 22),
+              Icon(icon, color: AppColors.neonBright, size: 22),
               const SizedBox(width: 14),
               Expanded(
                 child: Column(
@@ -447,7 +489,7 @@ class _SwitchTile extends StatelessWidget {
           side: BorderSide(color: theme.glassBorder),
         ),
         child: SwitchListTile(
-          secondary: Icon(icon, color: AppColors.brandLight),
+          secondary: Icon(icon, color: AppColors.neonBright),
           title: Text(title,
               style: TextStyle(
                   color: theme.foreground, fontWeight: FontWeight.w600)),
@@ -455,7 +497,8 @@ class _SwitchTile extends StatelessWidget {
               style: TextStyle(fontSize: 12, color: theme.muted)),
           value: value,
           onChanged: onChanged,
-          activeThumbColor: AppColors.brandLight,
+          activeThumbColor: Colors.white,
+          activeTrackColor: AppColors.neon,
         ),
       ),
     );

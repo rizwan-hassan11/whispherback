@@ -33,27 +33,29 @@ class GlassNavBar extends StatelessWidget {
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 56,
-            child: IgnorePointer(
-              child: Container(
-                height: 40,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.bottomCenter,
-                    end: Alignment.topCenter,
-                    colors: [
-                      (isDark ? AppColors.deep : AppColors.lightBg)
-                          .withValues(alpha: isDark ? 0.72 : 0.85),
-                      Colors.transparent,
-                    ],
+          // Soft scrim fade above the bar — only in dark mode. In light mode
+          // it read as a muddy grey band, so we omit it for a clean look.
+          if (isDark)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 56,
+              child: IgnorePointer(
+                child: Container(
+                  height: 40,
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.bottomCenter,
+                      end: Alignment.topCenter,
+                      colors: [
+                        Color(0xB8020611),
+                        Colors.transparent,
+                      ],
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
           ClipRRect(
             borderRadius: BorderRadius.circular(28),
             child: BackdropFilter(
@@ -79,11 +81,19 @@ class GlassNavBar extends StatelessWidget {
                         ? Colors.white.withValues(alpha: 0.18)
                         : AppColors.ink.withValues(alpha: 0.14),
                   ),
-                  boxShadow: AppDepth.shadows(
-                    isDark: isDark,
-                    elevated: true,
-                    intensity: 1.1,
-                  ),
+                  boxShadow: isDark
+                      ? AppDepth.shadows(
+                          isDark: true,
+                          elevated: true,
+                          intensity: 1.1,
+                        )
+                      : [
+                          BoxShadow(
+                            color: AppColors.ink.withValues(alpha: 0.07),
+                            blurRadius: 18,
+                            offset: const Offset(0, 6),
+                          ),
+                        ],
                 ),
                 child: Padding(
                   padding: const EdgeInsets.all(5),

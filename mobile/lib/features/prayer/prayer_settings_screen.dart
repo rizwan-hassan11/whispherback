@@ -276,17 +276,17 @@ class _CompassHero extends StatelessWidget {
             height: 72,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(AppRadii.sm),
-              color: theme.isDark ? theme.glass : Colors.white,
-              border: Border.all(color: theme.glassBorder),
+              gradient: AppColors.neonGradient,
+              border: Border.all(color: Colors.white.withValues(alpha: 0.25)),
               boxShadow: [
                 BoxShadow(
-                  color: AppColors.brandGlow.withValues(alpha: 0.3),
-                  blurRadius: 24,
+                  color: AppColors.neon.withValues(alpha: 0.5),
+                  blurRadius: 26,
+                  spreadRadius: 1,
                 ),
               ],
             ),
-            child: const Icon(AppIcons.prayer,
-                size: 32, color: AppColors.brandLight),
+            child: const Icon(AppIcons.prayer, size: 32, color: Colors.white),
           ),
         ],
       ),

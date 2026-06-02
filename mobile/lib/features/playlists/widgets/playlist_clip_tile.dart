@@ -55,16 +55,14 @@ class PlaylistClipTile extends StatelessWidget {
                   height: 44,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(13),
-                    gradient: LinearGradient(
-                      colors: [
-                        AppColors.brand.withValues(alpha: 0.4),
-                        AppColors.brandLight.withValues(alpha: 0.2),
-                      ],
+                    color: AppColors.neon.withValues(alpha: 0.16),
+                    border: Border.all(
+                      color: AppColors.neon.withValues(alpha: 0.4),
                     ),
                   ),
                   child: Icon(
                     isRecorded ? AppIcons.mic : AppIcons.audioFile,
-                    color: AppColors.brandLight,
+                    color: AppColors.neonBright,
                     size: 20,
                   ),
                 ),
