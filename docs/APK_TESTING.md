@@ -8,6 +8,16 @@ Use this to install the app on a real phone and test **record → playlist → s
 
 **One-time:** Android SDK must be set up (`flutter doctor` shows ✓ Android toolchain).
 
+### Prerequisites (Windows)
+
+| Requirement | Check | Fix |
+|-------------|-------|-----|
+| Flutter | `flutter doctor` | [INSTALLATION.md](INSTALLATION.md) |
+| JDK 17 | `java -version` | `winget install Microsoft.OpenJDK.17` |
+| Android NDK | folder under `%LOCALAPPDATA%\Android\Sdk\ndk\` must contain `source.properties` | see **NDK troubleshooting** below |
+
+The build script auto-finds JDK 17 if `JAVA_HOME` is not set.
+
 From repo root:
 
 ```powershell
@@ -19,6 +29,30 @@ Output file:
 ```text
 whispherback\dist\whisperback-test.apk
 ```
+
+### NDK troubleshooting (common on Windows)
+
+If the build fails with **`did not have a source.properties file`**, the NDK download was interrupted (not an app bug):
+
+```powershell
+# Remove broken partial install
+Remove-Item "$env:LOCALAPPDATA\Android\Sdk\ndk\*" -Recurse -Force -ErrorAction SilentlyContinue
+
+# Option A — let Gradle re-download (run build, wait 10–20 min on stable Wi-Fi)
+.\scripts\build_apk.ps1
+
+# Option B — manual NDK install (~714 MB)
+.\scripts\install_ndk.ps1
+.\scripts\build_apk.ps1
+```
+
+### Option C — GitHub Actions (no local NDK)
+
+After pushing to `main`, GitHub builds the APK in the cloud:
+
+1. Open [Actions → Build Android APK](https://github.com/MaiMam01/whispherback/actions/workflows/build_apk.yml)
+2. Open the latest green run → **Artifacts** → download `whisperback-debug-apk`
+3. Rename `app-debug.apk` if needed, copy to your phone, install
 
 Manual build:
 
@@ -36,6 +70,8 @@ mobile\build\app\outputs\flutter-apk\app-debug.apk
 ---
 
 ## 2. Install on your phone
+
+**If the screen looks blank (only bottom bar visible):** uninstall the old APK, install the latest build from GitHub Actions (fix in `main` after June 2026). On first launch, use **Wi‑Fi** so display fonts can download (~2 MB).
 
 ### Option A — Copy APK to phone (easiest)
 

@@ -15,9 +15,10 @@ class HomeAmbience extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = whisperTheme(context).isDark;
     return IgnorePointer(
-      child: CustomPaint(
-        painter: _HomeAmbiencePainter(isActive: isActive, isDark: isDark),
-        size: Size.infinite,
+      child: SizedBox.expand(
+        child: CustomPaint(
+          painter: _HomeAmbiencePainter(isActive: isActive, isDark: isDark),
+        ),
       ),
     );
   }

@@ -160,9 +160,13 @@
   }
   .orb-3d {
     position: absolute; border-radius: 50%; pointer-events: none;
-    background: radial-gradient(circle at 32% 28%, rgba(255,255,255,0.35), rgba(255,255,255,0.08) 38%, transparent 68%);
-    box-shadow: 0 16px 40px rgba(0,0,0,0.22);
+    background: radial-gradient(circle at 32% 28%, rgba(255,255,255,0.6), rgba(255,255,255,0.2) 42%, transparent 70%);
+    box-shadow: 0 8px 28px rgba(255,255,255,0.12);
     animation: orbFloat 7s ease-in-out infinite;
+  }
+  [data-theme="light"] .orb-3d {
+    background: radial-gradient(circle at 32% 28%, rgba(6,19,49,0.16), rgba(6,19,49,0.05) 42%, transparent 70%);
+    box-shadow: none;
   }
   .home-bg .orb-3d-1 { width: 88px; height: 88px; top: 10%; right: 6%; animation-delay: 0s; }
   .home-bg .orb-3d-2 { width: 64px; height: 64px; top: 22%; left: 4%; animation-delay: -2.5s; opacity: 0.85; }
@@ -433,7 +437,7 @@
   .pm-dismiss [data-lucide] svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 1.75; }
   .theme-toggle [data-lucide] svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.75; vertical-align: -3px; margin-right: 4px; }
   .nav-item [data-lucide] svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 1.75; transition: stroke 0.22s, stroke-width 0.22s, transform 0.22s; }
-  .nav-item.on [data-lucide] svg { stroke: var(--btn-fg); stroke-width: 2; transform: scale(1.06); }
+  .nav-item.on [data-lucide] svg { stroke: #fff; stroke-width: 2; transform: scale(1.08); filter: drop-shadow(0 0 6px rgba(255,255,255,0.55)); }
   .sched-dot [data-lucide] svg { width: 12px; height: 12px; stroke: var(--deep); fill: none; stroke-width: 2; }
 
   .scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding: 0 20px 120px; scrollbar-width: none; position: relative; z-index: 1; touch-action: pan-y; }
@@ -601,23 +605,42 @@
   .stat {
     background: linear-gradient(145deg, rgba(255,255,255,0.09), rgba(255,255,255,0.04));
     border: 1px solid rgba(255,255,255,0.16);
-    border-radius: var(--radius); padding: 14px 8px 12px;
+    border-radius: var(--radius); padding: 14px 10px 13px;
     backdrop-filter: blur(14px);
     box-shadow: var(--elev-sm);
+    cursor: pointer;
+    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
   }
-  .stat-icon.p { background: rgba(255,255,255,0.14); color: var(--soft); }
-  .stat-icon.s { background: var(--accent-soft); color: var(--soft); }
-  .stat-icon.c { background: rgba(74,222,170,0.12); color: var(--success); }
+  .stat:hover { transform: translateY(-2px); border-color: rgba(255,255,255,0.26); box-shadow: var(--elev-md, var(--elev-sm)); }
+  .stat:active { transform: translateY(0) scale(0.97); }
+  [data-theme="light"] .stat:hover { border-color: rgba(6,19,49,0.18); }
+  .stat-icon.p {
+    background: linear-gradient(135deg, rgba(77,163,255,0.30), rgba(77,163,255,0.12));
+    border: 1px solid rgba(77,163,255,0.42);
+    color: var(--neon-bright);
+    box-shadow: 0 4px 14px rgba(46,139,255,0.30);
+  }
+  .stat-icon.s {
+    background: linear-gradient(135deg, rgba(230,179,77,0.28), rgba(230,179,77,0.10));
+    border: 1px solid rgba(230,179,77,0.45);
+    color: #E6B34D;
+    box-shadow: 0 4px 14px rgba(230,179,77,0.24);
+  }
+  .stat-icon.c {
+    background: linear-gradient(135deg, rgba(74,222,170,0.28), rgba(74,222,170,0.10));
+    border: 1px solid rgba(74,222,170,0.45);
+    color: var(--success);
+    box-shadow: 0 4px 14px rgba(74,222,170,0.26);
+  }
   .stat-icon {
-    width: 34px; height: 34px; border-radius: 10px; margin: 0 auto 8px;
+    width: 38px; height: 38px; border-radius: 12px; margin: 0 auto 11px;
     display: flex; align-items: center; justify-content: center;
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
   }
   .stat-icon svg, .stat-icon [data-lucide] svg {
-    width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 2;
+    width: 19px; height: 19px; stroke: currentColor; fill: none; stroke-width: 2;
   }
-  .stat .val { font-size: 20px; font-weight: 800; color: var(--soft); }
-  .stat .lbl { font-size: 10px; color: var(--muted); margin-top: 2px; letter-spacing: 0.2px; }
+  .stat .val { font-size: 22px; font-weight: 800; color: var(--soft); letter-spacing: -0.5px; line-height: 1; }
+  .stat .lbl { font-size: 11px; font-weight: 500; color: var(--muted); margin-top: 4px; letter-spacing: 0.2px; }
   .next-whisper {
     width: 100%; margin-top: 12px; padding: 14px; border-radius: var(--radius);
     background: linear-gradient(145deg, rgba(255,255,255,0.09), rgba(255,255,255,0.04));
@@ -1460,8 +1483,12 @@
   .nav-indicator {
     position: absolute; top: 5px; bottom: 5px; left: 0;
     width: 0; border-radius: 20px; z-index: 0; pointer-events: none;
-    background: linear-gradient(180deg, var(--brand) 0%, rgba(241,245,249,0.92) 100%);
-    box-shadow: 0 4px 18px var(--brand-glow), inset 0 1px 0 rgba(255,255,255,0.45);
+    background: linear-gradient(135deg, var(--neon-cyan) 0%, var(--neon) 55%, #1F5FD6 100%);
+    box-shadow:
+      0 5px 22px var(--neon-glow),
+      0 0 12px rgba(56,225,255,0.30),
+      inset 0 0 0 1px rgba(255,255,255,0.28),
+      inset 0 1px 0 rgba(255,255,255,0.45);
     transition:
       transform 0.34s cubic-bezier(0.34, 1.28, 0.64, 1),
       width 0.34s cubic-bezier(0.34, 1.28, 0.64, 1);
@@ -1488,14 +1515,17 @@
     stroke-linecap: round; stroke-linejoin: round;
     transition: stroke 0.22s, stroke-width 0.22s, transform 0.22s;
   }
-  .nav-item.on { color: var(--btn-fg); }
-  .nav-item.on svg { stroke: var(--btn-fg); stroke-width: 2; transform: scale(1.06); }
+  .nav-item.on { color: #fff; }
+  .nav-item.on svg {
+    stroke: #fff; stroke-width: 2; transform: scale(1.08);
+    filter: drop-shadow(0 0 6px rgba(255,255,255,0.55));
+  }
   .nav-label {
     font-size: 10px; font-weight: 500; letter-spacing: 0.2px;
     line-height: 1; color: var(--muted); transition: color 0.22s, opacity 0.22s, font-weight 0.22s;
     max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .nav-item.on .nav-label { color: var(--btn-fg); font-weight: 700; }
+  .nav-item.on .nav-label { color: #fff; font-weight: 700; }
   .bottom-nav:not(.show-labels) .nav-label {
     opacity: 0; max-height: 0; overflow: hidden; margin: 0;
   }
@@ -2289,6 +2319,14 @@
   .settings-row:last-child { border-bottom: none; }
   .settings-row:hover { background: rgba(255,255,255,0.04); }
   [data-theme="light"] .settings-row:hover { background: rgba(6,19,49,0.03); }
+  .settings-row .chevron { transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease; }
+  .settings-row:hover .chevron {
+    border-color: rgba(46,139,255,0.45);
+    background: rgba(46,139,255,0.12);
+    transform: translateX(2px);
+  }
+  .settings-row:hover .chevron svg,
+  .settings-row:hover .chevron [data-lucide] svg { stroke: var(--neon-bright); }
   .settings-row.no-hover { cursor: default; }
   .settings-row.no-hover:hover { background: transparent; }
   .settings-row .left {
@@ -2296,12 +2334,14 @@
     flex: 1; min-width: 0;
   }
   .settings-row .left .ico-sm {
-    width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0;
-    background: rgba(255,255,255,0.12);
+    width: 36px; height: 36px; border-radius: 11px; flex-shrink: 0;
+    background: linear-gradient(135deg, rgba(255,255,255,0.16), rgba(255,255,255,0.05));
+    border: 1px solid rgba(255,255,255,0.14);
     display: flex; align-items: center; justify-content: center;
   }
   [data-theme="light"] .settings-row .left .ico-sm {
-    background: rgba(6,19,49,0.06);
+    background: linear-gradient(135deg, rgba(6,19,49,0.08), rgba(6,19,49,0.03));
+    border-color: rgba(6,19,49,0.08);
   }
   .settings-row .left .ico-sm svg,
   .settings-row .left .ico-sm [data-lucide] svg {
@@ -2924,8 +2964,12 @@
       inset 0 2px 12px rgba(56,225,255,0.22);
   }
   [data-theme="light"] .nav-indicator {
-    background: linear-gradient(180deg, var(--brand) 0%, #0a2048 100%);
-    box-shadow: 0 4px 14px rgba(6,19,49,0.16);
+    background: linear-gradient(135deg, var(--neon-cyan) 0%, var(--neon) 55%, #1F5FD6 100%);
+    box-shadow:
+      0 5px 18px rgba(46,139,255,0.42),
+      0 0 10px rgba(56,225,255,0.25),
+      inset 0 0 0 1px rgba(255,255,255,0.35),
+      inset 0 1px 0 rgba(255,255,255,0.5);
   }
   [data-theme="light"] .toast {
     background: #fff;
@@ -3030,14 +3074,14 @@
     width: auto !important;
     height: 52px;
     border-radius: 14px;
-    background: linear-gradient(90deg, var(--brand) 0%, rgba(241,245,249,0.92) 100%);
+    background: linear-gradient(120deg, var(--neon-cyan) 0%, var(--neon) 55%, #1F5FD6 100%);
     transform: translateY(0);
     transition:
       transform 0.34s cubic-bezier(0.34, 1.28, 0.64, 1),
       height 0.34s cubic-bezier(0.34, 1.28, 0.64, 1);
   }
   [data-theme="light"] .phone[data-layout="wide"] .nav-indicator {
-    background: linear-gradient(90deg, var(--brand) 0%, #0a2048 100%);
+    background: linear-gradient(120deg, var(--neon-cyan) 0%, var(--neon) 55%, #1F5FD6 100%);
   }
   .phone[data-layout="wide"] .bottom-nav {
     backdrop-filter: blur(28px) saturate(1.25);
@@ -3378,15 +3422,15 @@
             <span id="statusText" data-i18n="tapPowerToBegin">Tap power to begin</span>
           </div>
           <div class="quick-stats" id="quickStats">
-            <div class="stat depth-3d depth-3d-tilt">
+            <div class="stat depth-3d depth-3d-tilt" role="button" tabindex="0" onclick="show('playlists')">
               <div class="stat-icon p"><i data-lucide="list-music"></i></div>
               <div class="val">2</div><div class="lbl" data-i18n="statPlaylists">Playlists</div>
             </div>
-            <div class="stat depth-3d depth-3d-tilt">
+            <div class="stat depth-3d depth-3d-tilt" role="button" tabindex="0" onclick="show('schedule')">
               <div class="stat-icon s"><i data-lucide="calendar-clock"></i></div>
               <div class="val">1</div><div class="lbl" data-i18n="statScheduled">Scheduled</div>
             </div>
-            <div class="stat depth-3d depth-3d-tilt">
+            <div class="stat depth-3d depth-3d-tilt" role="button" tabindex="0" onclick="show('clips')">
               <div class="stat-icon c"><i data-lucide="mic"></i></div>
               <div class="val">3</div><div class="lbl" data-i18n="statClips">Clips</div>
             </div>

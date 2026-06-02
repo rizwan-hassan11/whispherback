@@ -56,7 +56,9 @@ class HomeScreen extends ConsumerWidget {
             ),
           ),
         ),
-        HomeAmbience(isActive: isActive),
+        RepaintBoundary(
+          child: HomeAmbience(isActive: isActive),
+        ),
         Stack(
           children: [
             DepthOrb(

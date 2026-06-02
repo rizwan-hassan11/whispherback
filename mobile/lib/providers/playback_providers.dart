@@ -48,21 +48,26 @@ final isAppActiveProvider = FutureProvider<bool>((ref) {
 });
 
 final playlistsProvider = FutureProvider((ref) {
+  ref.keepAlive();
   return ref.watch(playlistRepositoryProvider).getAll();
 });
 
 final clipsProvider = FutureProvider((ref) {
+  ref.keepAlive();
   return ref.watch(clipRepositoryProvider).getAll();
 });
 
 final schedulesProvider = FutureProvider((ref) {
+  ref.keepAlive();
   return ref.watch(scheduleRepositoryProvider).getAll();
 });
 
 final activeSleepProvider = FutureProvider((ref) {
+  ref.keepAlive();
   return ref.watch(sleepRepositoryProvider).getActive();
 });
 
 final prayerSettingsProvider = FutureProvider((ref) {
+  ref.keepAlive();
   return ref.watch(prayerRepositoryProvider).getSettings();
 });

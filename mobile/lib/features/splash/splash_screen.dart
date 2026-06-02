@@ -2,9 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
-
+import '../../core/bootstrap/app_bootstrap.dart';
 import '../../core/theme/app_colors.dart';
-import '../../data/database/seed_service.dart';
 import '../../l10n/app_localizations.dart';
 
 class SplashScreen extends ConsumerStatefulWidget {
@@ -15,15 +14,21 @@ class SplashScreen extends ConsumerStatefulWidget {
 }
 
 class _SplashScreenState extends ConsumerState<SplashScreen> {
+  static const _minDisplay = Duration(milliseconds: 400);
+
   @override
   void initState() {
     super.initState();
-    _bootstrap();
+    _goHomeWhenReady();
   }
 
-  Future<void> _bootstrap() async {
-    await SeedService.seedIfEmpty();
-    await Future<void>.delayed(const Duration(milliseconds: 1500));
+  Future<void> _goHomeWhenReady() async {
+    final started = DateTime.now();
+    await AppBootstrap.ensureReady();
+    final elapsed = DateTime.now().difference(started);
+    if (elapsed < _minDisplay) {
+      await Future<void>.delayed(_minDisplay - elapsed);
+    }
     if (!mounted) return;
     context.go('/home');
   }

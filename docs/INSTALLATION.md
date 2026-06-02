@@ -341,6 +341,7 @@ Copy and tick off:
 
 | Doc | Content |
 |-----|---------|
+| [**LOCAL_DEVELOPMENT.md**](LOCAL_DEVELOPMENT.md) | **Hot reload on phone, APK size, daily workflow** |
 | [MOBILE_WALKTHROUGH.md](MOBILE_WALKTHROUGH.md) | Architecture, screens, learning path |
 | [PROJECT_AUDIT.md](PROJECT_AUDIT.md) | Gaps and sprint plan |
 | [mobile/README.md](../mobile/README.md) | Short commands |

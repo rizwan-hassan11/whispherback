@@ -49,7 +49,7 @@ Write-Host "Next steps:" -ForegroundColor Cyan
 Write-Host "  1. flutter doctor -v   (install Android Studio if Android toolchain shows X)"
 Write-Host "  2. cd mobile"
 Write-Host "  3. flutter run -d windows          (no Android SDK required)"
-Write-Host "     flutter run -d chrome           (web preview)"
+Write-Host "     .\scripts\run_android.ps1       (phone USB + hot reload — see docs/LOCAL_DEVELOPMENT.md)"
 Write-Host "     flutter run -d <device>       (phone/emulator after Android Studio)"
 Write-Host ""
 Write-Host "Full guide: docs/INSTALLATION.md"

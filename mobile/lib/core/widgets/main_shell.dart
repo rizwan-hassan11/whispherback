@@ -77,21 +77,35 @@ class MainShell extends ConsumerWidget {
     final theme = whisperTheme(context);
     final r = context.responsive;
 
-    final body = Padding(
-      padding: r.hingePadding,
-      child: Align(
-        alignment: Alignment.topCenter,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: r.contentMaxWidth),
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              child,
-              const PlaybackModal(),
-            ],
+    final body = LayoutBuilder(
+      builder: (context, constraints) {
+        return Padding(
+          padding: r.hingePadding,
+          child: SizedBox(
+            height: constraints.maxHeight,
+            width: constraints.maxWidth,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Positioned.fill(
+                  child: Align(
+                    alignment: Alignment.topCenter,
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: r.contentMaxWidth,
+                        minHeight: constraints.maxHeight,
+                        maxHeight: constraints.maxHeight,
+                      ),
+                      child: child,
+                    ),
+                  ),
+                ),
+                const PlaybackModal(),
+              ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
 
     if (r.useSideNavigation) {

@@ -28,6 +28,14 @@ whispherback/
 
 ## Quick start — mobile
 
+### Develop on phone (hot reload — no APK each time)
+
+```powershell
+.\scripts\run_android.ps1
+```
+
+Edit code → save → press **`r`** in the terminal. See [docs/LOCAL_DEVELOPMENT.md](docs/LOCAL_DEVELOPMENT.md).
+
 ### Prerequisites
 
 - Flutter SDK 3.24+ ([install guide](https://docs.flutter.dev/get-started/install))
@@ -88,6 +96,7 @@ See [api/README.md](api/README.md). Endpoints match [docs/api-contracts.md](docs
 
 ## Documentation
 
+- [**Local development (hot reload, APK size)**](docs/LOCAL_DEVELOPMENT.md)
 - [**Installation (new PC / laptop)**](docs/INSTALLATION.md) — Flutter, Android Studio, commands, checklist
 - [**Mobile walkthrough**](docs/MOBILE_WALKTHROUGH.md) — Architecture, design → code, learning path
 - [Project audit (May 2026)](docs/PROJECT_AUDIT.md)
@@ -95,6 +104,7 @@ See [api/README.md](api/README.md). Endpoints match [docs/api-contracts.md](docs
 - [Screen specifications](design/screen-specs.md)
 - [Design tokens](design/tokens.json)
 - [API contracts (Phase 2)](docs/api-contracts.md)
+- [**Release & client workflow**](docs/RELEASE_WORKFLOW.md)
 - [**API server (run locally)**](api/README.md)
 - [QA checklist](docs/qa-checklist.md)
 
