@@ -12,6 +12,7 @@ import '../../l10n/app_localizations.dart';
 import '../../providers/playback_providers.dart';
 import '../../providers/repository_providers.dart';
 import '../../providers/settings_provider.dart';
+import '../../services/notifications/notification_sync.dart';
 
 class ScheduleBuilderScreen extends ConsumerStatefulWidget {
   const ScheduleBuilderScreen({super.key, required this.playlistId});
@@ -119,6 +120,10 @@ class _ScheduleBuilderScreenState extends ConsumerState<ScheduleBuilderScreen> {
           );
       ref.invalidate(schedulesProvider);
       ref.invalidate(playlistsProvider);
+      await syncWhisperNotifications(
+        appState: ref.read(appStateRepositoryProvider),
+        schedules: ref.read(scheduleRepositoryProvider),
+      );
       if (mounted) {
         final l10n = context.l10n;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -150,6 +155,10 @@ class _ScheduleBuilderScreenState extends ConsumerState<ScheduleBuilderScreen> {
     await ref.read(scheduleRepositoryProvider).remove(widget.playlistId);
     ref.invalidate(schedulesProvider);
     ref.invalidate(playlistsProvider);
+    await syncWhisperNotifications(
+      appState: ref.read(appStateRepositoryProvider),
+      schedules: ref.read(scheduleRepositoryProvider),
+    );
     if (mounted) context.pop();
   }
 

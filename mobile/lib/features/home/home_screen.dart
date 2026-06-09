@@ -13,7 +13,8 @@ import '../../domain/playback/playback_state.dart';
 import '../../l10n/app_localizations.dart';
 import '../../providers/playback_providers.dart';
 import '../../core/widgets/depth_surface.dart';
-import '../../core/widgets/particle_field.dart';
+import '../../providers/repository_providers.dart';
+import '../../services/notifications/notification_sync.dart';
 import '../widgets/active_toggle.dart';
 import 'widgets/home_ambience.dart';
 
@@ -60,7 +61,6 @@ class HomeScreen extends ConsumerWidget {
         RepaintBoundary(
           child: HomeAmbience(isActive: isActive),
         ),
-        ParticleField(active: isActive),
         Stack(
           children: [
             DepthOrb(
@@ -112,9 +112,17 @@ class HomeScreen extends ConsumerWidget {
                             SizedBox(height: r.isFlipCover ? 10 : 16),
                             ActiveToggle(
                               isActive: isActive,
-                              onToggle: () => ref
-                                  .read(playbackCoordinatorProvider)
-                                  .toggleActive(),
+                              onToggle: () async {
+                                await ref
+                                    .read(playbackCoordinatorProvider)
+                                    .toggleActive();
+                                await syncWhisperNotifications(
+                                  appState:
+                                      ref.read(appStateRepositoryProvider),
+                                  schedules:
+                                      ref.read(scheduleRepositoryProvider),
+                                );
+                              },
                             ),
                             const SizedBox(height: 10),
                             const DepthPedestal(),

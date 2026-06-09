@@ -12,8 +12,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Version numbers 
 - APK build scripts and GitHub Actions workflow
 - Installation and APK testing documentation
 
+### Added (background / notifications)
+- Scheduled **alarm notifications** that fire even when the app is closed or
+  killed (Android via exact alarms; iOS time-sensitive). Re-armed on reboot.
+- Persistent **"WhisperBack is active"** notification while the master toggle
+  is ON, showing how many schedules are armed.
+- Notifications auto-sync on toggle ON/OFF, schedule save/remove, and cold
+  start (so state is restored after a reboot/OS kill).
+- Android manifest + permissions (exact alarm, boot, wake) and timezone setup.
+
+### Changed
+- Faster startup: app no longer blocks the first frame on a network font
+  fetch; fonts load lazily with a system fallback
+- Removed the heavy particle/constellation background animation (per-frame
+  blur + O(n^2) work) that caused jank and slow loads
+- Power toggle isolated in a RepaintBoundary so its glow no longer repaints
+  the whole home screen
+
 ### Added
-- Interactive drifting particle background (home + premium screens)
+- Playlist limit enforcement (20 Basic; 50 reserved for Premium) with a
+  clear localized message
+- Schedule engine now fires immediately on app open inside an active window
+  and reliably every interval thereafter (last-fired based, no missed ticks)
 
 ### Fixed
 - RTL (Arabic/Urdu): bottom-nav highlight now mirrors with the items so taps

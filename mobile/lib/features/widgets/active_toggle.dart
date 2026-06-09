@@ -90,15 +90,16 @@ class _ActiveToggleState extends State<ActiveToggle>
     final discSize = heroSize * 0.74;
     final iconSize = heroSize * 0.26;
 
-    return GestureDetector(
-      onTap: _handleTap,
-      onTapDown: (_) => setState(() => _pressed = true),
-      onTapUp: (_) => setState(() => _pressed = false),
-      onTapCancel: () => setState(() => _pressed = false),
-      child: SizedBox(
-        width: heroSize,
-        height: heroSize,
-        child: AnimatedBuilder(
+    return RepaintBoundary(
+      child: GestureDetector(
+        onTap: _handleTap,
+        onTapDown: (_) => setState(() => _pressed = true),
+        onTapUp: (_) => setState(() => _pressed = false),
+        onTapCancel: () => setState(() => _pressed = false),
+        child: SizedBox(
+          width: heroSize,
+          height: heroSize,
+          child: AnimatedBuilder(
           animation: Listenable.merge([_power, _charge, _breathe]),
           builder: (context, child) {
             final t = _ignite.value.clamp(0.0, 1.0);
@@ -266,6 +267,7 @@ class _ActiveToggleState extends State<ActiveToggle>
               ],
             );
           },
+          ),
         ),
       ),
     );

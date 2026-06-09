@@ -1349,6 +1349,14 @@ class AppLocalizations {
       'Nhập tên danh sách phát');
   String createdPlaylist(String name) => _s('Created $name', '$name بنائی',
       'تم إنشاء $name', '$name gemaakt', '$name créée', 'Đã tạo $name');
+  String playlistLimitReached(int limit) => _s(
+        'Playlist limit reached ($limit). Upgrade to Premium for more.',
+        'پلے لسٹ کی حد ($limit) پوری ہو گئی۔ مزید کے لیے پریمیم حاصل کریں۔',
+        'تم بلوغ حد القوائم ($limit). الترقية إلى بريميوم للمزيد.',
+        'Limiet bereikt ($limit). Upgrade naar Premium voor meer.',
+        'Limite atteinte ($limit). Passez à Premium pour plus.',
+        'Đã đạt giới hạn ($limit). Nâng cấp Premium để thêm.',
+      );
   String get ideaMorningWhispers => _s(
       'Morning Whispers',
       'Morning Whispers',

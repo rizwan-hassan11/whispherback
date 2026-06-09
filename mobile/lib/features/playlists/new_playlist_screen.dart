@@ -18,6 +18,7 @@ import '../../l10n/app_localizations.dart';
 
 import '../../providers/playback_providers.dart';
 
+import '../../data/repositories/playlist_repository.dart';
 import '../../providers/repository_providers.dart';
 
 class NewPlaylistScreen extends ConsumerStatefulWidget {
@@ -71,6 +72,12 @@ class _NewPlaylistScreenState extends ConsumerState<NewPlaylistScreen> {
         );
 
         context.go('/playlists/${playlist.id}');
+      }
+    } on PlaylistLimitException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l10n.playlistLimitReached(e.limit))),
+        );
       }
     } finally {
       if (mounted) setState(() => _creating = false);

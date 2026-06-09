@@ -1,9 +1,11 @@
-import 'package:google_fonts/google_fonts.dart';
-
 import '../../data/database/database_helper.dart';
 import '../../data/database/seed_service.dart';
 
-/// One-time startup work: SQLite warm-open, demo seed, font cache.
+/// One-time startup work: SQLite warm-open + demo seed.
+///
+/// Intentionally local-only (no network) so startup stays instant. Fonts are
+/// fetched lazily by google_fonts with a system fallback, so we never block
+/// the first frame on them.
 abstract final class AppBootstrap {
   static Future<void>? _ready;
 
@@ -14,21 +16,7 @@ abstract final class AppBootstrap {
   }
 
   static Future<void> _run() async {
-    await Future.wait([
-      DatabaseHelper.instance.database,
-      SeedService.seedIfEmpty(),
-      _preloadFonts(),
-    ]);
-  }
-
-  static Future<void> _preloadFonts() async {
-    try {
-      await GoogleFonts.pendingFonts([
-        GoogleFonts.fraunces(),
-        GoogleFonts.dmSans(),
-      ]);
-    } catch (_) {
-      // Offline: theme falls back to system sans-serif.
-    }
+    await DatabaseHelper.instance.database;
+    await SeedService.seedIfEmpty();
   }
 }

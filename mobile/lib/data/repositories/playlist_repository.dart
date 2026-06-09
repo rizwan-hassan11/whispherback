@@ -5,11 +5,28 @@ import '../../domain/entities/audio_clip.dart';
 import '../../domain/entities/playlist.dart';
 import '../database/database_helper.dart';
 
+/// Thrown when creating a playlist would exceed the tier limit.
+class PlaylistLimitException implements Exception {
+  const PlaylistLimitException(this.limit);
+  final int limit;
+}
+
 class PlaylistRepository {
   PlaylistRepository(this._db);
 
   final DatabaseHelper _db;
   final _uuid = const Uuid();
+
+  /// Tier caps (Phase 1 is offline → Basic). Premium unlocks 50 in Phase 2.
+  static const int basicLimit = 20;
+  static const int premiumLimit = 50;
+
+  Future<int> count() async {
+    final db = await _db.database;
+    final result =
+        await db.rawQuery('SELECT COUNT(*) AS c FROM playlists');
+    return Sqflite.firstIntValue(result) ?? 0;
+  }
 
   Future<List<Playlist>> getAll() async {
     final db = await _db.database;
@@ -63,6 +80,9 @@ class PlaylistRepository {
   }
 
   Future<Playlist> create(String name) async {
+    if (await count() >= basicLimit) {
+      throw const PlaylistLimitException(basicLimit);
+    }
     final now = DateTime.now();
     final playlist = Playlist(
       id: _uuid.v4(),

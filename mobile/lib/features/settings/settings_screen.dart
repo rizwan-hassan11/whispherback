@@ -192,9 +192,10 @@ class SettingsScreen extends ConsumerWidget {
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (ctx) {
-        // Cap height so the list scrolls instead of overflowing on short
-        // screens, and always leave room for every language (incl. Vietnamese).
-        final maxHeight = MediaQuery.sizeOf(ctx).height * 0.7;
+        // Compact, capped-height sheet: all six languages fit without
+        // scrolling on virtually every phone, and it still scrolls as a
+        // fallback on very short screens — Vietnamese is never hidden.
+        final maxHeight = MediaQuery.sizeOf(ctx).height * 0.85;
         final bottomInset = MediaQuery.viewPaddingOf(ctx).bottom;
         return ConstrainedBox(
           constraints: BoxConstraints(maxHeight: maxHeight),
@@ -203,7 +204,7 @@ class SettingsScreen extends ConsumerWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+                padding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -219,16 +220,18 @@ class SettingsScreen extends ConsumerWidget {
                   ],
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 4),
               Flexible(
                 child: ListView(
                   shrinkWrap: true,
-                  padding: EdgeInsets.fromLTRB(12, 4, 12, bottomInset + 16),
+                  padding: EdgeInsets.fromLTRB(12, 4, 12, bottomInset + 12),
                   children: [
                     for (final lang in AppLanguage.values)
                       ListTile(
+                        dense: true,
+                        visualDensity: VisualDensity.compact,
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
+                          borderRadius: BorderRadius.circular(12),
                         ),
                         selected: lang == current,
                         selectedTileColor:
@@ -236,7 +239,7 @@ class SettingsScreen extends ConsumerWidget {
                         title: Text(
                           lang.label,
                           style: GoogleFonts.dmSans(
-                            fontSize: 16,
+                            fontSize: 15,
                             fontWeight: FontWeight.w600,
                             color: theme.foreground,
                           ),
@@ -247,7 +250,7 @@ class SettingsScreen extends ConsumerWidget {
                         ),
                         trailing: lang == current
                             ? const Icon(AppIcons.checkCircle,
-                                color: AppColors.neon)
+                                color: AppColors.neon, size: 20)
                             : null,
                         onTap: () async {
                           await ref

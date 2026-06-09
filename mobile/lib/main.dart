@@ -6,16 +6,15 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'app.dart';
-import 'core/bootstrap/app_bootstrap.dart';
 
-Future<void> main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
   if (Platform.isWindows || Platform.isLinux) {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
   }
+  // Allow lazy font fetch with instant system fallback — never block launch.
   GoogleFonts.config.allowRuntimeFetching = true;
-  // Start DB + font work early so splash → home feels instant.
-  await AppBootstrap.ensureReady();
+  // Run immediately; the splash screen warms the DB/seed in the background.
   runApp(const ProviderScope(child: WhisperBackApp()));
 }
