@@ -81,6 +81,15 @@ class _ActiveToggleState extends State<ActiveToggle>
   }
 
   void _handleTap() {
+    // Ignite the visual state immediately — persistence runs in the background.
+    if (!widget.isActive) {
+      _power.forward();
+      _charge.forward(from: 0);
+      _breathe.repeat(reverse: true);
+    } else {
+      _power.reverse();
+      _breathe.stop();
+    }
     widget.onToggle();
   }
 

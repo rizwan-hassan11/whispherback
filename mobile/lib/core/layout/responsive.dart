@@ -32,6 +32,30 @@ abstract final class ShellMetrics {
     }
     return bottomNavTotalHeight(context) - 4;
   }
+
+  /// Extra lift for [Scaffold.floatingActionButton] above the glass nav bar.
+  static double fabBottomInset(BuildContext context) {
+    if (Responsive.of(context).useSideNavigation) {
+      return MediaQuery.paddingOf(context).bottom + 8;
+    }
+    return bottomNavTotalHeight(context);
+  }
+}
+
+/// Positions a FAB above the shell bottom navigation bar.
+class ShellAwareFabLocation extends FloatingActionButtonLocation {
+  const ShellAwareFabLocation(this.bottomInset);
+
+  final double bottomInset;
+
+  @override
+  Offset getOffset(ScaffoldPrelayoutGeometry geometry) {
+    final end = FloatingActionButtonLocation.endFloat.getOffset(geometry);
+    return Offset(end.dx, end.dy - bottomInset);
+  }
+
+  @override
+  String toString() => 'ShellAwareFabLocation($bottomInset)';
 }
 
 /// Read viewport / fold / tablet layout from [BuildContext].

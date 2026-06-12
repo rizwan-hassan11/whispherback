@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -113,22 +115,23 @@ class HomeScreen extends ConsumerWidget {
                             SizedBox(height: r.isFlipCover ? 10 : 16),
                             ActiveToggle(
                               isActive: isActive,
-                              onToggle: () async {
-                                await ref
-                                    .read(playbackCoordinatorProvider)
-                                    .toggleActive();
-                                final appState =
-                                    ref.read(appStateRepositoryProvider);
-                                final nowActive = await appState.isActive();
-                                await syncWhisperNotifications(
-                                  appState: appState,
-                                  schedules:
-                                      ref.read(scheduleRepositoryProvider),
-                                );
-                                // First time going Active, ask to ignore
-                                // battery optimization so background scheduling
-                                // survives OEM killers.
-                                if (nowActive) await requestBatteryExemption();
+                              onToggle: () {
+                                unawaited(() async {
+                                  await ref
+                                      .read(playbackCoordinatorProvider)
+                                      .toggleActive();
+                                  final appState =
+                                      ref.read(appStateRepositoryProvider);
+                                  final nowActive = await appState.isActive();
+                                  await syncWhisperNotifications(
+                                    appState: appState,
+                                    schedules:
+                                        ref.read(scheduleRepositoryProvider),
+                                  );
+                                  if (nowActive) {
+                                    await requestBatteryExemption();
+                                  }
+                                }());
                               },
                             ),
                             const SizedBox(height: 10),

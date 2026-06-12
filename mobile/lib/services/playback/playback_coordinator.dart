@@ -83,7 +83,9 @@ class PlaybackCoordinator {
 
   Future<void> _onClipCompleted() async {
     if (_snapshot.playlistId == null) {
-      await stop();
+      // Single-clip preview: keep the sheet open so the user can replay.
+      _emit(_snapshot.copyWith(isPlaying: false));
+      await _audio.stop();
       return;
     }
     final clips = await _playlists.getClips(_snapshot.playlistId!);
@@ -97,14 +99,22 @@ class PlaybackCoordinator {
   Future<void> toggleActive() async {
     final active = await _appState.isActive();
     if (active) {
+      _emit(const PlaybackSnapshot(state: AppPlaybackState.inactive));
       await _appState.setActive(false);
       await _audio.exitForeground();
-      _emit(const PlaybackSnapshot(state: AppPlaybackState.inactive));
     } else {
+      _emit(_snapshot.copyWith(
+        state: AppPlaybackState.activeIdle,
+        isPlaying: false,
+      ));
       await _appState.setActive(true);
-      await _audio.enterForeground();
-      await refreshModeState();
+      unawaited(_activateInBackground());
     }
+  }
+
+  Future<void> _activateInBackground() async {
+    await _audio.enterForeground();
+    await refreshModeState();
   }
 
   Future<void> playPlaylist(String playlistId,
@@ -174,6 +184,20 @@ class PlaybackCoordinator {
   }
 
   Future<void> resume() async {
+    // Library clip preview does not require the master toggle.
+    if (_snapshot.playlistId == null) {
+      final path = _audio.currentPath;
+      if (path == null) return;
+      final atEnd = _audio.player.processingState == ProcessingState.completed;
+      if (atEnd) {
+        await _audio.playFile(path, title: _snapshot.clipTitle ?? '');
+      } else {
+        await _audio.resume();
+      }
+      _emit(_snapshot.copyWith(isPlaying: true, modalVisible: true));
+      return;
+    }
+
     if (!await _canPlay()) return;
     await _audio.resume();
     _emit(_snapshot.copyWith(isPlaying: true, modalVisible: true));
@@ -181,8 +205,14 @@ class PlaybackCoordinator {
 
   Future<void> stop() async {
     await _audio.stop();
-    if (await _appState.isActive()) {
-      await refreshModeState();
+    final active = await _appState.isActive();
+    if (active) {
+      _emit(const PlaybackSnapshot(
+        state: AppPlaybackState.activeIdle,
+        isPlaying: false,
+        modalVisible: false,
+      ));
+      unawaited(refreshModeState());
     } else {
       _emit(const PlaybackSnapshot(state: AppPlaybackState.inactive));
     }

@@ -73,6 +73,9 @@ class PlaylistsScreen extends ConsumerWidget {
                   ),
             orElse: () => null,
           ),
+          floatingActionButtonLocation: ShellAwareFabLocation(
+            ShellMetrics.fabBottomInset(context),
+          ),
         ),
       ],
     );

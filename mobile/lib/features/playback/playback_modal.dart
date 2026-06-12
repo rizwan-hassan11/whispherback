@@ -178,13 +178,20 @@ class PlaybackModal extends ConsumerWidget {
                             return StreamBuilder<Duration?>(
                               stream: audio.durationStream,
                               builder: (context, durSnap) {
-                                final pos = posSnap.data ?? Duration.zero;
+                                final rawPos = posSnap.data ?? Duration.zero;
                                 final dur = durSnap.data ?? Duration.zero;
-                                final progress = dur.inMilliseconds > 0
-                                    ? pos.inMilliseconds / dur.inMilliseconds
-                                    : 0.0;
+                                final maxMs = dur.inMilliseconds;
+                                final posMs = maxMs > 0
+                                    ? rawPos.inMilliseconds.clamp(0, maxMs)
+                                    : rawPos.inMilliseconds.clamp(0, 1 << 31);
+                                final pos = Duration(milliseconds: posMs);
+                                final progress =
+                                    maxMs > 0 ? posMs / maxMs : 0.0;
                                 final clamped = progress.clamp(0.0, 1.0);
-                                final remaining = dur - pos;
+                                final remainingMs =
+                                    (maxMs - posMs).clamp(0, maxMs);
+                                final remaining =
+                                    Duration(milliseconds: remainingMs);
 
                                 return Column(
                                   children: [
