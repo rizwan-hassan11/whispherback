@@ -27,9 +27,12 @@ Future<void> main() async {
         builder: WhisperAudioHandler.new,
         config: const AudioServiceConfig(
           androidNotificationChannelId: 'com.whisperback.playback',
-          androidNotificationChannelName: 'WhisperBack playback',
+          androidNotificationChannelName: 'WhisperBack',
+          androidNotificationChannelDescription:
+              'Playback controls, schedules, and session status',
           androidNotificationOngoing: true,
           androidStopForegroundOnPause: true,
+          androidNotificationIcon: 'mipmap/ic_launcher',
           notificationColor: Color(0xFF2E8BFF),
         ),
       ).timeout(const Duration(seconds: 8));

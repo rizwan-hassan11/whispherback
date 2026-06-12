@@ -45,13 +45,13 @@ class _HomeAmbiencePainter extends CustomPainter {
               Offset(size.width * 0.85, size.height * 0.12),
               90.0,
               AppColors.gold,
-              0.08
+              0.04
             ),
             (
               Offset(size.width * 0.08, size.height * 0.22),
               70.0,
               AppColors.brandLight,
-              0.10
+              0.045
             ),
             (
               Offset(size.width * 0.92, size.height * 0.55),

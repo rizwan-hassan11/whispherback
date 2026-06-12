@@ -285,10 +285,12 @@ class DepthOrb extends StatelessWidget {
     this.right,
     this.bottom,
     this.blur = 0,
+    this.intensity = 1,
   });
 
   final double size;
   final Color color;
+  final double intensity;
   final double? top;
   final double? left;
   final double? right;
@@ -300,9 +302,10 @@ class DepthOrb extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     // Dark theme: bright, luminous orbs. Light theme: keep them subtle so the
     // dark accent colors don't turn into heavy blobs on a pale background.
-    final coreAlpha = isDark ? 0.9 : 0.42;
-    final midAlpha = isDark ? 0.4 : 0.16;
-    final shadowAlpha = isDark ? 0.3 : 0.14;
+    final i = intensity.clamp(0.0, 1.0);
+    final coreAlpha = (isDark ? 0.9 : 0.42) * i;
+    final midAlpha = (isDark ? 0.4 : 0.16) * i;
+    final shadowAlpha = (isDark ? 0.3 : 0.14) * i;
 
     return Positioned(
       top: top,

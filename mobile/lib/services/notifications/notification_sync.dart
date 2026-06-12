@@ -1,5 +1,6 @@
 import '../../data/repositories/app_state_repository.dart';
 import '../../data/repositories/schedule_repository.dart';
+import '../audio/whisper_audio_handler.dart';
 import '../scheduler/schedule_fire_helper.dart';
 import 'notification_service.dart';
 
@@ -31,9 +32,13 @@ Future<void> syncWhisperNotifications({
   }
 
   if (active) {
-    await service.showActiveOngoing(
+    final subtitle = nextUpcoming ??
+        (armed > 0
+            ? '$armed schedule(s) armed · whispers will play automatically'
+            : 'Listening for scheduled whispers');
+    await whisperAudioHandler.updateActiveSessionInfo(
+      subtitle: subtitle,
       scheduleCount: armed,
-      nextUpcoming: nextUpcoming,
     );
   } else {
     await service.cancelActiveOngoing();

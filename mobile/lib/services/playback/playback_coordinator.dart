@@ -59,6 +59,9 @@ class PlaybackCoordinator {
     final active = await _appState.isActive();
     // Tapping Stop on the media notification turns the whole session OFF.
     _audio.onStopRequested = () => unawaited(_deactivateFromNotification());
+    _audio.onStopClipRequested = () => unawaited(stop());
+    _audio.onPlayRequested = () => unawaited(_syncPlayingFromNotification(true));
+    _audio.onPauseRequested = () => unawaited(_syncPlayingFromNotification(false));
     _emit(
       _snapshot.copyWith(
         state: active ? AppPlaybackState.activeIdle : AppPlaybackState.inactive,
@@ -68,6 +71,11 @@ class PlaybackCoordinator {
     if (active) await _audio.enterForeground();
     _playerSub = _audio.playerStateStream.listen(_onPlayerState);
     startModeMonitoring();
+  }
+
+  Future<void> _syncPlayingFromNotification(bool playing) async {
+    if (_snapshot.state == AppPlaybackState.inactive) return;
+    _emit(_snapshot.copyWith(isPlaying: playing));
   }
 
   Future<void> _deactivateFromNotification() async {
@@ -175,7 +183,12 @@ class PlaybackCoordinator {
     }
 
     try {
-      await _audio.playFile(clip.filePath, title: clip.title);
+      await _audio.playFile(
+        clip.filePath,
+        title: clip.title,
+        playlistName: playlist?.name,
+        subtitle: fromSchedule ? 'Scheduled whisper' : 'Now playing',
+      );
     } catch (_) {
       return;
     }
@@ -212,7 +225,11 @@ class PlaybackCoordinator {
     ));
 
     try {
-      await _audio.playFile(clip.filePath, title: clip.title);
+      await _audio.playFile(
+        clip.filePath,
+        title: clip.title,
+        subtitle: 'Library preview',
+      );
     } catch (_) {
       await stop();
     }
@@ -234,7 +251,11 @@ class PlaybackCoordinator {
       if (path == null) return;
       final atEnd = _audio.player.processingState == ProcessingState.completed;
       if (atEnd) {
-        await _audio.playFile(path, title: _snapshot.clipTitle ?? '');
+        await _audio.playFile(
+          path,
+          title: _snapshot.clipTitle ?? '',
+          subtitle: 'Library preview',
+        );
       } else {
         await _audio.resume();
       }

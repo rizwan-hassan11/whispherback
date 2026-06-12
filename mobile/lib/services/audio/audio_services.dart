@@ -140,9 +140,19 @@ class AudioPlaybackService {
   Stream<Duration?> get durationStream => _handler.player.durationStream;
   Stream<PlayerState> get playerStateStream => _handler.player.playerStateStream;
 
-  Future<void> playFile(String path, {String title = 'WhisperBack'}) async {
+  Future<void> playFile(
+    String path, {
+    String title = 'WhisperBack',
+    String? playlistName,
+    String? subtitle,
+  }) async {
     _currentPath = path;
-    await _handler.playFile(path, title: title);
+    await _handler.playFile(
+      path,
+      title: title,
+      playlistName: playlistName,
+      subtitle: subtitle,
+    );
   }
 
   Future<void> pause() => _handler.pause();
@@ -156,8 +166,30 @@ class AudioPlaybackService {
   }
 
   /// Starts the always-on foreground session (master toggle ON).
-  Future<void> enterForeground({String title = 'WhisperBack active'}) =>
-      _handler.enterForeground(title: title);
+  Future<void> enterForeground({
+    String title = 'WhisperBack · Active',
+    String subtitle = 'Listening for scheduled whispers',
+    int scheduleCount = 0,
+  }) =>
+      _handler.enterForeground(
+        title: title,
+        subtitle: subtitle,
+        scheduleCount: scheduleCount,
+      );
+
+  Future<void> updateActiveSessionInfo({
+    required String subtitle,
+    int scheduleCount = 0,
+  }) =>
+      _handler.updateActiveSessionInfo(
+        subtitle: subtitle,
+        scheduleCount: scheduleCount,
+      );
+
+  set onStopClipRequested(void Function()? cb) =>
+      _handler.onStopClipRequested = cb;
+  set onPlayRequested(void Function()? cb) => _handler.onPlayRequested = cb;
+  set onPauseRequested(void Function()? cb) => _handler.onPauseRequested = cb;
 
   /// Tears down the foreground session (master toggle OFF).
   Future<void> exitForeground() async {
