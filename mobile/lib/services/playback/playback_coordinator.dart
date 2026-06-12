@@ -37,6 +37,7 @@ class PlaybackCoordinator {
 
   StreamSubscription<PlayerState>? _playerSub;
   Timer? _modeCheckTimer;
+  String? _pendingScheduledPlaylistId;
 
   /// Replays the current snapshot to every new listener so the UI never misses
   /// the restored "active" state on a cold start (broadcast streams otherwise
@@ -82,18 +83,46 @@ class PlaybackCoordinator {
   }
 
   Future<void> _onClipCompleted() async {
-    if (_snapshot.playlistId == null) {
-      // Single-clip preview: keep the sheet open so the user can replay.
+    // Scheduled whispers: one clip per interval — never auto-chain.
+    if (_snapshot.state == AppPlaybackState.scheduledPlaying) {
       _emit(_snapshot.copyWith(isPlaying: false));
       await _audio.stop();
+      await _drainPendingScheduled();
       return;
     }
+
+    if (_snapshot.playlistId == null) {
+      _emit(_snapshot.copyWith(isPlaying: false));
+      await _audio.stop();
+      await _drainPendingScheduled();
+      return;
+    }
+
+    // Manual playlist: play next clip in sequence.
     final clips = await _playlists.getClips(_snapshot.playlistId!);
     if (clips.length <= 1) {
       await stop();
+      await _drainPendingScheduled();
       return;
     }
     await playPlaylist(_snapshot.playlistId!);
+  }
+
+  Future<void> _drainPendingScheduled() async {
+    final next = _pendingScheduledPlaylistId;
+    if (next == null) return;
+    _pendingScheduledPlaylistId = null;
+    await requestScheduledPlay(next);
+  }
+
+  /// Called by [ScheduleEngine]. Queues if another clip is already playing.
+  Future<void> requestScheduledPlay(String playlistId) async {
+    if (_snapshot.isPlaying ||
+        _snapshot.state == AppPlaybackState.manualPlaying) {
+      _pendingScheduledPlaylistId = playlistId;
+      return;
+    }
+    await playPlaylist(playlistId, fromSchedule: true);
   }
 
   Future<void> toggleActive() async {
@@ -119,7 +148,15 @@ class PlaybackCoordinator {
 
   Future<void> playPlaylist(String playlistId,
       {bool fromSchedule = false}) async {
-    if (!await _canPlay()) return;
+    if (fromSchedule &&
+        (_snapshot.isPlaying ||
+            _snapshot.state == AppPlaybackState.manualPlaying)) {
+      _pendingScheduledPlaylistId = playlistId;
+      return;
+    }
+
+    if (!fromSchedule && !await _canPlay()) return;
+    if (fromSchedule && !await _appState.isActive()) return;
 
     final clips = await _playlists.getClips(playlistId);
     if (clips.isEmpty) return;
@@ -129,6 +166,13 @@ class PlaybackCoordinator {
     final clip = shuffle ? _nextShuffledClip(playlistId, clips) : clips.first;
 
     if (!_isPlayablePath(clip.filePath)) return;
+
+    if (fromSchedule) {
+      final sleep = await _sleep.getActive();
+      if (_sleep.isSleepActive(sleep)) return;
+      final prayer = await _prayer.getCurrentPrayerWindow();
+      if (prayer != null) return;
+    }
 
     try {
       await _audio.playFile(clip.filePath, title: clip.title);
@@ -146,7 +190,7 @@ class PlaybackCoordinator {
         clipTitle: clip.title,
         isPlaying: true,
         shuffleEnabled: shuffle,
-        modalVisible: true,
+        modalVisible: false,
       ),
     );
   }
@@ -164,7 +208,7 @@ class PlaybackCoordinator {
       playlistName: clip.title,
       clipTitle: clip.title,
       isPlaying: true,
-      modalVisible: true,
+      modalVisible: false,
     ));
 
     try {
@@ -221,6 +265,14 @@ class PlaybackCoordinator {
   void dismissModal() {
     if (_snapshot.state == AppPlaybackState.inactive) return;
     _emit(_snapshot.copyWith(modalVisible: false));
+  }
+
+  void showModal() {
+    if (_snapshot.state == AppPlaybackState.inactive ||
+        _snapshot.state == AppPlaybackState.activeIdle) {
+      return;
+    }
+    _emit(_snapshot.copyWith(modalVisible: true));
   }
 
   Future<void> toggleShuffle(String playlistId, bool enabled) async {

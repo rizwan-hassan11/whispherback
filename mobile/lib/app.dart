@@ -9,6 +9,7 @@ import 'providers/settings_provider.dart';
 import 'services/notifications/notification_service.dart';
 import 'services/notifications/notification_sync.dart';
 import 'services/scheduler/schedule_engine.dart';
+import 'services/scheduler/schedule_last_fired_store.dart';
 
 class WhisperBackApp extends ConsumerStatefulWidget {
   const WhisperBackApp({super.key});
@@ -21,9 +22,10 @@ class _WhisperBackAppState extends ConsumerState<WhisperBackApp> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await ScheduleLastFiredStore.ensureLoaded();
       ref.read(scheduleEngineProvider).start();
-      _initNotifications();
+      await _initNotifications();
     });
   }
 

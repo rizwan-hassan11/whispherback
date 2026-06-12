@@ -1,5 +1,6 @@
 import '../../data/repositories/app_state_repository.dart';
 import '../../data/repositories/schedule_repository.dart';
+import '../scheduler/schedule_fire_helper.dart';
 import 'notification_service.dart';
 
 /// Reconciles system notifications with the current app state:
@@ -16,10 +17,34 @@ Future<void> syncWhisperNotifications({
   final all = await schedules.getAll();
   final armed = all.where((s) => s.enabled).length;
 
+  String? nextUpcoming;
+  final next = ScheduleFireHelper.nextUpcoming(
+    all.where((s) => s.enabled).toList(),
+    DateTime.now(),
+  );
+  if (next != null) {
+    final name = next.schedule.playlistName.isEmpty
+        ? 'WhisperBack'
+        : next.schedule.playlistName;
+    final time = _formatTime(next.when);
+    nextUpcoming = 'Next: “$name” at $time';
+  }
+
   if (active) {
-    await service.showActiveOngoing(scheduleCount: armed);
+    await service.showActiveOngoing(
+      scheduleCount: armed,
+      nextUpcoming: nextUpcoming,
+    );
   } else {
     await service.cancelActiveOngoing();
   }
   await service.syncSchedules(all, active: active);
+}
+
+String _formatTime(DateTime when) {
+  final h = when.hour;
+  final m = when.minute.toString().padLeft(2, '0');
+  final period = h >= 12 ? 'PM' : 'AM';
+  final hour12 = h % 12 == 0 ? 12 : h % 12;
+  return '$hour12:$m $period';
 }

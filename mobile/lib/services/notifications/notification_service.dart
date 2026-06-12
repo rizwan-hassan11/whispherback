@@ -5,6 +5,7 @@ import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 
 import '../../domain/entities/playback_schedule.dart';
+import '../scheduler/schedule_fire_helper.dart';
 
 /// Handles all system notifications: a persistent "active" status notification
 /// while the master toggle is ON, and exact scheduled alarms that fire even
@@ -93,11 +94,16 @@ class NotificationService {
 
   // ── Persistent "active" notification ──────────────────────────────────────
 
-  Future<void> showActiveOngoing({int scheduleCount = 0}) async {
+  Future<void> showActiveOngoing({
+    int scheduleCount = 0,
+    String? nextUpcoming,
+  }) async {
     await init();
-    final body = scheduleCount > 0
-        ? '$scheduleCount schedule(s) armed · whispers will play automatically'
-        : 'Listening for your scheduled whispers';
+    final body = nextUpcoming != null
+        ? nextUpcoming
+        : scheduleCount > 0
+            ? '$scheduleCount schedule(s) armed · whispers will play automatically'
+            : 'Listening for your scheduled whispers';
     const details = NotificationDetails(
       android: AndroidNotificationDetails(
         _statusChannelId,
@@ -135,23 +141,17 @@ class NotificationService {
     var id = _scheduleBase;
     for (final schedule in schedules) {
       if (!schedule.enabled || !schedule.alarmEnabled) continue;
-      for (var weekday = 1; weekday <= 7; weekday++) {
-        if ((schedule.daysMask & (1 << (weekday - 1))) == 0) continue;
-        final when = _nextWeekdayTime(
-          weekday,
-          schedule.startTime.hour,
-          schedule.startTime.minute,
-        );
+      for (final slot in ScheduleFireHelper.intervalAlarmSlots(schedule)) {
+        if (id >= _scheduleBase + 400) return;
+        final when = _nextWeekdayTime(slot.weekday, slot.hour, slot.minute);
+        final name = slot.label.isEmpty ? 'WhisperBack' : slot.label;
         await _scheduleWeekly(
           id: id,
           when: when,
           title: 'WhisperBack',
-          body: schedule.playlistName.isEmpty
-              ? 'A scheduled whisper is ready to play'
-              : '“${schedule.playlistName}” is ready to play',
+          body: '“$name” is ready to play',
         );
         id++;
-        if (id >= _scheduleBase + 400) return; // safety cap
       }
     }
   }

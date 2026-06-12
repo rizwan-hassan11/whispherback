@@ -15,6 +15,7 @@ import '../../l10n/app_localizations.dart';
 import '../../l10n/schedule_l10n.dart';
 import '../../providers/playback_providers.dart';
 import '../../providers/repository_providers.dart';
+import '../../services/notifications/notification_sync.dart';
 
 class ScheduledOverviewScreen extends ConsumerWidget {
   const ScheduledOverviewScreen({super.key});
@@ -56,6 +57,10 @@ class ScheduledOverviewScreen extends ConsumerWidget {
                       .read(scheduleRepositoryProvider)
                       .setEnabled(s.playlistId, enabled);
                   ref.invalidate(schedulesProvider);
+                  await syncWhisperNotifications(
+                    appState: ref.read(appStateRepositoryProvider),
+                    schedules: ref.read(scheduleRepositoryProvider),
+                  );
                 },
               ),
               loading: () => const Center(child: CircularProgressIndicator()),

@@ -9,6 +9,7 @@ enum AppSizeClass { compact, medium, expanded }
 abstract final class ShellMetrics {
   static const navBarContentHeight = 60.0;
   static const navOuterPaddingBottom = 16.0;
+  static const miniPlayerHeight = 64.0;
   static const navHorizontalPadding = 12.0;
   static const railWidthCompact = 88.0;
   static const railWidthExtended = 220.0;
@@ -23,7 +24,7 @@ abstract final class ShellMetrics {
     if (Responsive.of(context).useSideNavigation) {
       return MediaQuery.paddingOf(context).bottom + extra;
     }
-    return bottomNavTotalHeight(context) + extra;
+    return bottomNavTotalHeight(context) + miniPlayerHeight + extra;
   }
 
   static double playbackModalBottomInset(BuildContext context) {

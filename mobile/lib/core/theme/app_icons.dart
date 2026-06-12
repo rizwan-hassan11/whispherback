@@ -66,4 +66,7 @@ abstract final class AppIcons {
   static const audioFile = LucideIcons.music_2;
   static const folderOpen = LucideIcons.folder_open;
   static const volumeOff = LucideIcons.volume_x;
+  static const moreVertical = LucideIcons.ellipsis_vertical;
+  static const trash = LucideIcons.trash_2;
+  static const edit = LucideIcons.pencil;
 }

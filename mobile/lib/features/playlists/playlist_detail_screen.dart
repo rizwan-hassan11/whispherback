@@ -16,6 +16,8 @@ import '../../l10n/duration_format.dart';
 import '../../l10n/schedule_l10n.dart';
 import '../../providers/playback_providers.dart';
 import '../../providers/repository_providers.dart';
+import '../../services/notifications/notification_sync.dart';
+import 'widgets/add_clips_sheet.dart';
 import 'widgets/playlist_clip_tile.dart';
 
 class PlaylistDetailScreen extends ConsumerStatefulWidget {
@@ -62,6 +64,103 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
         .read(playlistRepositoryProvider)
         .setShuffle(widget.playlistId, next);
     setState(() => _playlist = _playlist!.copyWith(shuffleEnabled: next));
+  }
+
+  Future<void> _rename() async {
+    if (_playlist == null) return;
+    final l10n = context.l10n;
+    final controller = TextEditingController(text: _playlist!.name);
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(l10n.renamePlaylist),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: InputDecoration(hintText: l10n.playlistName),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(l10n.cancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: Text(l10n.save),
+          ),
+        ],
+      ),
+    );
+    if (name == null || name.isEmpty || name == _playlist!.name) return;
+    await ref.read(playlistRepositoryProvider).rename(widget.playlistId, name);
+    ref.invalidate(playlistsProvider);
+    if (mounted) {
+      setState(() => _playlist = _playlist!.copyWith(name: name));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.playlistRenamed)),
+      );
+    }
+  }
+
+  Future<void> _delete() async {
+    final l10n = context.l10n;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(l10n.deletePlaylist),
+        content: Text(l10n.deletePlaylistConfirm),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(l10n.cancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(l10n.delete),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    final deleted =
+        await ref.read(playlistRepositoryProvider).delete(widget.playlistId);
+    if (!mounted) return;
+    if (!deleted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.deletePlaylistBlocked)),
+      );
+      return;
+    }
+    ref.invalidate(playlistsProvider);
+    await syncWhisperNotifications(
+      appState: ref.read(appStateRepositoryProvider),
+      schedules: ref.read(scheduleRepositoryProvider),
+    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.playlistDeleted)),
+      );
+      context.go('/playlists');
+    }
+  }
+
+  Future<void> _removeClip(AudioClip clip) async {
+    await ref
+        .read(playlistRepositoryProvider)
+        .removeClip(widget.playlistId, clip.id);
+    ref.invalidate(playlistsProvider);
+    await _load();
+  }
+
+  void _showAddClips() {
+    showAddClipsSheet(
+      context,
+      ref,
+      playlistId: widget.playlistId,
+      playlistName: _playlist?.name ?? context.l10n.playlist,
+      onChanged: _load,
+    );
   }
 
   int get _totalMs => _clips.fold(0, (s, c) => s + c.durationMs);
@@ -134,6 +233,40 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                     onPressed: () =>
                         context.push('/schedule/build/${widget.playlistId}'),
                   ),
+                  PopupMenuButton<String>(
+                    icon: Icon(AppIcons.moreVertical, color: theme.foreground),
+                    onSelected: (v) {
+                      switch (v) {
+                        case 'rename':
+                          _rename();
+                        case 'delete':
+                          _delete();
+                      }
+                    },
+                    itemBuilder: (ctx) => [
+                      PopupMenuItem(
+                        value: 'rename',
+                        child: Row(
+                          children: [
+                            Icon(AppIcons.edit, size: 18, color: theme.foreground),
+                            const SizedBox(width: 10),
+                            Text(l10n.renamePlaylist),
+                          ],
+                        ),
+                      ),
+                      PopupMenuItem(
+                        value: 'delete',
+                        child: Row(
+                          children: [
+                            const Icon(AppIcons.trash, size: 18, color: AppColors.error),
+                            const SizedBox(width: 10),
+                            Text(l10n.deletePlaylist,
+                                style: const TextStyle(color: AppColors.error)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
                 expandedHeight: 0,
                 toolbarHeight: 56,
@@ -159,8 +292,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                         onShuffle: _toggleShuffle,
                         onSchedule: () => context
                             .push('/schedule/build/${widget.playlistId}'),
-                        onAddClips: () => context
-                            .push('/playlists/${widget.playlistId}/add-clips'),
+                        onAddClips: _showAddClips,
                       ),
                       if (_schedule != null) ...[
                         const SizedBox(height: 16),
@@ -186,8 +318,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                   hasScrollBody: false,
                   child: _EmptyClipsState(
                     theme: theme,
-                    onAdd: () => context
-                        .push('/playlists/${widget.playlistId}/add-clips'),
+                    onAdd: _showAddClips,
                   ),
                 )
               else
@@ -199,12 +330,46 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                     separatorBuilder: (_, __) => const SizedBox(height: 10),
                     itemBuilder: (context, i) {
                       final clip = _clips[i];
-                      return PlaylistClipTile(
-                        clip: clip,
-                        index: i,
-                        onPlay: () => ref
-                            .read(playbackCoordinatorProvider)
-                            .playPlaylist(widget.playlistId),
+                      return Dismissible(
+                        key: ValueKey(clip.id),
+                        direction: DismissDirection.endToStart,
+                        background: Container(
+                          alignment: Alignment.centerRight,
+                          padding: const EdgeInsets.only(right: 20),
+                          decoration: BoxDecoration(
+                            color: AppColors.error.withValues(alpha: 0.85),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: const Icon(AppIcons.trash, color: Colors.white),
+                        ),
+                        confirmDismiss: (_) async {
+                          return await showDialog<bool>(
+                                context: context,
+                                builder: (ctx) => AlertDialog(
+                                  title: Text(l10n.removeFromPlaylist),
+                                  content: Text(clip.title),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(ctx, false),
+                                      child: Text(l10n.cancel),
+                                    ),
+                                    FilledButton(
+                                      onPressed: () => Navigator.pop(ctx, true),
+                                      child: Text(l10n.removeFromPlaylist),
+                                    ),
+                                  ],
+                                ),
+                              ) ??
+                              false;
+                        },
+                        onDismissed: (_) => _removeClip(clip),
+                        child: PlaylistClipTile(
+                          clip: clip,
+                          index: i,
+                          onPlay: () => ref
+                              .read(playbackCoordinatorProvider)
+                              .playClip(clip),
+                        ),
                       );
                     },
                   ),

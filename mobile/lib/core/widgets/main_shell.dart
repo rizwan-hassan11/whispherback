@@ -2,18 +2,27 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../features/playback/mini_player_bar.dart';
 import '../../features/playback/playback_modal.dart';
 import '../../l10n/app_localizations.dart';
+import '../../providers/playback_providers.dart';
 import '../layout/responsive.dart';
 import '../theme/app_icons.dart';
 import '../theme/app_theme.dart';
 import 'adaptive_shell_nav.dart';
 import 'glass_nav_bar.dart';
 
-class MainShell extends ConsumerWidget {
+class MainShell extends ConsumerStatefulWidget {
   const MainShell({super.key, required this.child});
 
   final Widget child;
+
+  @override
+  ConsumerState<MainShell> createState() => _MainShellState();
+}
+
+class _MainShellState extends ConsumerState<MainShell> {
+  String? _lastLocation;
 
   static List<GlassNavDestination> _destinations(BuildContext context) {
     final l10n = context.l10n;
@@ -71,8 +80,15 @@ class MainShell extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final location = GoRouterState.of(context).uri.toString();
+    if (_lastLocation != null && _lastLocation != location) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        ref.read(playbackCoordinatorProvider).dismissModal();
+      });
+    }
+    _lastLocation = location;
+
     final index = _indexForLocation(location);
     final theme = whisperTheme(context);
     final r = context.responsive;
@@ -96,7 +112,7 @@ class MainShell extends ConsumerWidget {
                         minHeight: constraints.maxHeight,
                         maxHeight: constraints.maxHeight,
                       ),
-                      child: child,
+                      child: widget.child,
                     ),
                   ),
                 ),
@@ -106,6 +122,19 @@ class MainShell extends ConsumerWidget {
           ),
         );
       },
+    );
+
+    final bottomBar = Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const MiniPlayerBar(),
+        GlassNavBar(
+          showAllLabels: theme.showLabels,
+          selectedIndex: index,
+          onSelected: (i) => _go(context, i),
+          destinations: _destinations(context),
+        ),
+      ],
     );
 
     if (r.useSideNavigation) {
@@ -137,18 +166,14 @@ class MainShell extends ConsumerWidget {
             ),
           ],
         ),
+        bottomNavigationBar: const MiniPlayerBar(),
       );
     }
 
     return Scaffold(
       extendBody: true,
       body: body,
-      bottomNavigationBar: GlassNavBar(
-        showAllLabels: theme.showLabels,
-        selectedIndex: index,
-        onSelected: (i) => _go(context, i),
-        destinations: _destinations(context),
-      ),
+      bottomNavigationBar: bottomBar,
     );
   }
 }

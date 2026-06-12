@@ -394,6 +394,66 @@ class AppLocalizations {
       'Afspeellijst maken',
       'Créer une playlist',
       'Tạo danh sách phát');
+  String get renamePlaylist => _s(
+      'Rename playlist',
+      'پلے لسٹ کا نام بدلیں',
+      'إعادة تسمية القائمة',
+      'Afspeellijst hernoemen',
+      'Renommer la playlist',
+      'Đổi tên danh sách phát');
+  String get deletePlaylist => _s(
+      'Delete playlist',
+      'پلے لسٹ حذف کریں',
+      'حذف القائمة',
+      'Afspeellijst verwijderen',
+      'Supprimer la playlist',
+      'Xóa danh sách phát');
+  String get deletePlaylistConfirm => _s(
+      'Delete this playlist? This cannot be undone.',
+      'یہ پلے لسٹ حذف کریں؟ یہ واپس نہیں ہو سکتی۔',
+      'حذف هذه القائمة؟ لا يمكن التراجع.',
+      'Deze afspeellijst verwijderen? Dit kan niet ongedaan worden.',
+      'Supprimer cette playlist ? Action irréversible.',
+      'Xóa danh sách phát này? Không thể hoàn tác.');
+  String get deletePlaylistBlocked => _s(
+      'Disable the active schedule before deleting this playlist.',
+      'حذف سے پہلے فعال شیڈول بند کریں۔',
+      'عطّل الجدول النشط قبل الحذف.',
+      'Schakel het actieve schema uit voordat je verwijdert.',
+      'Désactivez la planification active avant de supprimer.',
+      'Tắt lịch đang chạy trước khi xóa.');
+  String get playlistDeleted => _s(
+      'Playlist deleted',
+      'پلے لسٹ حذف ہو گئی',
+      'تم حذف القائمة',
+      'Afspeellijst verwijderd',
+      'Playlist supprimée',
+      'Đã xóa danh sách phát');
+  String get playlistRenamed => _s(
+      'Playlist renamed',
+      'نام تبدیل ہو گیا',
+      'تمت إعادة التسمية',
+      'Naam gewijzigd',
+      'Playlist renommée',
+      'Đã đổi tên');
+  String get removeFromPlaylist => _s(
+      'Remove from playlist',
+      'پلے لسٹ سے ہٹائیں',
+      'إزالة من القائمة',
+      'Verwijderen uit afspeellijst',
+      'Retirer de la playlist',
+      'Xóa khỏi danh sách phát');
+  String get selectClipsHint => _s(
+      'Select clips to add',
+      'شامل کرنے کے لیے کلپس منتخب کریں',
+      'اختر المقاطع للإضافة',
+      'Selecteer clips om toe te voegen',
+      'Sélectionnez des clips à ajouter',
+      'Chọn đoạn ghi để thêm');
+  String get delete => _s(
+      'Delete', 'حذف', 'حذف', 'Verwijderen', 'Supprimer', 'Xóa');
+  String get rename => _s(
+      'Rename', 'نام بدلیں', 'إعادة تسمية', 'Hernoemen', 'Renommer', 'Đổi tên');
   String get totalClips => _s('Total clips', 'کل کلپس', 'إجمالي المقاطع',
       'Totaal clips', 'Total clips', 'Tổng số đoạn ghi');
   String get shuffleOn => _s('Shuffle on', 'شفل آن', 'تشغيل عشوائي',
