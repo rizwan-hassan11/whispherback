@@ -34,15 +34,14 @@ Future<void> main() async {
           androidStopForegroundOnPause: false,
           androidNotificationIcon: 'drawable/ic_notification',
           androidNotificationClickStartsActivity: true,
-          androidShowNotificationBadge: false,
           notificationColor: const Color(0xFF2E8BFF),
-          artDownscaleWidth: 512,
-          artDownscaleHeight: 512,
         ),
       ).timeout(const Duration(seconds: 8));
+      whisperAudioServiceBound = true;
     } catch (e, st) {
       debugPrint('AudioService.init failed, using plain handler: $e\n$st');
       whisperAudioHandler = WhisperAudioHandler();
+      whisperAudioServiceBound = false;
     }
   } else {
     whisperAudioHandler = WhisperAudioHandler();

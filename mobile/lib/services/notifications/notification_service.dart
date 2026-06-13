@@ -28,6 +28,7 @@ class NotificationService {
   static const int _scheduleBase = 1000; // scheduled alarms occupy 1000+
 
   static const String _statusChannelId = 'whisperback_status';
+  static const String _nowPlayingChannelId = 'whisperback_now_playing';
   static const String _alarmChannelId = 'whisperback_alarms';
 
   Future<void> init() async {
@@ -69,6 +70,16 @@ class NotificationService {
         'Active status',
         description: 'Shows while WhisperBack is active.',
         importance: Importance.low,
+        playSound: false,
+        enableVibration: false,
+      ),
+    );
+    await android.createNotificationChannel(
+      const AndroidNotificationChannel(
+        _nowPlayingChannelId,
+        'Now playing',
+        description: 'Shows the currently playing whisper with controls.',
+        importance: Importance.defaultImportance,
         playSound: false,
         enableVibration: false,
       ),
@@ -151,6 +162,35 @@ class NotificationService {
   Future<void> cancelActiveOngoing() async {
     await init();
     await _plugin.cancel(_ongoingId);
+  }
+
+  /// Visible now-playing line while a clip plays (complements audio_service).
+  Future<void> showNowPlaying({
+    required String title,
+    String? subtitle,
+  }) async {
+    await init();
+    final body = subtitle ?? 'Tap to open WhisperBack';
+    await _plugin.show(
+      _ongoingId,
+      title,
+      body,
+      NotificationDetails(
+        android: AndroidNotificationDetails(
+          _nowPlayingChannelId,
+          'Now playing',
+          channelDescription:
+              'Shows the currently playing whisper with controls.',
+          importance: Importance.defaultImportance,
+          priority: Priority.defaultPriority,
+          ongoing: true,
+          autoCancel: false,
+          showWhen: false,
+          onlyAlertOnce: false,
+          category: AndroidNotificationCategory.transport,
+        ),
+      ),
+    );
   }
 
   // ── Scheduled alarms (fire when app is killed) ────────────────────────────

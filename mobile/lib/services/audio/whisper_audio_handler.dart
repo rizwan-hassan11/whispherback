@@ -1,10 +1,17 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:audio_service/audio_service.dart';
 import 'package:audio_session/audio_session.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 WhisperAudioHandler? _whisperAudioHandler;
+
+/// True when [AudioService.init] succeeded and the handler is bound to Android.
+bool whisperAudioServiceBound = false;
 
 WhisperAudioHandler get whisperAudioHandler =>
     _whisperAudioHandler ??= WhisperAudioHandler();
@@ -12,16 +19,11 @@ WhisperAudioHandler get whisperAudioHandler =>
 set whisperAudioHandler(WhisperAudioHandler handler) =>
     _whisperAudioHandler = handler;
 
-/// Lock-screen artwork shown on the media notification.
-final Uri _defaultArtUri = Uri.parse(
-  'android.resource://com.whisperback.whisperback/drawable/ic_notification',
-);
-
-/// Bridges [just_audio] to [audio_service] for full-quality playback, media
-/// notifications, and lock-screen controls (Spotify-style).
+/// Bridges [just_audio] to [audio_service].
 ///
-/// A single [AudioPlayer] handles all audio — no silent keep-alive loop that
-/// can degrade quality via Android audio-focus mixing.
+/// • [_clipPlayer] — all real audio (full quality, exclusive while playing)
+/// • [_idlePlayer] — silent loop at volume 0 while Active; keeps the Android
+///   foreground service + scheduler alive without touching clip audio
 class WhisperAudioHandler extends BaseAudioHandler {
   WhisperAudioHandler() {
     playbackState.add(
@@ -37,26 +39,37 @@ class WhisperAudioHandler extends BaseAudioHandler {
       ),
     );
 
-    _player.playbackEventStream.listen(_broadcastState);
-    _player.durationStream.listen(_onDurationReady);
+    _clipPlayer.playbackEventStream.listen((_) {
+      if (_playingClip) _broadcastState();
+    });
+    _idlePlayer.playbackEventStream.listen((_) {
+      if (!_playingClip && _keepAlive) _broadcastState();
+    });
+    _clipPlayer.durationStream.listen(_onDurationReady);
   }
 
-  final AudioPlayer _player = AudioPlayer();
+  final AudioPlayer _clipPlayer = AudioPlayer();
+  final AudioPlayer _idlePlayer = AudioPlayer();
 
-  AudioPlayer get player => _player;
+  AudioPlayer get player => _clipPlayer;
 
   bool _keepAlive = false;
   bool _standalonePlayback = false;
   bool _audioSessionReady = false;
+  bool _playingClip = false;
+  String? _silencePath;
+
+  String _sessionSubtitle = 'Listening for scheduled whispers';
+  int _scheduleCount = 0;
+  String? _clipTitle;
 
   void Function()? onStopRequested;
   void Function()? onStopClipRequested;
   void Function()? onPlayRequested;
   void Function()? onPauseRequested;
 
-  String _sessionSubtitle = 'Listening for scheduled whispers';
-  int _scheduleCount = 0;
-  bool _playingClip = false;
+  bool get isPlayingClip => _playingClip;
+  String? get currentClipTitle => _clipTitle;
 
   Future<void> _ensureAudioSession() async {
     if (_audioSessionReady) return;
@@ -65,7 +78,7 @@ class WhisperAudioHandler extends BaseAudioHandler {
     _audioSessionReady = true;
   }
 
-  // ── Keep-alive (Active toggle ON, no clip playing) ────────────────────────
+  // ── Active session (master toggle ON) ─────────────────────────────────────
 
   Future<void> enterForeground({
     String title = 'WhisperBack · Active',
@@ -76,15 +89,27 @@ class WhisperAudioHandler extends BaseAudioHandler {
     _sessionSubtitle = subtitle;
     _scheduleCount = scheduleCount;
     if (_playingClip) return;
-    await _publishActiveIdle(title: title);
+    await _startIdleSession(title: title);
   }
 
-  Future<void> _publishActiveIdle({String title = 'WhisperBack · Active'}) async {
+  Future<void> _startIdleSession({String title = 'WhisperBack · Active'}) async {
     _playingClip = false;
+    _clipTitle = null;
     final item = _activeMediaItem(title: title);
     mediaItem.add(item);
     queue.add([item]);
-    _broadcastState(null);
+
+    try {
+      final path = await _ensureSilenceFile();
+      await _idlePlayer.stop();
+      await _idlePlayer.setVolume(0);
+      await _idlePlayer.setLoopMode(LoopMode.one);
+      await _idlePlayer.setAudioSource(AudioSource.file(path));
+      await _idlePlayer.play();
+    } catch (_) {
+      // Metadata-only fallback; idle loop preferred for foreground service.
+    }
+    _broadcastState();
   }
 
   Future<void> updateActiveSessionInfo({
@@ -94,7 +119,12 @@ class WhisperAudioHandler extends BaseAudioHandler {
     _sessionSubtitle = subtitle;
     _scheduleCount = scheduleCount;
     if (_playingClip) return;
-    await _publishActiveIdle();
+    mediaItem.add(_activeMediaItem());
+    if (_keepAlive && !_idlePlayer.playing) {
+      await _startIdleSession();
+    } else {
+      _broadcastState();
+    }
   }
 
   MediaItem _activeMediaItem({String title = 'WhisperBack · Active'}) {
@@ -103,7 +133,6 @@ class WhisperAudioHandler extends BaseAudioHandler {
       title: title,
       album: 'WhisperBack',
       artist: _sessionSubtitle,
-      artUri: _defaultArtUri,
       displayTitle: title,
       displaySubtitle: _sessionSubtitle,
       displayDescription: _scheduleCount > 0
@@ -117,12 +146,14 @@ class WhisperAudioHandler extends BaseAudioHandler {
     _keepAlive = false;
     _playingClip = false;
     _standalonePlayback = false;
-    await _player.stop();
+    _clipTitle = null;
+    await _idlePlayer.stop();
+    await _clipPlayer.stop();
     queue.add([]);
     await super.stop();
   }
 
-  // ── Clip playback (manual + scheduled) ────────────────────────────────────
+  // ── Clip playback ─────────────────────────────────────────────────────────
 
   Future<void> playFile(
     String path, {
@@ -132,19 +163,22 @@ class WhisperAudioHandler extends BaseAudioHandler {
   }) async {
     await _ensureAudioSession();
     _playingClip = true;
+    _clipTitle = title;
     if (!_keepAlive) _standalonePlayback = true;
 
-    await _player.stop();
-    await _player.setVolume(1);
-    await _player.setSpeed(1);
-    await _player.setLoopMode(LoopMode.off);
+    // Stop idle loop completely so clip gets a clean, full-quality audio path.
+    await _idlePlayer.stop();
+
+    await _clipPlayer.stop();
+    await _clipPlayer.setVolume(1);
+    await _clipPlayer.setSpeed(1);
+    await _clipPlayer.setLoopMode(LoopMode.off);
 
     final item = MediaItem(
       id: path,
       title: title,
       album: playlistName ?? 'WhisperBack',
       artist: subtitle ?? 'Now playing',
-      artUri: _defaultArtUri,
       displayTitle: title,
       displaySubtitle: playlistName ?? subtitle ?? 'Now playing',
       displayDescription: subtitle ?? 'Now playing',
@@ -153,12 +187,12 @@ class WhisperAudioHandler extends BaseAudioHandler {
     mediaItem.add(item);
     queue.add([item]);
 
-    await _player.setAudioSource(
+    await _clipPlayer.setAudioSource(
       AudioSource.file(path),
       preload: true,
     );
-    await _player.play();
-    _broadcastState(null);
+    await _clipPlayer.play();
+    _broadcastState();
   }
 
   void _onDurationReady(Duration? dur) {
@@ -173,7 +207,6 @@ class WhisperAudioHandler extends BaseAudioHandler {
         album: current.album,
         artist: current.artist,
         duration: dur,
-        artUri: current.artUri,
         displayTitle: current.displayTitle,
         displaySubtitle: current.displaySubtitle,
         displayDescription: current.displayDescription,
@@ -184,11 +217,12 @@ class WhisperAudioHandler extends BaseAudioHandler {
 
   Future<void> stopClip() async {
     _playingClip = false;
-    await _player.stop();
+    _clipTitle = null;
+    await _clipPlayer.stop();
 
     if (_keepAlive) {
       _standalonePlayback = false;
-      await _publishActiveIdle();
+      await _startIdleSession();
       return;
     }
 
@@ -197,36 +231,85 @@ class WhisperAudioHandler extends BaseAudioHandler {
       queue.add([]);
       await super.stop();
     }
-    _broadcastState(null);
+    _broadcastState();
   }
 
-  // ── audio_service media controls ──────────────────────────────────────────
+  Future<String> _ensureSilenceFile() async {
+    if (_silencePath != null && File(_silencePath!).existsSync()) {
+      return _silencePath!;
+    }
+    final dir = await getApplicationSupportDirectory();
+    final file = File(p.join(dir.path, 'whisperback_session_silence.wav'));
+    if (!file.existsSync()) {
+      await file.writeAsBytes(_silentWav());
+    }
+    _silencePath = file.path;
+    return file.path;
+  }
+
+  Uint8List _silentWav({int seconds = 1, int sampleRate = 44100}) {
+    const channels = 2;
+    final numSamples = seconds * sampleRate;
+    final dataSize = numSamples * channels * 2;
+    final bytes = BytesBuilder();
+    void str(String s) => bytes.add(s.codeUnits);
+    void u32(int v) {
+      final b = ByteData(4)..setUint32(0, v, Endian.little);
+      bytes.add(b.buffer.asUint8List());
+    }
+
+    void u16(int v) {
+      final b = ByteData(2)..setUint16(0, v, Endian.little);
+      bytes.add(b.buffer.asUint8List());
+    }
+
+    str('RIFF');
+    u32(36 + dataSize);
+    str('WAVE');
+    str('fmt ');
+    u32(16);
+    u16(1);
+    u16(channels);
+    u32(sampleRate);
+    u32(sampleRate * channels * 2);
+    u16(channels * 2);
+    u16(16);
+    str('data');
+    u32(dataSize);
+    bytes.add(Uint8List(dataSize));
+    return bytes.toBytes();
+  }
+
+  // ── Media controls ──────────────────────────────────────────────────────────
 
   @override
   Future<void> play() async {
     if (_playingClip) {
-      await _player.play();
+      await _clipPlayer.play();
       onPlayRequested?.call();
-      _broadcastState(null);
+      _broadcastState();
       return;
     }
-    if (_keepAlive) {
-      onPlayRequested?.call();
-      _broadcastState(null);
-    }
+    if (_keepAlive && _idlePlayer.volume == 0) return;
+    await _idlePlayer.play();
+    onPlayRequested?.call();
+    _broadcastState();
   }
 
   @override
   Future<void> pause() async {
     if (_playingClip) {
-      await _player.pause();
+      await _clipPlayer.pause();
       onPauseRequested?.call();
-      _broadcastState(null);
+      _broadcastState();
     }
   }
 
   @override
-  Future<void> seek(Duration position) => _player.seek(position);
+  Future<void> seek(Duration position) {
+    if (_playingClip) return _clipPlayer.seek(position);
+    return _idlePlayer.seek(position);
+  }
 
   @override
   Future<void> stop() async {
@@ -247,59 +330,79 @@ class WhisperAudioHandler extends BaseAudioHandler {
     }
   }
 
-  void _broadcastState(PlaybackEvent? event) {
-    final playing = _player.playing;
-    final processing = _player.processingState;
-
-    final reportPlaying = _playingClip
-        ? (playing ||
-            processing == ProcessingState.loading ||
-            processing == ProcessingState.buffering)
-        : _keepAlive;
-
-    final mappedState = _playingClip
-        ? _mapProcessingState(processing)
-        : (_keepAlive
-            ? AudioProcessingState.ready
-            : _mapProcessingState(processing));
-
-    final List<MediaControl> controls;
-    final List<int> compact;
-
+  void _broadcastState() {
     if (_playingClip) {
-      controls = [
-        if (processing != ProcessingState.completed)
-          playing ? MediaControl.pause : MediaControl.play,
-        MediaControl.stop,
-      ];
-      compact = controls.length >= 2 ? [0, 1] : [0];
+      _broadcastClipState();
     } else if (_keepAlive) {
-      controls = [
-        MediaControl.custom(
-          androidIcon: 'drawable/ic_power',
-          label: 'Power off',
-          name: 'power_off',
-        ),
-      ];
-      compact = const [0];
+      _broadcastIdleState();
     } else {
-      controls = const [];
-      compact = const [];
+      _broadcastStoppedState();
     }
+  }
+
+  void _broadcastClipState() {
+    final playing = _clipPlayer.playing;
+    final processing = _clipPlayer.processingState;
+
+    final reportPlaying = playing ||
+        processing == ProcessingState.loading ||
+        processing == ProcessingState.buffering;
+
+    final controls = <MediaControl>[
+      if (processing != ProcessingState.completed)
+        playing ? MediaControl.pause : MediaControl.play,
+      MediaControl.stop,
+    ];
 
     playbackState.add(
       playbackState.value.copyWith(
         controls: controls,
-        systemActions: {
-          if (_playingClip) MediaAction.seek,
-          MediaAction.stop,
-        },
-        androidCompactActionIndices: compact,
-        processingState: mappedState,
+        systemActions: const {MediaAction.seek, MediaAction.stop},
+        androidCompactActionIndices:
+            controls.length >= 2 ? const [0, 1] : const [0],
+        processingState: _mapProcessingState(processing),
         playing: reportPlaying,
-        updatePosition: _playingClip ? _player.position : Duration.zero,
-        bufferedPosition: _playingClip ? _player.bufferedPosition : Duration.zero,
-        speed: _player.speed,
+        updatePosition: _clipPlayer.position,
+        bufferedPosition: _clipPlayer.bufferedPosition,
+        speed: _clipPlayer.speed,
+        queueIndex: 0,
+      ),
+    );
+  }
+
+  void _broadcastIdleState() {
+    playbackState.add(
+      playbackState.value.copyWith(
+        controls: [
+          MediaControl.custom(
+            androidIcon: 'drawable/ic_power',
+            label: 'Power off',
+            name: 'power_off',
+          ),
+        ],
+        systemActions: const {MediaAction.stop},
+        androidCompactActionIndices: const [0],
+        processingState: AudioProcessingState.ready,
+        playing: true,
+        updatePosition: Duration.zero,
+        bufferedPosition: Duration.zero,
+        speed: 1.0,
+        queueIndex: 0,
+      ),
+    );
+  }
+
+  void _broadcastStoppedState() {
+    playbackState.add(
+      playbackState.value.copyWith(
+        controls: const [],
+        systemActions: const {MediaAction.stop},
+        androidCompactActionIndices: const [],
+        processingState: AudioProcessingState.idle,
+        playing: _standalonePlayback,
+        updatePosition: Duration.zero,
+        bufferedPosition: Duration.zero,
+        speed: 1.0,
         queueIndex: 0,
       ),
     );
@@ -316,6 +419,7 @@ class WhisperAudioHandler extends BaseAudioHandler {
   }
 
   void disposePlayer() {
-    _player.dispose();
+    _clipPlayer.dispose();
+    _idlePlayer.dispose();
   }
 }

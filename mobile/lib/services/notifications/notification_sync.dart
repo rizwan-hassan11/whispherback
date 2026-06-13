@@ -5,10 +5,12 @@ import '../scheduler/schedule_fire_helper.dart';
 import '../scheduler/schedule_last_fired_store.dart';
 import 'notification_service.dart';
 
-/// Reconciles system notifications with the current app state:
-/// shows/hides the persistent "active" notification and re-arms scheduled
-/// alarms. Call after toggling Active, after any schedule change, and after
-/// each scheduled fire so "next up" stays accurate.
+/// Reconciles system notifications with the current app state.
+///
+/// Uses a **dual notification** strategy that works reliably on Android:
+/// • [NotificationService.showActiveOngoing] — schedule / active status (always)
+/// • [WhisperAudioHandler] via audio_service — Spotify-style media controls
+///   while a clip is playing (when the service is bound)
 Future<void> syncWhisperNotifications({
   required AppStateRepository appState,
   required ScheduleRepository schedules,
@@ -22,6 +24,7 @@ Future<void> syncWhisperNotifications({
   final armed = enabled.length;
   final now = DateTime.now();
   final lastFired = ScheduleLastFiredStore.instance;
+  final handler = whisperAudioHandler;
 
   final upcoming = ScheduleFireHelper.upcomingEvents(
     enabled,
@@ -31,9 +34,16 @@ Future<void> syncWhisperNotifications({
   );
 
   String? nextUpcoming;
+  String? upcomingSummary;
   if (upcoming.isNotEmpty) {
     nextUpcoming =
         'Next: “${upcoming.first.playlistName}” at ${_formatTime(upcoming.first.when)}';
+    if (upcoming.length > 1) {
+      upcomingSummary = upcoming
+          .take(4)
+          .map((e) => '• ${_formatTime(e.when)} — ${e.playlistName}')
+          .join('\n');
+    }
   }
 
   if (active) {
@@ -41,16 +51,34 @@ Future<void> syncWhisperNotifications({
         (armed > 0
             ? '$armed schedule(s) armed · whispers will play automatically'
             : 'Listening for scheduled whispers');
-    await whisperAudioHandler.updateActiveSessionInfo(
+
+    await handler.updateActiveSessionInfo(
       subtitle: subtitle,
       scheduleCount: armed,
     );
-    // Media controls + lock screen come from audio_service — cancel the old
-    // low-priority status notification so it doesn't hide the media card.
-    await service.cancelActiveOngoing();
+
+    if (handler.isPlayingClip) {
+      final title = handler.currentClipTitle ?? 'Now playing';
+      await service.showNowPlaying(
+        title: title,
+        subtitle: subtitle,
+      );
+    } else {
+      await service.showActiveOngoing(
+        scheduleCount: armed,
+        nextUpcoming: nextUpcoming,
+        upcomingSummary: upcomingSummary,
+      );
+    }
+  } else if (handler.isPlayingClip) {
+    await service.showNowPlaying(
+      title: handler.currentClipTitle ?? 'Now playing',
+      subtitle: 'Library preview',
+    );
   } else {
     await service.cancelActiveOngoing();
   }
+
   await service.syncSchedules(all, active: active);
 }
 
@@ -62,7 +90,6 @@ String _formatTime(DateTime when) {
   return '$hour12:$m $period';
 }
 
-/// Refresh notifications after playback events (scheduled clip finished, etc.).
 Future<void> refreshWhisperNotifications({
   required AppStateRepository appState,
   required ScheduleRepository schedules,

@@ -237,6 +237,7 @@ class PlaybackCoordinator {
         modalVisible: false,
       ),
     );
+    await refreshScheduleNotifications?.call();
     return true;
   }
 
@@ -268,7 +269,9 @@ class PlaybackCoordinator {
       );
     } catch (_) {
       await stop();
+      return;
     }
+    await refreshScheduleNotifications?.call();
   }
 
   bool _isPlayablePath(String path) {
@@ -317,6 +320,7 @@ class PlaybackCoordinator {
     } else {
       _emit(const PlaybackSnapshot(state: AppPlaybackState.inactive));
     }
+    await refreshScheduleNotifications?.call();
   }
 
   void dismissModal() {
