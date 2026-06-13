@@ -9,6 +9,7 @@ import 'providers/settings_provider.dart';
 import 'services/notifications/notification_service.dart';
 import 'services/notifications/notification_sync.dart';
 import 'services/scheduler/schedule_engine.dart';
+import 'services/scheduler/schedule_engine_binding.dart';
 import 'services/scheduler/schedule_last_fired_store.dart';
 
 class WhisperBackApp extends ConsumerStatefulWidget {
@@ -18,22 +19,36 @@ class WhisperBackApp extends ConsumerStatefulWidget {
   ConsumerState<WhisperBackApp> createState() => _WhisperBackAppState();
 }
 
-class _WhisperBackAppState extends ConsumerState<WhisperBackApp> {
+class _WhisperBackAppState extends ConsumerState<WhisperBackApp>
+    with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await ScheduleLastFiredStore.ensureLoaded();
-      ref.read(scheduleEngineProvider).start();
+      // Eagerly create the engine (starts its timer in the provider).
+      ref.read(scheduleEngineProvider);
       await _initNotifications();
     });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      ScheduleEngineBinding.instance.fireNow();
+    }
   }
 
   Future<void> _initNotifications() async {
     await NotificationService.instance.init();
     await NotificationService.instance.requestPermissions();
-    // Restore the persistent notification + scheduled alarms after a cold
-    // start (covers reboots and OS-forced closures while Active was ON).
     await syncWhisperNotifications(
       appState: ref.read(appStateRepositoryProvider),
       schedules: ref.read(scheduleRepositoryProvider),

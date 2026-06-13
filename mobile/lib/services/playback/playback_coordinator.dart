@@ -150,9 +150,10 @@ class PlaybackCoordinator {
 
   /// Called by [ScheduleEngine]. Scheduled whispers take priority over manual
   /// preview/playlist playback — current audio is stopped first.
-  Future<void> requestScheduledPlay(String playlistId) async {
+  /// Returns true when clip playback actually started.
+  Future<bool> requestScheduledPlay(String playlistId) async {
     await _interruptForSchedule();
-    await playPlaylist(playlistId, fromSchedule: true);
+    return playPlaylist(playlistId, fromSchedule: true);
   }
 
   Future<void> _interruptForSchedule() async {
@@ -191,25 +192,25 @@ class PlaybackCoordinator {
     await refreshModeState();
   }
 
-  Future<void> playPlaylist(String playlistId,
+  Future<bool> playPlaylist(String playlistId,
       {bool fromSchedule = false}) async {
-    if (!fromSchedule && !await _canPlay()) return;
-    if (fromSchedule && !await _appState.isActive()) return;
+    if (!fromSchedule && !await _canPlay()) return false;
+    if (fromSchedule && !await _appState.isActive()) return false;
 
     final clips = await _playlists.getClips(playlistId);
-    if (clips.isEmpty) return;
+    if (clips.isEmpty) return false;
 
     final playlist = await _playlists.getById(playlistId);
     final shuffle = playlist?.shuffleEnabled ?? false;
     final clip = shuffle ? _nextShuffledClip(playlistId, clips) : clips.first;
 
-    if (!_isPlayablePath(clip.filePath)) return;
+    if (!_isPlayablePath(clip.filePath)) return false;
 
     if (fromSchedule) {
       final sleep = await _sleep.getActive();
-      if (_sleep.isSleepActive(sleep)) return;
+      if (_sleep.isSleepActive(sleep)) return false;
       final prayer = await _prayer.getCurrentPrayerWindow();
-      if (prayer != null) return;
+      if (prayer != null) return false;
     }
 
     try {
@@ -220,7 +221,7 @@ class PlaybackCoordinator {
         subtitle: fromSchedule ? 'Scheduled whisper' : 'Now playing',
       );
     } catch (_) {
-      return;
+      return false;
     }
 
     _emit(
@@ -236,6 +237,7 @@ class PlaybackCoordinator {
         modalVisible: false,
       ),
     );
+    return true;
   }
 
   /// Plays a single clip on demand (library preview). A manual tap plays

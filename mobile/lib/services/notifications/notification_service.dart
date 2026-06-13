@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
@@ -5,11 +7,13 @@ import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 
 import '../../domain/entities/playback_schedule.dart';
+import '../scheduler/schedule_engine_binding.dart';
 import '../scheduler/schedule_fire_helper.dart';
 
-/// Handles all system notifications: a persistent "active" status notification
-/// while the master toggle is ON, and exact scheduled alarms that fire even
-/// when the app is closed/killed (Android) or backgrounded (iOS).
+/// Payload attached to scheduled alarm notifications.
+const scheduleAlarmPayload = 'schedule_alarm';
+
+/// Handles scheduled alarm notifications that fire when the app is closed.
 class NotificationService {
   NotificationService._();
   static final NotificationService instance = NotificationService._();
@@ -46,6 +50,8 @@ class NotificationService {
     );
     await _plugin.initialize(
       const InitializationSettings(android: androidInit, iOS: darwinInit),
+      onDidReceiveNotificationResponse: _onNotificationResponse,
+      onDidReceiveBackgroundNotificationResponse: _onBackgroundNotificationResponse,
     );
 
     await _createChannels();
@@ -92,7 +98,20 @@ class NotificationService {
     await ios?.requestPermissions(alert: true, badge: true, sound: true);
   }
 
-  // ── Persistent "active" notification ──────────────────────────────────────
+  static void _onNotificationResponse(NotificationResponse response) {
+    if (response.payload == scheduleAlarmPayload) {
+      unawaited(ScheduleEngineBinding.instance.fireNow());
+    }
+  }
+
+  @pragma('vm:entry-point')
+  static void _onBackgroundNotificationResponse(NotificationResponse response) {
+    if (response.payload == scheduleAlarmPayload) {
+      // Background isolate cannot reach the engine; opening the app resumes it.
+    }
+  }
+
+  // ── Legacy status notification (deprecated — use audio_service media card) ─
 
   Future<void> showActiveOngoing({
     int scheduleCount = 0,
@@ -158,6 +177,7 @@ class NotificationService {
           when: when,
           title: 'WhisperBack',
           body: '“$name” is ready to play',
+          payload: scheduleAlarmPayload,
         );
         id++;
       }
@@ -169,6 +189,7 @@ class NotificationService {
     required tz.TZDateTime when,
     required String title,
     required String body,
+    String? payload,
   }) async {
     const details = NotificationDetails(
       android: AndroidNotificationDetails(
@@ -195,6 +216,7 @@ class NotificationService {
         uiLocalNotificationDateInterpretation:
             UILocalNotificationDateInterpretation.absoluteTime,
         matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
+        payload: payload,
       );
     } catch (_) {
       // Exact alarms may be disallowed; fall back to inexact.
@@ -208,6 +230,7 @@ class NotificationService {
         uiLocalNotificationDateInterpretation:
             UILocalNotificationDateInterpretation.absoluteTime,
         matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
+        payload: payload,
       );
     }
   }

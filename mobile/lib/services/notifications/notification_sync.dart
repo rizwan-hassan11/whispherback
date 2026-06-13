@@ -31,17 +31,9 @@ Future<void> syncWhisperNotifications({
   );
 
   String? nextUpcoming;
-  String? upcomingSummary;
   if (upcoming.isNotEmpty) {
     nextUpcoming =
         'Next: “${upcoming.first.playlistName}” at ${_formatTime(upcoming.first.when)}';
-    if (upcoming.length > 1) {
-      final lines = upcoming
-          .take(4)
-          .map((e) => '• ${_formatTime(e.when)} — ${e.playlistName}')
-          .join('\n');
-      upcomingSummary = lines;
-    }
   }
 
   if (active) {
@@ -53,11 +45,9 @@ Future<void> syncWhisperNotifications({
       subtitle: subtitle,
       scheduleCount: armed,
     );
-    await service.showActiveOngoing(
-      scheduleCount: armed,
-      nextUpcoming: nextUpcoming,
-      upcomingSummary: upcomingSummary,
-    );
+    // Media controls + lock screen come from audio_service — cancel the old
+    // low-priority status notification so it doesn't hide the media card.
+    await service.cancelActiveOngoing();
   } else {
     await service.cancelActiveOngoing();
   }

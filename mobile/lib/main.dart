@@ -27,13 +27,13 @@ Future<void> main() async {
         builder: WhisperAudioHandler.new,
         config: AudioServiceConfig(
           androidNotificationChannelId: 'com.whisperback.playback',
-          androidNotificationChannelName: 'WhisperBack',
+          androidNotificationChannelName: 'WhisperBack Playback',
           androidNotificationChannelDescription:
-              'Playback controls, schedules, and session status',
+              'Now playing, lock-screen controls, and active session',
           androidNotificationOngoing: true,
-          // Keep notification + lock-screen controls while paused or in background.
           androidStopForegroundOnPause: false,
           androidNotificationIcon: 'drawable/ic_notification',
+          androidNotificationClickStartsActivity: true,
           notificationColor: const Color(0xFF2E8BFF),
         ),
       ).timeout(const Duration(seconds: 8));
