@@ -176,10 +176,12 @@ class AudioPlaybackService {
       _handler.onStopClipRequested = cb;
   set onPlayRequested(void Function()? cb) => _handler.onPlayRequested = cb;
   set onPauseRequested(void Function()? cb) => _handler.onPauseRequested = cb;
-  set onSkipToNextRequested(void Function()? cb) =>
+  set onSkipToNextRequested(Future<void> Function()? cb) =>
       _handler.onSkipToNextRequested = cb;
-  set onSkipToPreviousRequested(void Function()? cb) =>
+  set onSkipToPreviousRequested(Future<void> Function()? cb) =>
       _handler.onSkipToPreviousRequested = cb;
+  set onClipSessionChanged(void Function()? cb) =>
+      _handler.onClipSessionChanged = cb;
 
   /// Tears down the foreground session (master toggle OFF).
   Future<void> exitForeground() async {

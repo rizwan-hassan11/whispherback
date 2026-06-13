@@ -48,6 +48,14 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     );
     _player.playbackEventStream.listen(_broadcastState);
     _player.durationStream.listen(_onDurationReady);
+    _player.positionStream.listen((_) {
+      if (_playingClip && _player.playing) {
+        _publishClipControls(
+          playing: true,
+          processing: _player.processingState,
+        );
+      }
+    });
   }
 
   /// All clip / playlist playback — drives lock-screen + notification controls.
@@ -71,10 +79,15 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   void Function()? onStopClipRequested;
   void Function()? onPlayRequested;
   void Function()? onPauseRequested;
-  void Function()? onSkipToNextRequested;
-  void Function()? onSkipToPreviousRequested;
+  Future<void> Function()? onSkipToNextRequested;
+  Future<void> Function()? onSkipToPreviousRequested;
+  void Function()? onClipSessionChanged;
 
   bool get isPlayingClip => _playingClip;
+  bool get occupiesMediaNotification =>
+      _playingClip ||
+      _player.processingState != ProcessingState.idle ||
+      mediaItem.value != null;
   String? get currentClipTitle => _clipTitle;
 
   Future<void> _ensureAudioSession() async {
@@ -158,6 +171,7 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     await _player.setSpeed(1);
     await _player.setLoopMode(LoopMode.off);
     await _player.setAudioSource(AudioSource.file(path), preload: true);
+    onClipSessionChanged?.call();
     await play();
   }
 
@@ -198,10 +212,16 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   Future<void> stopClip() async {
+    if (!_playingClip && _player.processingState == ProcessingState.idle) {
+      return;
+    }
+
     _playingClip = false;
     _clipTitle = null;
     _playlistMode = false;
     await _player.stop();
+    mediaItem.add(null);
+    queue.add([]);
 
     playbackState.add(
       playbackState.value.copyWith(
@@ -213,6 +233,8 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
       ),
     );
 
+    onClipSessionChanged?.call();
+
     if (_keepAlive) {
       _standalonePlayback = false;
       await _startIdleKeepAlive();
@@ -221,7 +243,6 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
 
     if (_standalonePlayback) {
       _standalonePlayback = false;
-      queue.add([]);
       await super.stop();
     }
   }
@@ -276,12 +297,42 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
 
   @override
   Future<void> play() async {
-    await _player.play();
-    onPlayRequested?.call();
+    if (!_playingClip) return;
+
+    await _ensureAudioSession();
+    final session = await AudioSession.instance;
+    await session.setActive(true);
+
+    if (_player.processingState == ProcessingState.completed) {
+      await _player.seek(Duration.zero);
+    }
+
+    _publishClipControls(
+      playing: true,
+      processing: _player.processingState,
+    );
+
+    try {
+      await _player.play();
+      onPlayRequested?.call();
+    } catch (_) {
+      _publishClipControls(
+        playing: false,
+        processing: _player.processingState,
+      );
+      rethrow;
+    }
   }
 
   @override
   Future<void> pause() async {
+    if (!_playingClip) return;
+
+    _publishClipControls(
+      playing: false,
+      processing: _player.processingState,
+    );
+
     await _player.pause();
     onPauseRequested?.call();
   }
@@ -292,25 +343,32 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   @override
   Future<void> stop() async {
     if (_playingClip) {
+      await stopClip();
       onStopClipRequested?.call();
-    } else {
-      onStopRequested?.call();
+      return;
     }
+    onStopRequested?.call();
+    await super.stop();
   }
 
   @override
   Future<void> skipToNext() async {
-    if (_playlistMode && onSkipToNextRequested != null) {
-      onSkipToNextRequested!.call();
-    }
+    if (!_playingClip || !_playlistMode) return;
+    await onSkipToNextRequested?.call();
   }
 
   @override
   Future<void> skipToPrevious() async {
-    if (_playlistMode && onSkipToPreviousRequested != null) {
-      onSkipToPreviousRequested!.call();
-    } else {
-      onStopClipRequested?.call();
+    if (!_playingClip) return;
+
+    if (_playlistMode) {
+      await onSkipToPreviousRequested?.call();
+      return;
+    }
+
+    await _player.seek(Duration.zero);
+    if (!_player.playing) {
+      await play();
     }
   }
 
@@ -333,6 +391,12 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     );
   }
 
+  static const _stopControl = MediaControl(
+    androidIcon: 'drawable/ic_media_stop',
+    label: 'Stop',
+    action: MediaAction.stop,
+  );
+
   void _publishClipControls({
     required bool playing,
     required ProcessingState processing,
@@ -342,17 +406,35 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     final completed = processing == ProcessingState.completed;
     final reportPlaying = !completed && (playing || loading);
 
+    final List<MediaControl> controls;
+    List<int> compactIndices;
+
+    if (_playlistMode) {
+      controls = [
+        MediaControl.skipToPrevious,
+        if (!completed && reportPlaying)
+          MediaControl.pause
+        else if (!completed)
+          MediaControl.play,
+        MediaControl.skipToNext,
+        _stopControl,
+      ];
+      compactIndices = const [0, 1, 2];
+    } else {
+      controls = [
+        MediaControl.skipToPrevious,
+        if (!completed && reportPlaying)
+          MediaControl.pause
+        else if (!completed)
+          MediaControl.play,
+        _stopControl,
+      ];
+      compactIndices = const [0, 1];
+    }
+
     playbackState.add(
       playbackState.value.copyWith(
-        controls: [
-          MediaControl.skipToPrevious,
-          if (!completed && (playing || loading))
-            MediaControl.pause
-          else if (!completed)
-            MediaControl.play,
-          MediaControl.stop,
-          if (_playlistMode) MediaControl.skipToNext,
-        ],
+        controls: controls,
         systemActions: const {
           MediaAction.seek,
           MediaAction.seekForward,
@@ -361,9 +443,7 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
           MediaAction.pause,
           MediaAction.play,
         },
-        androidCompactActionIndices: _playlistMode
-            ? const [0, 1, 3]
-            : const [0, 1, 2],
+        androidCompactActionIndices: compactIndices,
         processingState: completed
             ? AudioProcessingState.completed
             : (loading

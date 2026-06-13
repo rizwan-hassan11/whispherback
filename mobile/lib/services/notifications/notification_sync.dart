@@ -21,7 +21,7 @@ Future<void> syncWhisperNotifications({
   final now = DateTime.now();
   final lastFired = ScheduleLastFiredStore.instance;
   final handler = whisperAudioHandler;
-  final playingClip = handler.isPlayingClip;
+  final playingClip = handler.occupiesMediaNotification;
 
   final upcoming = ScheduleFireHelper.upcomingEvents(
     enabled,

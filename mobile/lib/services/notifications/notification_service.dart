@@ -7,6 +7,7 @@ import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 
 import '../../domain/entities/playback_schedule.dart';
+import '../audio/whisper_audio_handler.dart';
 import '../scheduler/schedule_engine_binding.dart';
 import '../scheduler/schedule_fire_helper.dart';
 
@@ -130,6 +131,7 @@ class NotificationService {
     String? upcomingSummary,
   }) async {
     await init();
+    if (whisperAudioHandler.occupiesMediaNotification) return;
     final body = upcomingSummary ??
         nextUpcoming ??
         (scheduleCount > 0

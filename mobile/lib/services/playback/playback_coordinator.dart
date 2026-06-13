@@ -38,6 +38,7 @@ class PlaybackCoordinator {
   StreamSubscription<PlayerState>? _playerSub;
   Timer? _modeCheckTimer;
   String? _pendingScheduledPlaylistId;
+  int? _playlistClipIndex;
 
   /// Called after a scheduled whisper finishes so notifications show the next slot.
   Future<void> Function()? refreshScheduleNotifications;
@@ -60,14 +61,15 @@ class PlaybackCoordinator {
 
   Future<void> initialize() async {
     final active = await _appState.isActive();
-    // Tapping Stop on the media notification turns the whole session OFF.
     _audio.onStopRequested = () => unawaited(_deactivateFromNotification());
-    _audio.onStopClipRequested = () => unawaited(stop());
-    _audio.onPlayRequested = () => unawaited(_syncPlayingFromNotification(true));
-    _audio.onPauseRequested = () => unawaited(_syncPlayingFromNotification(false));
-    _audio.onSkipToNextRequested = () => unawaited(_skipPlaylistClip(next: true));
-    _audio.onSkipToPreviousRequested = () =>
-        unawaited(_skipPlaylistClip(next: false));
+    _audio.onStopClipRequested = () => unawaited(_finalizeClipStopFromNotification());
+    _audio.onPlayRequested = () => _syncPlayingSnapshot(true);
+    _audio.onPauseRequested = () => _syncPlayingSnapshot(false);
+    _audio.onSkipToNextRequested = () => _skipPlaylistClip(next: true);
+    _audio.onSkipToPreviousRequested = () => _skipPlaylistClip(next: false);
+    _audio.onClipSessionChanged = () {
+      unawaited(refreshScheduleNotifications?.call());
+    };
     _emit(
       _snapshot.copyWith(
         state: active ? AppPlaybackState.activeIdle : AppPlaybackState.inactive,
@@ -79,36 +81,99 @@ class PlaybackCoordinator {
     startModeMonitoring();
   }
 
-  Future<void> _syncPlayingFromNotification(bool playing) async {
-    if (_snapshot.state == AppPlaybackState.inactive && _snapshot.playlistId != null) {
-      return;
-    }
-    if (_snapshot.state == AppPlaybackState.inactive && !playing) return;
-    if (playing) {
-      await _audio.resume();
+  void _syncPlayingSnapshot(bool playing) {
+    if (_snapshot.state == AppPlaybackState.inactive) return;
+    if (_snapshot.isPlaying == playing) return;
+    _emit(_snapshot.copyWith(isPlaying: playing));
+  }
+
+  Future<void> _finalizeClipStopFromNotification() async {
+    _playlistClipIndex = null;
+    final active = await _appState.isActive();
+    if (active) {
+      _emit(const PlaybackSnapshot(
+        state: AppPlaybackState.activeIdle,
+        isPlaying: false,
+        modalVisible: false,
+      ));
+      unawaited(refreshModeState());
     } else {
-      await _audio.pause();
+      _emit(const PlaybackSnapshot(state: AppPlaybackState.inactive));
     }
-    if (_snapshot.state != AppPlaybackState.inactive) {
-      _emit(_snapshot.copyWith(isPlaying: playing));
-    }
+    await refreshScheduleNotifications?.call();
   }
 
   Future<void> _skipPlaylistClip({required bool next}) async {
-    if (_snapshot.playlistId == null) {
-      await stop();
-      return;
-    }
-    final clips = await _playlists.getClips(_snapshot.playlistId!);
+    final playlistId = _snapshot.playlistId;
+    if (playlistId == null) return;
+
+    final clips = await _playlists.getClips(playlistId);
     if (clips.length <= 1) {
       await stop();
       return;
     }
-    if (next) {
-      await playPlaylist(_snapshot.playlistId!);
-    } else {
-      await playPlaylist(_snapshot.playlistId!);
+
+    final playlist = await _playlists.getById(playlistId);
+    final shuffle = playlist?.shuffleEnabled ?? false;
+    final fromSchedule = _snapshot.state == AppPlaybackState.scheduledPlaying;
+
+    if (shuffle) {
+      await playPlaylist(playlistId, fromSchedule: fromSchedule);
+      return;
     }
+
+    final currentIndex = _playlistClipIndex ?? 0;
+    final nextIndex = next
+        ? (currentIndex + 1) % clips.length
+        : (currentIndex - 1 + clips.length) % clips.length;
+    await _playClipAtIndex(
+      playlistId,
+      clips,
+      nextIndex,
+      fromSchedule: fromSchedule,
+    );
+  }
+
+  Future<void> _playClipAtIndex(
+    String playlistId,
+    List<AudioClip> clips,
+    int index, {
+    required bool fromSchedule,
+  }) async {
+    if (index < 0 || index >= clips.length) return;
+
+    final clip = clips[index];
+    if (!_isPlayablePath(clip.filePath)) return;
+
+    final playlist = await _playlists.getById(playlistId);
+
+    try {
+      await _audio.playFile(
+        clip.filePath,
+        title: clip.title,
+        playlistName: playlist?.name,
+        subtitle: fromSchedule ? 'Scheduled whisper' : 'Now playing',
+        playlistMode: clips.length > 1,
+      );
+    } catch (_) {
+      return;
+    }
+
+    _playlistClipIndex = index;
+    _emit(
+      _snapshot.copyWith(
+        state: fromSchedule
+            ? AppPlaybackState.scheduledPlaying
+            : AppPlaybackState.manualPlaying,
+        playlistId: playlistId,
+        playlistName: playlist?.name,
+        clipTitle: clip.title,
+        isPlaying: true,
+        shuffleEnabled: playlist?.shuffleEnabled ?? false,
+        modalVisible: false,
+      ),
+    );
+    await refreshScheduleNotifications?.call();
   }
 
   Future<void> _deactivateFromNotification() async {
@@ -118,6 +183,15 @@ class PlaybackCoordinator {
   }
 
   void _onPlayerState(PlayerState state) {
+    if (_snapshot.state == AppPlaybackState.manualPlaying ||
+        _snapshot.state == AppPlaybackState.scheduledPlaying) {
+      final playing = state.playing;
+      if (playing != _snapshot.isPlaying &&
+          state.processingState != ProcessingState.completed) {
+        _emit(_snapshot.copyWith(isPlaying: playing));
+      }
+    }
+
     if (state.processingState == ProcessingState.completed) {
       unawaited(_onClipCompleted());
     }
@@ -228,6 +302,7 @@ class PlaybackCoordinator {
     final playlist = await _playlists.getById(playlistId);
     final shuffle = playlist?.shuffleEnabled ?? false;
     final clip = shuffle ? _nextShuffledClip(playlistId, clips) : clips.first;
+    _playlistClipIndex = shuffle ? null : 0;
 
     if (!_isPlayablePath(clip.filePath)) return false;
 
@@ -334,6 +409,7 @@ class PlaybackCoordinator {
   }
 
   Future<void> stop() async {
+    _playlistClipIndex = null;
     await _audio.stop();
     final active = await _appState.isActive();
     if (active) {
