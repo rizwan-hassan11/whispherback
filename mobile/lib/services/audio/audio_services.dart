@@ -145,6 +145,7 @@ class AudioPlaybackService {
     String title = 'WhisperBack',
     String? playlistName,
     String? subtitle,
+    bool playlistMode = false,
   }) async {
     _currentPath = path;
     await _handler.playFile(
@@ -152,6 +153,7 @@ class AudioPlaybackService {
       title: title,
       playlistName: playlistName,
       subtitle: subtitle,
+      playlistMode: playlistMode,
     );
   }
 
@@ -190,6 +192,10 @@ class AudioPlaybackService {
       _handler.onStopClipRequested = cb;
   set onPlayRequested(void Function()? cb) => _handler.onPlayRequested = cb;
   set onPauseRequested(void Function()? cb) => _handler.onPauseRequested = cb;
+  set onSkipToNextRequested(void Function()? cb) =>
+      _handler.onSkipToNextRequested = cb;
+  set onSkipToPreviousRequested(void Function()? cb) =>
+      _handler.onSkipToPreviousRequested = cb;
 
   /// Tears down the foreground session (master toggle OFF).
   Future<void> exitForeground() async {

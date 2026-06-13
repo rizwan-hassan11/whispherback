@@ -65,6 +65,9 @@ class PlaybackCoordinator {
     _audio.onStopClipRequested = () => unawaited(stop());
     _audio.onPlayRequested = () => unawaited(_syncPlayingFromNotification(true));
     _audio.onPauseRequested = () => unawaited(_syncPlayingFromNotification(false));
+    _audio.onSkipToNextRequested = () => unawaited(_skipPlaylistClip(next: true));
+    _audio.onSkipToPreviousRequested = () =>
+        unawaited(_skipPlaylistClip(next: false));
     _emit(
       _snapshot.copyWith(
         state: active ? AppPlaybackState.activeIdle : AppPlaybackState.inactive,
@@ -77,13 +80,35 @@ class PlaybackCoordinator {
   }
 
   Future<void> _syncPlayingFromNotification(bool playing) async {
-    if (_snapshot.state == AppPlaybackState.inactive) return;
+    if (_snapshot.state == AppPlaybackState.inactive && _snapshot.playlistId != null) {
+      return;
+    }
+    if (_snapshot.state == AppPlaybackState.inactive && !playing) return;
     if (playing) {
       await _audio.resume();
     } else {
       await _audio.pause();
     }
-    _emit(_snapshot.copyWith(isPlaying: playing));
+    if (_snapshot.state != AppPlaybackState.inactive) {
+      _emit(_snapshot.copyWith(isPlaying: playing));
+    }
+  }
+
+  Future<void> _skipPlaylistClip({required bool next}) async {
+    if (_snapshot.playlistId == null) {
+      await stop();
+      return;
+    }
+    final clips = await _playlists.getClips(_snapshot.playlistId!);
+    if (clips.length <= 1) {
+      await stop();
+      return;
+    }
+    if (next) {
+      await playPlaylist(_snapshot.playlistId!);
+    } else {
+      await playPlaylist(_snapshot.playlistId!);
+    }
   }
 
   Future<void> _deactivateFromNotification() async {
@@ -219,6 +244,7 @@ class PlaybackCoordinator {
         title: clip.title,
         playlistName: playlist?.name,
         subtitle: fromSchedule ? 'Scheduled whisper' : 'Now playing',
+        playlistMode: clips.length > 1,
       );
     } catch (_) {
       return false;
