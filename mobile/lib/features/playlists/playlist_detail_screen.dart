@@ -349,6 +349,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                       20, 0, 20, context.shellScrollPadding.bottom),
                   sliver: SliverReorderableList(
                     itemCount: _clips.length,
+                    // ignore: deprecated_member_use
                     onReorder: _reorderClips,
                     itemBuilder: (context, i) {
                       final clip = _clips[i];

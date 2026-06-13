@@ -65,8 +65,6 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   bool _playlistMode = false;
   String? _silencePath;
 
-  String _sessionSubtitle = 'Listening for scheduled whispers';
-  int _scheduleCount = 0;
   String? _clipTitle;
 
   void Function()? onStopRequested;
@@ -88,14 +86,8 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
 
   // ── Active session (scheduling keep-alive, no media notification) ───────────
 
-  Future<void> enterForeground({
-    String title = 'WhisperBack · Active',
-    String subtitle = 'Listening for scheduled whispers',
-    int scheduleCount = 0,
-  }) async {
+  Future<void> enterForeground() async {
     _keepAlive = true;
-    _sessionSubtitle = subtitle;
-    _scheduleCount = scheduleCount;
     if (_playingClip) return;
     await _startIdleKeepAlive();
   }
@@ -113,12 +105,7 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     }
   }
 
-  Future<void> updateActiveSessionInfo({
-    required String subtitle,
-    int scheduleCount = 0,
-  }) async {
-    _sessionSubtitle = subtitle;
-    _scheduleCount = scheduleCount;
+  Future<void> updateActiveSessionInfo() async {
     if (_playingClip) return;
     if (_keepAlive && !_idlePlayer.playing) {
       await _startIdleKeepAlive();

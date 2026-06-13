@@ -175,7 +175,7 @@ class NotificationService {
       _ongoingId,
       title,
       body,
-      NotificationDetails(
+      const NotificationDetails(
         android: AndroidNotificationDetails(
           _nowPlayingChannelId,
           'Now playing',

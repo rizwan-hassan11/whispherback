@@ -47,14 +47,7 @@ Future<void> syncWhisperNotifications({
     // Media session owns the notification — hide the status card.
     await service.cancelActiveOngoing();
   } else if (active) {
-    final subtitle = nextUpcoming ??
-        (armed > 0
-            ? '$armed schedule(s) armed · whispers will play automatically'
-            : 'Listening for scheduled whispers');
-    await handler.updateActiveSessionInfo(
-      subtitle: subtitle,
-      scheduleCount: armed,
-    );
+    await handler.updateActiveSessionInfo();
     await service.showActiveOngoing(
       scheduleCount: armed,
       nextUpcoming: nextUpcoming,

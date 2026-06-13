@@ -168,25 +168,9 @@ class AudioPlaybackService {
   }
 
   /// Starts the always-on foreground session (master toggle ON).
-  Future<void> enterForeground({
-    String title = 'WhisperBack · Active',
-    String subtitle = 'Listening for scheduled whispers',
-    int scheduleCount = 0,
-  }) =>
-      _handler.enterForeground(
-        title: title,
-        subtitle: subtitle,
-        scheduleCount: scheduleCount,
-      );
+  Future<void> enterForeground() => _handler.enterForeground();
 
-  Future<void> updateActiveSessionInfo({
-    required String subtitle,
-    int scheduleCount = 0,
-  }) =>
-      _handler.updateActiveSessionInfo(
-        subtitle: subtitle,
-        scheduleCount: scheduleCount,
-      );
+  Future<void> updateActiveSessionInfo() => _handler.updateActiveSessionInfo();
 
   set onStopClipRequested(void Function()? cb) =>
       _handler.onStopClipRequested = cb;
