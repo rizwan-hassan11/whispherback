@@ -78,6 +78,11 @@ class PlaybackCoordinator {
 
   Future<void> _syncPlayingFromNotification(bool playing) async {
     if (_snapshot.state == AppPlaybackState.inactive) return;
+    if (playing) {
+      await _audio.resume();
+    } else {
+      await _audio.pause();
+    }
     _emit(_snapshot.copyWith(isPlaying: playing));
   }
 

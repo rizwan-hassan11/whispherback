@@ -25,15 +25,16 @@ Future<void> main() async {
     try {
       whisperAudioHandler = await AudioService.init(
         builder: WhisperAudioHandler.new,
-        config: const AudioServiceConfig(
+        config: AudioServiceConfig(
           androidNotificationChannelId: 'com.whisperback.playback',
           androidNotificationChannelName: 'WhisperBack',
           androidNotificationChannelDescription:
               'Playback controls, schedules, and session status',
           androidNotificationOngoing: true,
-          androidStopForegroundOnPause: true,
+          // Keep notification + lock-screen controls while paused or in background.
+          androidStopForegroundOnPause: false,
           androidNotificationIcon: 'drawable/ic_notification',
-          notificationColor: Color(0xFF2E8BFF),
+          notificationColor: const Color(0xFF2E8BFF),
         ),
       ).timeout(const Duration(seconds: 8));
     } catch (e, st) {
