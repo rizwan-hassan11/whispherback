@@ -24,7 +24,7 @@ class PlaybackSnapshot extends Equatable {
     this.clipTitle,
     this.isPlaying = false,
     this.shuffleEnabled = false,
-    this.modalVisible = true,
+    this.modalVisible = false,
   });
 
   final AppPlaybackState state;

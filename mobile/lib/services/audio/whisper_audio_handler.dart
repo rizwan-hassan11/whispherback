@@ -83,6 +83,14 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   void Function()? onClipSessionChanged;
 
   bool get isPlayingClip => _playingClip;
+  bool get isKeepAliveActive => _keepAlive && !_playingClip;
+  bool get isForegroundNotificationActive =>
+      whisperAudioServiceBound &&
+      isKeepAliveActive &&
+      _player.playing &&
+      mediaItem.value != null;
+  bool get shouldUseFlutterActiveNotification =>
+      !isPlayingClip && !isForegroundNotificationActive;
   bool get occupiesMediaNotification =>
       _playingClip ||
       (_keepAlive && mediaItem.value != null) ||

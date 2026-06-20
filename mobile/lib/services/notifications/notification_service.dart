@@ -144,7 +144,8 @@ class NotificationService {
     String? upcomingSummary,
   }) async {
     await init();
-    if (whisperAudioHandler.occupiesMediaNotification) return;
+    if (whisperAudioHandler.isPlayingClip) return;
+    if (!whisperAudioHandler.shouldUseFlutterActiveNotification) return;
     final copy = RuntimeCopy.l10n;
     final body = upcomingSummary ??
         nextUpcoming ??

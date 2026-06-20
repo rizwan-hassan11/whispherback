@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/layout/responsive.dart';
+import '../../core/navigation/route_back.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_icons.dart';
 import '../../core/theme/app_theme.dart';
@@ -197,7 +198,9 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     final name = _playlist?.name ?? l10n.playlist;
     final shuffle = _playlist?.shuffleEnabled ?? false;
 
-    return Stack(
+    return RouteBackScope(
+      fallbackLocation: '/playlists',
+      child: Stack(
       fit: StackFit.expand,
       children: [
         DecoratedBox(
@@ -237,11 +240,12 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
             slivers: [
               SliverAppBar(
                 pinned: true,
+                primary: true,
                 backgroundColor: Colors.transparent,
                 surfaceTintColor: Colors.transparent,
                 leading: IconButton(
                   icon: Icon(AppIcons.back, color: theme.foreground),
-                  onPressed: () => context.pop(),
+                  onPressed: () => popOrGo(context, '/playlists'),
                 ),
                 actions: [
                   IconButton(
@@ -412,6 +416,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                 ),
         ),
       ],
+    ),
     );
   }
 }

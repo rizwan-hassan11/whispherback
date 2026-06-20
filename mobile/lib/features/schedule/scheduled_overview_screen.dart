@@ -51,7 +51,7 @@ class ScheduledOverviewScreen extends ConsumerWidget {
                 schedules: schedules,
                 theme: theme,
                 timeFmt: timeFmt,
-                onCreate: () => context.push('/playlists'),
+                onCreate: () => context.go('/playlists'),
                 onEdit: (id) => context.push('/schedule/build/$id'),
                 onToggle: (s, enabled) async {
                   await ref

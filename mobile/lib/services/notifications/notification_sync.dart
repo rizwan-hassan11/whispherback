@@ -22,7 +22,7 @@ Future<void> syncWhisperNotifications({
   final now = DateTime.now();
   final lastFired = ScheduleLastFiredStore.instance;
   final handler = whisperAudioHandler;
-  final playingClip = handler.occupiesMediaNotification;
+  final playingClip = handler.isPlayingClip;
 
   final upcoming = ScheduleFireHelper.upcomingEvents(
     enabled,
@@ -48,15 +48,19 @@ Future<void> syncWhisperNotifications({
   }
 
   if (playingClip) {
-    // Media session owns the notification — hide the status card.
+    // Clip playback uses the media notification — hide the status card.
     await service.cancelActiveOngoing();
   } else if (active) {
     await handler.updateActiveSessionInfo();
-    await service.showActiveOngoing(
-      scheduleCount: armed,
-      nextUpcoming: nextUpcoming,
-      upcomingSummary: upcomingSummary,
-    );
+    if (handler.shouldUseFlutterActiveNotification) {
+      await service.showActiveOngoing(
+        scheduleCount: armed,
+        nextUpcoming: nextUpcoming,
+        upcomingSummary: upcomingSummary,
+      );
+    } else {
+      await service.cancelActiveOngoing();
+    }
   } else {
     await service.cancelActiveOngoing();
   }

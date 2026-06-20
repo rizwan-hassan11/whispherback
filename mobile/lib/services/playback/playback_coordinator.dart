@@ -75,8 +75,9 @@ class PlaybackCoordinator {
       unawaited(refreshScheduleNotifications?.call());
     };
     _emit(
-      _snapshot.copyWith(
+      PlaybackSnapshot(
         state: active ? AppPlaybackState.activeIdle : AppPlaybackState.inactive,
+        modalVisible: false,
       ),
     );
     // Restore the foreground keep-alive after a cold start if Active.
@@ -288,7 +289,7 @@ class PlaybackCoordinator {
         isPlaying: false,
       ));
       await _appState.setActive(true);
-      unawaited(_activateInBackground());
+      await _activateInBackground();
     }
     return ActiveToggleResult.success;
   }
@@ -296,6 +297,7 @@ class PlaybackCoordinator {
   Future<void> _activateInBackground() async {
     await _audio.enterForeground();
     await refreshModeState();
+    await refreshScheduleNotifications?.call();
   }
 
   Future<bool> playPlaylist(String playlistId,

@@ -20,7 +20,6 @@ class PlaylistsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final playlistsAsync = ref.watch(playlistsProvider);
     final theme = whisperTheme(context);
-    final l10n = context.l10n;
 
     return Stack(
       fit: StackFit.expand,
@@ -67,19 +66,6 @@ class PlaylistsScreen extends ConsumerWidget {
               ),
             ),
           ),
-          floatingActionButton: playlistsAsync.maybeWhen(
-            data: (list) => list.isEmpty
-                ? null
-                : FloatingActionButton.extended(
-                    onPressed: () => context.push('/playlists/new'),
-                    icon: const Icon(AppIcons.add),
-                    label: Text(l10n.newPlaylist),
-                  ),
-            orElse: () => null,
-          ),
-          floatingActionButtonLocation: ShellAwareFabLocation(
-            ShellMetrics.fabBottomInset(context),
-          ),
         ),
       ],
     );
@@ -121,17 +107,41 @@ class _PlaylistsBody extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  l10n.playlists,
-                  style: GoogleFonts.fraunces(
-                    fontSize: 28,
-                    fontWeight: FontWeight.w700,
-                    color: theme.foreground,
-                  ),
-                ),
-                Text(
-                  l10n.collectionsSummary(playlists.length, totalClips),
-                  style: TextStyle(fontSize: 13, color: theme.muted),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            l10n.playlists,
+                            style: GoogleFonts.fraunces(
+                              fontSize: 28,
+                              fontWeight: FontWeight.w700,
+                              color: theme.foreground,
+                            ),
+                          ),
+                          Text(
+                            l10n.collectionsSummary(playlists.length, totalClips),
+                            style: TextStyle(fontSize: 13, color: theme.muted),
+                          ),
+                        ],
+                      ),
+                    ),
+                    FilledButton.tonalIcon(
+                      onPressed: onCreate,
+                      icon: const Icon(AppIcons.add, size: 18),
+                      label: Text(l10n.newPlaylist),
+                      style: FilledButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 20),
                 PlaylistsSummaryStrip(

@@ -42,7 +42,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/sign-up',
         builder: (context, state) => const SignUpScreen(),
       ),
-      // The five primary tabs live inside the shell (bottom nav visible).
+      // Primary tabs — bottom nav stays visible for nested playlist routes.
       ShellRoute(
         navigatorKey: _shellKey,
         builder: (context, state, child) => MainShell(child: child),
@@ -56,6 +56,31 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             path: '/playlists',
             pageBuilder: (context, state) =>
                 const NoTransitionPage(child: PlaylistsScreen()),
+            routes: [
+              GoRoute(
+                path: 'new',
+                pageBuilder: (context, state) =>
+                    const NoTransitionPage(child: NewPlaylistScreen()),
+              ),
+              GoRoute(
+                path: ':id',
+                pageBuilder: (context, state) => NoTransitionPage(
+                  child: PlaylistDetailScreen(
+                    playlistId: state.pathParameters['id']!,
+                  ),
+                ),
+                routes: [
+                  GoRoute(
+                    path: 'add-clips',
+                    pageBuilder: (context, state) => NoTransitionPage(
+                      child: AddClipsToPlaylistScreen(
+                        playlistId: state.pathParameters['id']!,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
           GoRoute(
             path: '/clips',
@@ -74,27 +99,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           ),
         ],
       ),
-      // Detail / builder pages open full-screen on the root navigator so the
-      // bottom nav bar never overlaps their content or action buttons.
-      GoRoute(
-        path: '/playlists/new',
-        parentNavigatorKey: _rootKey,
-        builder: (context, state) => const NewPlaylistScreen(),
-      ),
-      GoRoute(
-        path: '/playlists/:id/add-clips',
-        parentNavigatorKey: _rootKey,
-        builder: (context, state) => AddClipsToPlaylistScreen(
-          playlistId: state.pathParameters['id']!,
-        ),
-      ),
-      GoRoute(
-        path: '/playlists/:id',
-        parentNavigatorKey: _rootKey,
-        builder: (context, state) => PlaylistDetailScreen(
-          playlistId: state.pathParameters['id']!,
-        ),
-      ),
+      // Full-screen flows that should not show the bottom nav.
       GoRoute(
         path: '/clips/record',
         parentNavigatorKey: _rootKey,

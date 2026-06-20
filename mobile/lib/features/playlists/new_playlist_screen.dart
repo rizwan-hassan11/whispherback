@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 
 import 'package:google_fonts/google_fonts.dart';
 
+import '../../core/navigation/route_back.dart';
 import '../../core/theme/app_colors.dart';
 
 import '../../core/theme/app_icons.dart';
@@ -71,7 +72,7 @@ class _NewPlaylistScreenState extends ConsumerState<NewPlaylistScreen> {
           SnackBar(content: Text(l10n.createdPlaylist(name))),
         );
 
-        context.go('/playlists/${playlist.id}');
+        context.pushReplacement('/playlists/${playlist.id}');
       }
     } on PlaylistLimitException catch (e) {
       if (mounted) {
@@ -113,7 +114,7 @@ class _NewPlaylistScreenState extends ConsumerState<NewPlaylistScreen> {
                 _SubTopBar(
                   theme: theme,
                   title: l10n.newPlaylist,
-                  onBack: _creating ? null : () => context.pop(),
+                  onBack: _creating ? null : () => popOrGo(context, '/playlists'),
                 ),
                 Expanded(
                   child: ListView(
