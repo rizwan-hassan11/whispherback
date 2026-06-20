@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -7,13 +9,10 @@ plugins {
 
 // Pinned for CI clarity — keep in sync with Flutter stable (3.38+ uses API 36).
 // minSdk 24 = Android 7.0 (2016+). target/compile 36 = Android 16.
-private val compileSdkVersion = 36
-private val minSdkVersion = 24
-private val targetSdkVersion = 36
-
+// Use literals here: `compileSdkVersion` inside `android {}` is an AGP String? property.
 android {
     namespace = "com.whisperback.whisperback"
-    compileSdk = compileSdkVersion
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -22,14 +21,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
-    }
-
     defaultConfig {
         applicationId = "com.whisperback.whisperback"
-        minSdk = minSdkVersion
-        targetSdk = targetSdkVersion
+        minSdk = 24
+        targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
@@ -47,6 +42,12 @@ android {
         jniLibs {
             useLegacyPackaging = false
         }
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
     }
 }
 
