@@ -15,9 +15,14 @@ import '../../domain/playback/playback_state.dart';
 import '../../l10n/app_localizations.dart';
 import '../../providers/playback_providers.dart';
 import '../../core/widgets/depth_surface.dart';
+import '../../core/widgets/audio_service_warning_banner.dart';
 import '../../providers/repository_providers.dart';
+import '../../services/audio/whisper_audio_handler.dart';
 import '../../services/platform/permission_prompt.dart';
 import '../../services/notifications/notification_sync.dart';
+import '../../services/scheduler/schedule_countdown.dart';
+import '../../services/scheduler/schedule_fire_helper.dart';
+import '../../services/scheduler/schedule_last_fired_store.dart';
 import '../widgets/active_toggle.dart';
 import 'widgets/home_ambience.dart';
 
@@ -66,19 +71,25 @@ class HomeScreen extends ConsumerWidget {
         ),
         Stack(
           children: [
-            DepthOrb(
-              size: 100,
-              color: theme.isDark ? AppColors.brandLight : AppColors.ink,
-              top: 48,
-              right: -20,
-              intensity: 0.38,
-            ),
-            DepthOrb(
-              size: 72,
-              color: theme.isDark ? AppColors.gold : AppColors.lightMuted,
-              top: 120,
-              left: -24,
-              intensity: 0.32,
+            IgnorePointer(
+              child: Stack(
+                children: [
+                  DepthOrb(
+                    size: 100,
+                    color: theme.isDark ? AppColors.brandLight : AppColors.ink,
+                    top: 48,
+                    right: -20,
+                    intensity: 0.38,
+                  ),
+                  DepthOrb(
+                    size: 72,
+                    color: theme.isDark ? AppColors.gold : AppColors.lightMuted,
+                    top: 120,
+                    left: -24,
+                    intensity: 0.32,
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -133,6 +144,12 @@ class HomeScreen extends ConsumerWidget {
                                   );
                                   if (nowActive && context.mounted) {
                                     await runSchedulingSetupWizard(context);
+                                    if (context.mounted &&
+                                        !whisperAudioServiceBound) {
+                                      await showAudioServiceUnavailableDialog(
+                                        context,
+                                      );
+                                    }
                                   }
                                 }());
                               },
@@ -363,51 +380,92 @@ class _GreetingCard extends StatelessWidget {
   }
 }
 
-class _NextWhisperCard extends StatelessWidget {
+class _NextWhisperCard extends ConsumerStatefulWidget {
   const _NextWhisperCard({required this.theme});
 
   final WhisperThemeExtension theme;
 
   @override
+  ConsumerState<_NextWhisperCard> createState() => _NextWhisperCardState();
+}
+
+class _NextWhisperCardState extends ConsumerState<_NextWhisperCard> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return DepthSurface(
-      radius: AppRadii.sm,
-      padding: const EdgeInsets.all(14),
-      tiltX: 0.02,
-      lift: 4,
-      child: Row(
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: theme.glass,
-              borderRadius: BorderRadius.circular(12),
+    final l10n = context.l10n;
+    final schedules = ref.watch(schedulesProvider).valueOrNull ?? [];
+    final enabled = schedules.where((s) => s.enabled).toList(growable: false);
+    final now = DateTime.now();
+    final next = ScheduleFireHelper.nextUpcoming(
+      enabled,
+      now,
+      lastFiredFor: ScheduleLastFiredStore.instance.get,
+    );
+
+    final subtitle = next == null
+        ? l10n.noSchedulesYet
+        : '${next.schedule.playlistName} · ${ScheduleCountdown.untilTime(next.when, now)}';
+
+    return GestureDetector(
+      onTap: () => context.go('/schedule'),
+      child: DepthSurface(
+        radius: AppRadii.sm,
+        padding: const EdgeInsets.all(14),
+        tiltX: 0.02,
+        lift: 4,
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: widget.theme.glass,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(AppIcons.schedule,
+                  color: widget.theme.foreground, size: 20),
             ),
-            child: Icon(AppIcons.schedule, color: theme.foreground, size: 20),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  context.l10n.nextWhisper,
-                  style: Theme.of(context).textTheme.labelSmall,
-                ),
-                Text(
-                  context.l10n.nextWhisperSample,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 14,
-                    color: theme.foreground,
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    l10n.nextWhisper,
+                    style: Theme.of(context).textTheme.labelSmall,
                   ),
-                ),
-              ],
+                  Text(
+                    subtitle,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                      color: widget.theme.foreground,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          Icon(AppIcons.chevronRight, color: theme.muted, size: 20),
-        ],
+            Icon(AppIcons.chevronRight, color: widget.theme.muted, size: 20),
+          ],
+        ),
       ),
     );
   }

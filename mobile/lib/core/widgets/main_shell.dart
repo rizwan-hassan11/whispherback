@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../features/playback/mini_player_bar.dart';
 import '../../features/playback/playback_modal.dart';
+import '../../domain/playback/playback_state.dart';
 import '../../l10n/app_localizations.dart';
 import '../../providers/playback_providers.dart';
 import '../layout/responsive.dart';
@@ -93,6 +94,17 @@ class _MainShellState extends ConsumerState<MainShell> {
     final index = _indexForLocation(location);
     final theme = whisperTheme(context);
     final r = context.responsive;
+    final playback = ref.watch(playbackSnapshotProvider);
+    final snapshot = playback.valueOrNull;
+    final miniPlayerVisible = snapshot != null &&
+        snapshot.state != AppPlaybackState.inactive &&
+        snapshot.state != AppPlaybackState.activeIdle &&
+        snapshot.playlistName != null &&
+        !snapshot.modalVisible;
+    final shellBottomReserve = ShellMetrics.reservedBottomHeight(
+      context,
+      miniPlayerVisible: miniPlayerVisible,
+    );
 
     final body = LayoutBuilder(
       builder: (context, constraints) {
@@ -117,7 +129,12 @@ class _MainShellState extends ConsumerState<MainShell> {
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           const AudioServiceWarningBanner(),
-                          Expanded(child: widget.child),
+                          Expanded(
+                            child: Padding(
+                              padding: EdgeInsets.only(bottom: shellBottomReserve),
+                              child: widget.child,
+                            ),
+                          ),
                         ],
                       ),
                     ),

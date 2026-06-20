@@ -5,6 +5,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/widgets/permission_required_dialog.dart';
+import '../../core/layout/shell_messenger.dart';
 import '../../l10n/app_localizations.dart';
 import 'android_runtime_permissions.dart';
 
@@ -236,11 +237,9 @@ Future<void> runSchedulingSetupWizard(BuildContext context) async {
 
   final l10n = context.l10n;
 
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: Text(l10n.schedulingSetupIntro),
-      duration: const Duration(seconds: 4),
-    ),
+  context.showShellSnackBar(
+    l10n.schedulingSetupIntro,
+    duration: const Duration(seconds: 4),
   );
 
   await requestAppPermissionKind(AppPermissionKind.notifications);
@@ -277,9 +276,7 @@ Future<void> runSchedulingSetupWizard(BuildContext context) async {
   perms = await ensureAndroidSchedulingPermissions();
 
   if (perms.fullyReady) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(l10n.schedulingSetupComplete)),
-    );
+    context.showShellSnackBar(l10n.schedulingSetupComplete);
     return;
   }
 

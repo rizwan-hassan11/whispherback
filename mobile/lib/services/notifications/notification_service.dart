@@ -10,10 +10,12 @@ import '../../domain/entities/playback_schedule.dart';
 import '../audio/whisper_audio_handler.dart';
 import '../scheduler/schedule_engine_binding.dart';
 import '../scheduler/schedule_fire_helper.dart';
+import '../playback/active_mode_binding.dart';
 import '../../l10n/runtime_copy.dart';
 
 /// Payload attached to scheduled alarm notifications.
 const scheduleAlarmPayload = 'schedule_alarm';
+const activeStopActionId = 'stop_active';
 
 /// Handles scheduled alarm notifications that fire when the app is closed.
 class NotificationService {
@@ -124,6 +126,11 @@ class NotificationService {
   }
 
   static void _onNotificationResponse(NotificationResponse response) {
+    if (response.actionId == activeStopActionId) {
+      unawaited(ActiveModeBinding.instance.stopActive());
+      unawaited(instance.cancelActiveOngoing());
+      return;
+    }
     if (response.payload == scheduleAlarmPayload) {
       unawaited(ScheduleEngineBinding.instance.fireNow());
     }
@@ -171,6 +178,14 @@ class NotificationService {
               )
             : null,
         category: AndroidNotificationCategory.status,
+        actions: [
+          AndroidNotificationAction(
+            activeStopActionId,
+            copy.stop,
+            showsUserInterface: true,
+            cancelNotification: true,
+          ),
+        ],
       ),
     );
     await _plugin.show(_ongoingId, copy.notificationActiveTitle, body, details);

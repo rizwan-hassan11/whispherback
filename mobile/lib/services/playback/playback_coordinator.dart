@@ -11,6 +11,7 @@ import '../audio/audio_services.dart';
 import '../audio/clip_path_guard.dart';
 import '../../l10n/runtime_copy.dart';
 import '../prayer/prayer_service.dart';
+import '../playback/active_mode_binding.dart';
 import '../shuffle/shuffle_engine.dart';
 
 enum ActiveToggleResult { success }
@@ -65,6 +66,7 @@ class PlaybackCoordinator {
 
   Future<void> initialize() async {
     final active = await _appState.isActive();
+    ActiveModeBinding.instance.attach(_deactivateFromNotification);
     _audio.onStopRequested = () => unawaited(_deactivateFromNotification());
     _audio.onStopClipRequested = () => unawaited(_finalizeClipStopFromNotification());
     _audio.onPlayRequested = () => _syncPlayingSnapshot(true);

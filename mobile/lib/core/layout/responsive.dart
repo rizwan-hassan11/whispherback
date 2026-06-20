@@ -20,11 +20,30 @@ abstract final class ShellMetrics {
         MediaQuery.paddingOf(context).bottom;
   }
 
-  static double scrollBottomInset(BuildContext context, {double extra = 8}) {
+  /// Space reserved at the bottom of shell tab content so nothing sits under
+  /// the floating nav bar (and optional mini player).
+  static double reservedBottomHeight(
+    BuildContext context, {
+    required bool miniPlayerVisible,
+  }) {
     if (Responsive.of(context).useSideNavigation) {
-      return MediaQuery.paddingOf(context).bottom + extra;
+      return MediaQuery.paddingOf(context).bottom +
+          (miniPlayerVisible ? miniPlayerHeight : 0);
     }
-    return bottomNavTotalHeight(context) + miniPlayerHeight + extra;
+    var total = bottomNavTotalHeight(context);
+    if (miniPlayerVisible) total += miniPlayerHeight;
+    return total;
+  }
+
+  /// Bottom padding for modal sheets shown over shell routes.
+  static double sheetBottomInset(BuildContext context) {
+    return reservedBottomHeight(context, miniPlayerVisible: false) + 12;
+  }
+
+  /// Extra list padding at the bottom of scroll views inside the shell.
+  /// Nav clearance is applied globally by [MainShell].
+  static double scrollBottomInset(BuildContext context, {double extra = 12}) {
+    return extra;
   }
 
   static double playbackModalBottomInset(BuildContext context) {

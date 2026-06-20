@@ -710,50 +710,34 @@ class _ActionRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
 
-    return ShaderMask(
-      shaderCallback: (bounds) => const LinearGradient(
-        begin: Alignment.centerLeft,
-        end: Alignment.centerRight,
-        stops: [0.0, 0.05, 0.95, 1.0],
-        colors: [
-          Colors.transparent,
-          Colors.black,
-          Colors.black,
-          Colors.transparent,
-        ],
-      ).createShader(bounds),
-      blendMode: BlendMode.dstIn,
-      child: ScrollConfiguration(
-        behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          clipBehavior: Clip.none,
-          child: Row(
-            children: [
-              _ActionChip(
-                theme: theme,
-                icon: AppIcons.shuffle,
-                label: shuffleOn ? l10n.shuffleOn : l10n.shuffleOff,
-                selected: shuffleOn,
-                onTap: onShuffle,
-              ),
-              const SizedBox(width: 8),
-              _ActionChip(
-                theme: theme,
-                icon: AppIcons.schedule,
-                label: l10n.schedules,
-                onTap: onSchedule,
-              ),
-              const SizedBox(width: 8),
-              _ActionChip(
-                theme: theme,
-                icon: AppIcons.add,
-                label: l10n.addClips,
-                onTap: onAddClips,
-              ),
-            ],
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 2),
+      clipBehavior: Clip.none,
+      child: Row(
+        children: [
+          _ActionChip(
+            theme: theme,
+            icon: AppIcons.shuffle,
+            label: shuffleOn ? l10n.shuffleOn : l10n.shuffleOff,
+            selected: shuffleOn,
+            onTap: onShuffle,
           ),
-        ),
+          const SizedBox(width: 8),
+          _ActionChip(
+            theme: theme,
+            icon: AppIcons.schedule,
+            label: l10n.schedules,
+            onTap: onSchedule,
+          ),
+          const SizedBox(width: 8),
+          _ActionChip(
+            theme: theme,
+            icon: AppIcons.add,
+            label: l10n.addClips,
+            onTap: onAddClips,
+          ),
+        ],
       ),
     );
   }

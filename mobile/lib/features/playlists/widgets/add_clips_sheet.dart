@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../../../core/layout/responsive.dart';
+import '../../../core/layout/shell_messenger.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_icons.dart';
 import '../../../core/theme/app_theme.dart';
@@ -90,12 +92,8 @@ class _AddClipsSheetState extends ConsumerState<_AddClipsSheet> {
       ref.invalidate(clipsProvider);
       widget.onChanged?.call();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              context.l10n.clipsAddedToPlaylist(toAdd.length, widget.playlistName),
-            ),
-          ),
+        context.showShellSnackBar(
+          context.l10n.clipsAddedToPlaylist(toAdd.length, widget.playlistName),
         );
         Navigator.pop(context);
       }
@@ -122,7 +120,10 @@ class _AddClipsSheetState extends ConsumerState<_AddClipsSheet> {
     final maxH = MediaQuery.sizeOf(context).height * 0.82;
 
     return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.viewInsetsOf(context).bottom +
+            ShellMetrics.sheetBottomInset(context),
+      ),
       child: ClipRRect(
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         child: Material(

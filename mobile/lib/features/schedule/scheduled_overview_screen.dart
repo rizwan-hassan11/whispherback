@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -17,6 +19,9 @@ import '../../l10n/schedule_l10n.dart';
 import '../../providers/playback_providers.dart';
 import '../../providers/repository_providers.dart';
 import '../../services/notifications/notification_sync.dart';
+import '../../services/scheduler/schedule_countdown.dart';
+import '../../services/scheduler/schedule_fire_helper.dart';
+import '../../services/scheduler/schedule_last_fired_store.dart';
 
 class ScheduledOverviewScreen extends ConsumerWidget {
   const ScheduledOverviewScreen({super.key});
@@ -119,7 +124,7 @@ class _ScheduleAmbience extends StatelessWidget {
   }
 }
 
-class _ScheduleBody extends StatelessWidget {
+class _ScheduleBody extends StatefulWidget {
   const _ScheduleBody({
     required this.schedules,
     required this.theme,
@@ -136,13 +141,62 @@ class _ScheduleBody extends StatelessWidget {
   final ValueChanged<String> onEdit;
   final void Function(PlaybackSchedule schedule, bool enabled) onToggle;
 
-  int get _alarmCount => schedules.where((s) => s.alarmEnabled).length;
+  @override
+  State<_ScheduleBody> createState() => _ScheduleBodyState();
+}
 
-  int get _activeCount => schedules.where((s) => s.enabled).length;
+class _ScheduleBodyState extends State<_ScheduleBody> {
+  Timer? _countdownTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _countdownTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _countdownTimer?.cancel();
+    super.dispose();
+  }
+
+  int get _alarmCount =>
+      widget.schedules.where((s) => s.alarmEnabled).length;
+
+  int get _activeCount => widget.schedules.where((s) => s.enabled).length;
+
+  String _countdownFor(PlaybackSchedule schedule, AppLocalizations l10n) {
+    if (!schedule.enabled) return l10n.paused;
+    final now = DateTime.now();
+    final last = ScheduleLastFiredStore.instance.get(schedule.id);
+    final next = ScheduleFireHelper.nextFireTime(
+      schedule,
+      now,
+      lastFired: last,
+    );
+    return ScheduleCountdown.untilTime(next, now);
+  }
+
+  String _globalNextCountdown() {
+    final now = DateTime.now();
+    final enabled =
+        widget.schedules.where((s) => s.enabled).toList(growable: false);
+    final next = ScheduleFireHelper.nextUpcoming(
+      enabled,
+      now,
+      lastFiredFor: ScheduleLastFiredStore.instance.get,
+    );
+    return ScheduleCountdown.untilTime(next?.when, now);
+  }
 
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
+    final schedules = widget.schedules;
+    final theme = widget.theme;
+    final timeFmt = widget.timeFmt;
     return CustomScrollView(
       slivers: [
         SliverToBoxAdapter(
@@ -173,10 +227,10 @@ class _ScheduleBody extends StatelessWidget {
                     theme: theme,
                     active: _activeCount,
                     alarms: _alarmCount,
-                    nextLabel: timeFmt.format(_nextFire(schedules.first)),
+                    nextLabel: _globalNextCountdown(),
                   ),
                 if (schedules.isNotEmpty) const SizedBox(height: 16),
-                _CustomizeAction(theme: theme, onTap: onCreate),
+                _CustomizeAction(theme: theme, onTap: widget.onCreate),
                 const SizedBox(height: 22),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -248,29 +302,15 @@ class _ScheduleBody extends StatelessWidget {
                   schedule: s,
                   theme: theme,
                   timeFmt: timeFmt,
-                  onEdit: () => onEdit(s.playlistId),
-                  onToggle: (v) => onToggle(s, v),
+                  nextCountdown: _countdownFor(s, l10n),
+                  onEdit: () => widget.onEdit(s.playlistId),
+                  onToggle: (v) => widget.onToggle(s, v),
                 );
               },
             ),
           ),
       ],
     );
-  }
-
-  DateTime _nextFire(PlaybackSchedule s) {
-    final now = DateTime.now();
-    var t = DateTime(
-      now.year,
-      now.month,
-      now.day,
-      s.startTime.hour,
-      s.startTime.minute,
-    );
-    if (t.isBefore(now)) {
-      t = t.add(Duration(minutes: s.intervalMinutes));
-    }
-    return t;
   }
 }
 
@@ -485,6 +525,7 @@ class _ScheduleCard extends StatelessWidget {
     required this.schedule,
     required this.theme,
     required this.timeFmt,
+    required this.nextCountdown,
     required this.onEdit,
     required this.onToggle,
   });
@@ -492,6 +533,7 @@ class _ScheduleCard extends StatelessWidget {
   final PlaybackSchedule schedule;
   final WhisperThemeExtension theme;
   final DateFormat timeFmt;
+  final String nextCountdown;
   final VoidCallback onEdit;
   final ValueChanged<bool> onToggle;
 
@@ -627,7 +669,7 @@ class _ScheduleCard extends StatelessWidget {
                           children: [
                             TextSpan(text: l10n.nextWhisperIn),
                             TextSpan(
-                              text: schedule.enabled ? '~12 min' : l10n.paused,
+                              text: nextCountdown,
                               style: TextStyle(
                                 fontWeight: FontWeight.w600,
                                 color: theme.foreground,
