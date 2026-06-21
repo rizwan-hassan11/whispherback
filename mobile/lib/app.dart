@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'core/layout/shell_messenger.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'l10n/app_localizations.dart';
@@ -57,6 +58,7 @@ class _WhisperBackAppState extends ConsumerState<WhisperBackApp>
     await syncWhisperNotifications(
       appState: ref.read(appStateRepositoryProvider),
       schedules: ref.read(scheduleRepositoryProvider),
+      prayer: ref.read(prayerRepositoryProvider),
     );
   }
 
@@ -67,6 +69,7 @@ class _WhisperBackAppState extends ConsumerState<WhisperBackApp>
     await syncWhisperNotifications(
       appState: ref.read(appStateRepositoryProvider),
       schedules: ref.read(scheduleRepositoryProvider),
+      prayer: ref.read(prayerRepositoryProvider),
     );
     // Cold start / alarm tap — run an immediate scheduling pass.
     await ScheduleEngineBinding.instance.fireNow();
@@ -87,6 +90,7 @@ class _WhisperBackAppState extends ConsumerState<WhisperBackApp>
 
     return MaterialApp.router(
       key: ValueKey('locale-${locale.languageCode}'),
+      scaffoldMessengerKey: rootMessengerKey,
       title: 'WhisperBack',
       debugShowCheckedModeBanner: false,
       locale: locale,

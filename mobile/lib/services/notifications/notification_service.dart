@@ -34,6 +34,10 @@ class NotificationService {
   static const String _statusChannelId = 'whisperback_status';
   static const String _nowPlayingChannelId = 'whisperback_now_playing';
   static const String _alarmChannelId = 'whisperback_alarms';
+  static const String _prayerChannelId = 'whisperback_prayer';
+
+  /// Plugin handle for advanced features (prayer notification scheduling, etc.).
+  FlutterLocalNotificationsPlugin get plugin => _plugin;
 
   Future<void> init() async {
     if (_ready) return;
@@ -98,6 +102,16 @@ class NotificationService {
         'Scheduled whispers',
         description: 'Alerts when a scheduled whisper is due.',
         importance: Importance.max,
+        playSound: true,
+        enableVibration: true,
+      ),
+    );
+    await android.createNotificationChannel(
+      const AndroidNotificationChannel(
+        _prayerChannelId,
+        'Prayer times',
+        description: 'Adhan reminders at each prayer time.',
+        importance: Importance.high,
         playSound: true,
         enableVibration: true,
       ),

@@ -35,3 +35,24 @@ class AppleLogo extends StatelessWidget {
     );
   }
 }
+
+/// WhisperBack brand mark for use inside the app (splash, about, headers…).
+class WhisperBackLogo extends StatelessWidget {
+  const WhisperBackLogo({super.key, this.size = 96, this.borderRadius});
+
+  final double size;
+  final BorderRadius? borderRadius;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: borderRadius ?? BorderRadius.circular(size * 0.22),
+      child: Image.asset(
+        'assets/branding/app_logo.png',
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+      ),
+    );
+  }
+}

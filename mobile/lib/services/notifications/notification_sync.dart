@@ -1,6 +1,8 @@
 import '../../data/repositories/app_state_repository.dart';
+import '../../data/repositories/prayer_repository.dart';
 import '../../data/repositories/schedule_repository.dart';
 import '../audio/whisper_audio_handler.dart';
+import '../prayer/prayer_notification_scheduler.dart';
 import '../scheduler/schedule_fire_helper.dart';
 import '../scheduler/schedule_last_fired_store.dart';
 import '../../l10n/runtime_copy.dart';
@@ -11,6 +13,7 @@ import 'notification_service.dart';
 Future<void> syncWhisperNotifications({
   required AppStateRepository appState,
   required ScheduleRepository schedules,
+  PrayerRepository? prayer,
 }) async {
   final service = NotificationService.instance;
   await service.init();
@@ -66,6 +69,16 @@ Future<void> syncWhisperNotifications({
   }
 
   await service.syncSchedules(all, active: active);
+
+  if (prayer != null) {
+    final prayerScheduler = PrayerNotificationScheduler(
+      plugin: service.plugin,
+      prayerRepository: prayer,
+    );
+    // Adhan reminders are independent of the Active toggle — they fire as long
+    // as the user has the "Play adhan voice" setting enabled.
+    await prayerScheduler.sync();
+  }
 }
 
 String _formatTime(DateTime when) {

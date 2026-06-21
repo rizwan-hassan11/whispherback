@@ -6,12 +6,30 @@ class PrayerSettings {
     required this.madhab,
     required this.useGps,
     this.manualCity,
+    this.playAdhan = true,
   });
 
   final String calculationMethod;
   final String madhab;
   final bool useGps;
   final String? manualCity;
+  final bool playAdhan;
+
+  PrayerSettings copyWith({
+    String? calculationMethod,
+    String? madhab,
+    bool? useGps,
+    String? manualCity,
+    bool? playAdhan,
+  }) {
+    return PrayerSettings(
+      calculationMethod: calculationMethod ?? this.calculationMethod,
+      madhab: madhab ?? this.madhab,
+      useGps: useGps ?? this.useGps,
+      manualCity: manualCity ?? this.manualCity,
+      playAdhan: playAdhan ?? this.playAdhan,
+    );
+  }
 }
 
 class PrayerRepository {
@@ -35,6 +53,7 @@ class PrayerRepository {
       madhab: row['madhab']! as String,
       useGps: (row['use_gps'] as int) == 1,
       manualCity: row['manual_city'] as String?,
+      playAdhan: ((row['play_adhan'] as int?) ?? 1) == 1,
     );
   }
 
@@ -47,6 +66,7 @@ class PrayerRepository {
         'madhab': settings.madhab,
         'use_gps': settings.useGps ? 1 : 0,
         'manual_city': settings.manualCity,
+        'play_adhan': settings.playAdhan ? 1 : 0,
       },
       where: 'id = 1',
     );

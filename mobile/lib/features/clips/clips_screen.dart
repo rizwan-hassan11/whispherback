@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../core/layout/responsive.dart';
+import '../../core/layout/shell_messenger.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_icons.dart';
 import '../../core/theme/app_theme.dart';
@@ -61,9 +62,7 @@ class _ClipsScreenState extends ConsumerState<ClipsScreen> {
     ref.invalidate(clipsProvider);
     ref.invalidate(playlistsProvider);
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l10n.clipDeleted)),
-      );
+      context.showShellSnackBar(l10n.clipDeleted, icon: AppIcons.checkCircle);
     }
   }
 

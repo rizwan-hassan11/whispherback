@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 
 import 'package:google_fonts/google_fonts.dart';
 
+import '../../core/layout/shell_messenger.dart';
 import '../../core/navigation/route_back.dart';
 import '../../core/theme/app_colors.dart';
 
@@ -53,10 +54,8 @@ class _NewPlaylistScreenState extends ConsumerState<NewPlaylistScreen> {
     final name = _nameController.text.trim();
 
     if (name.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l10n.enterPlaylistName)),
-      );
-
+      context.showShellSnackBar(l10n.enterPlaylistName,
+          icon: AppIcons.alertCircle);
       return;
     }
 
@@ -68,17 +67,14 @@ class _NewPlaylistScreenState extends ConsumerState<NewPlaylistScreen> {
       ref.invalidate(playlistsProvider);
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(l10n.createdPlaylist(name))),
-        );
-
         context.pushReplacement('/playlists/${playlist.id}');
+        context.showShellSnackBar(l10n.createdPlaylist(name),
+            icon: AppIcons.checkCircle);
       }
     } on PlaylistLimitException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(l10n.playlistLimitReached(e.limit))),
-        );
+        context.showShellSnackBar(l10n.playlistLimitReached(e.limit),
+            icon: AppIcons.alertCircle);
       }
     } finally {
       if (mounted) setState(() => _creating = false);

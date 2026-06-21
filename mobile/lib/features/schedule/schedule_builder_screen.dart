@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../../core/layout/shell_messenger.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_icons.dart';
 import '../../core/theme/app_theme.dart';
@@ -126,16 +127,15 @@ class _ScheduleBuilderScreenState extends ConsumerState<ScheduleBuilderScreen> {
       await syncWhisperNotifications(
         appState: ref.read(appStateRepositoryProvider),
         schedules: ref.read(scheduleRepositoryProvider),
+        prayer: ref.read(prayerRepositoryProvider),
       );
       if (mounted) {
         final l10n = context.l10n;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(l10n.scheduleSavedTurnActive),
-            duration: const Duration(seconds: 4),
-          ),
-        );
         context.pop();
+        context.showShellSnackBar(
+          l10n.scheduleSavedTurnActive,
+          icon: AppIcons.checkCircle,
+        );
       }
     } on ScheduleConflictException catch (e) {
       if (!mounted) return;
@@ -161,8 +161,14 @@ class _ScheduleBuilderScreenState extends ConsumerState<ScheduleBuilderScreen> {
     await syncWhisperNotifications(
       appState: ref.read(appStateRepositoryProvider),
       schedules: ref.read(scheduleRepositoryProvider),
+      prayer: ref.read(prayerRepositoryProvider),
     );
-    if (mounted) context.pop();
+    if (mounted) {
+      final l10n = context.l10n;
+      context.pop();
+      context.showShellSnackBar(l10n.scheduleRemoved,
+          icon: AppIcons.checkCircle);
+    }
   }
 
   @override

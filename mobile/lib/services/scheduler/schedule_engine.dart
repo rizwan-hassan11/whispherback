@@ -132,6 +132,7 @@ final scheduleNotificationSyncProvider = Provider<ScheduleNotificationSync>(
     await syncWhisperNotifications(
       appState: ref.read(appStateRepositoryProvider),
       schedules: ref.read(scheduleRepositoryProvider),
+      prayer: ref.read(prayerRepositoryProvider),
     );
   },
 );

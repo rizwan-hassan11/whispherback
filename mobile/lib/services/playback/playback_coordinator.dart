@@ -10,6 +10,7 @@ import '../../domain/playback/playback_state.dart';
 import '../audio/audio_services.dart';
 import '../audio/clip_path_guard.dart';
 import '../../l10n/runtime_copy.dart';
+import '../prayer/adhan_player.dart';
 import '../prayer/prayer_service.dart';
 import '../playback/active_mode_binding.dart';
 import '../shuffle/shuffle_engine.dart';
@@ -44,6 +45,7 @@ class PlaybackCoordinator {
   Timer? _modeCheckTimer;
   String? _pendingScheduledPlaylistId;
   int? _playlistClipIndex;
+  String? _lastAdhanWindowKey;
 
   /// Called after a scheduled whisper finishes so notifications show the next slot.
   Future<void> Function()? refreshScheduleNotifications;
@@ -109,6 +111,9 @@ class PlaybackCoordinator {
     }
     await refreshScheduleNotifications?.call();
   }
+
+  Future<void> skipNext() => _skipPlaylistClip(next: true);
+  Future<void> skipPrevious() => _skipPlaylistClip(next: false);
 
   Future<void> _skipPlaylistClip({required bool next}) async {
     final playlistId = _snapshot.playlistId;
@@ -188,6 +193,7 @@ class PlaybackCoordinator {
   Future<void> _deactivateFromNotification() async {
     await _appState.setActive(false);
     await _audio.exitForeground();
+    await AdhanPlayer.instance.stop();
     _emit(const PlaybackSnapshot(state: AppPlaybackState.inactive));
   }
 
@@ -285,6 +291,7 @@ class PlaybackCoordinator {
       _emit(const PlaybackSnapshot(state: AppPlaybackState.inactive));
       await _appState.setActive(false);
       await _audio.exitForeground();
+      await AdhanPlayer.instance.stop();
     } else {
       _emit(_snapshot.copyWith(
         state: AppPlaybackState.activeIdle,
@@ -424,6 +431,9 @@ class PlaybackCoordinator {
   Future<void> stop() async {
     _playlistClipIndex = null;
     await _audio.stop();
+    // If a prayer/adhan happened to be playing, stop it too — the user just
+    // hit the Stop control on the player and expects silence.
+    await AdhanPlayer.instance.stop();
     final active = await _appState.isActive();
     if (active) {
       _emit(const PlaybackSnapshot(
@@ -483,7 +493,20 @@ class PlaybackCoordinator {
   }
 
   Future<void> refreshModeState() async {
-    if (!await _appState.isActive()) {
+    final active = await _appState.isActive();
+
+    // Adhan voice is decoupled from the master Active toggle so users still
+    // hear the call to prayer even when WhisperBack whispers are off.
+    final prayer = await _prayer.getCurrentPrayerWindow();
+    if (prayer != null && await _prayer.adhanEnabled()) {
+      final key = '${prayer.name}-${prayer.start.toIso8601String()}';
+      if (_lastAdhanWindowKey != key) {
+        _lastAdhanWindowKey = key;
+        unawaited(AdhanPlayer.instance.playFor(key));
+      }
+    }
+
+    if (!active) {
       _emit(const PlaybackSnapshot(state: AppPlaybackState.inactive));
       return;
     }
@@ -496,7 +519,6 @@ class PlaybackCoordinator {
       return;
     }
 
-    final prayer = await _prayer.getCurrentPrayerWindow();
     if (prayer != null) {
       await _audio.pause();
       _emit(_snapshot.copyWith(

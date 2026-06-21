@@ -12,6 +12,7 @@ import '../../l10n/app_localizations.dart';
 import '../../data/repositories/prayer_repository.dart';
 import '../../providers/playback_providers.dart';
 import '../../providers/repository_providers.dart';
+import '../../services/notifications/notification_sync.dart';
 import '../../services/platform/permission_prompt.dart';
 
 class PrayerSettingsScreen extends ConsumerStatefulWidget {
@@ -29,6 +30,12 @@ class _PrayerSettingsScreenState extends ConsumerState<PrayerSettingsScreen> {
   Future<void> _save(PrayerSettings settings) async {
     await ref.read(prayerRepositoryProvider).saveSettings(settings);
     ref.invalidate(prayerSettingsProvider);
+    // Prayer-time notifications depend on these settings — keep them in sync.
+    await syncWhisperNotifications(
+      appState: ref.read(appStateRepositoryProvider),
+      schedules: ref.read(scheduleRepositoryProvider),
+      prayer: ref.read(prayerRepositoryProvider),
+    );
   }
 
   @override
@@ -122,12 +129,7 @@ class _PrayerSettingsScreenState extends ConsumerState<PrayerSettingsScreen> {
                           options: _methods,
                           selected: settings.calculationMethod,
                           onSelect: (v) => _save(
-                            PrayerSettings(
-                              calculationMethod: v,
-                              madhab: settings.madhab,
-                              useGps: settings.useGps,
-                              manualCity: settings.manualCity,
-                            ),
+                            settings.copyWith(calculationMethod: v),
                           ),
                         ),
                         const SizedBox(height: 20),
@@ -139,12 +141,7 @@ class _PrayerSettingsScreenState extends ConsumerState<PrayerSettingsScreen> {
                           selected: settings.madhab,
                           columns: 2,
                           onSelect: (v) => _save(
-                            PrayerSettings(
-                              calculationMethod: settings.calculationMethod,
-                              madhab: v,
-                              useGps: settings.useGps,
-                              manualCity: settings.manualCity,
-                            ),
+                            settings.copyWith(madhab: v),
                           ),
                         ),
                         const SizedBox(height: 20),
@@ -160,13 +157,16 @@ class _PrayerSettingsScreenState extends ConsumerState<PrayerSettingsScreen> {
                               if (!granted || !context.mounted) return;
                             }
                             await _save(
-                              PrayerSettings(
-                                calculationMethod: settings.calculationMethod,
-                                madhab: settings.madhab,
-                                useGps: v,
-                                manualCity: settings.manualCity,
-                              ),
+                              settings.copyWith(useGps: v),
                             );
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                        _AdhanToggleCard(
+                          theme: theme,
+                          value: settings.playAdhan,
+                          onChanged: (v) async {
+                            await _save(settings.copyWith(playAdhan: v));
                           },
                         ),
                       ],
@@ -515,6 +515,72 @@ class _GpsToggleCard extends StatelessWidget {
                     ),
                     Text(
                       context.l10n.useGpsLocationDesc,
+                      style: TextStyle(fontSize: 12, color: theme.muted),
+                    ),
+                  ],
+                ),
+              ),
+              Switch.adaptive(value: value, onChanged: onChanged),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AdhanToggleCard extends StatelessWidget {
+  const _AdhanToggleCard({
+    required this.theme,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final WhisperThemeExtension theme;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    return Material(
+      color: theme.isDark ? theme.glass : Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadii.sm),
+        side: BorderSide(color: theme.glassBorder),
+      ),
+      child: InkWell(
+        onTap: () => onChanged(!value),
+        borderRadius: BorderRadius.circular(AppRadii.sm),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(AppRadii.sm),
+                  color: AppColors.brand.withValues(alpha: 0.12),
+                ),
+                child: const Icon(AppIcons.prayer,
+                    color: AppColors.brandLight, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      l10n.playAdhanTitle,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                        color: theme.foreground,
+                      ),
+                    ),
+                    Text(
+                      l10n.playAdhanSubtitle,
                       style: TextStyle(fontSize: 12, color: theme.muted),
                     ),
                   ],

@@ -584,6 +584,14 @@ class AppLocalizations {
         'Planning enregistrée. Activez l\'app sur l\'accueil pour démarrer.',
         'Đã lưu lịch. Bật ứng dụng ở Trang chủ để bắt đầu phát.',
       );
+  String get scheduleRemoved => _s(
+        'Schedule removed.',
+        'شیڈول ہٹا دیا گیا۔',
+        'تمت إزالة الجدول.',
+        'Schema verwijderd.',
+        'Planification supprimée.',
+        'Đã xoá lịch.',
+      );
 
   String clipCountLabel(int count) => _s(
         '$count clip${count == 1 ? '' : 's'}',
@@ -699,6 +707,41 @@ class AppLocalizations {
       _s('Alarms', 'الارم', 'تنبيهات', 'Alarmen', 'Alarmes', 'Báo thức');
   String get next =>
       _s('Next', 'اگلا', 'التالي', 'Volgende', 'Suivant', 'Tiếp theo');
+  String get previousTrack => _s(
+      'Previous track',
+      'پچھلا ٹریک',
+      'المسار السابق',
+      'Vorige track',
+      'Piste précédente',
+      'Bài trước');
+  String get nextTrack => _s(
+      'Next track',
+      'اگلا ٹریک',
+      'المسار التالي',
+      'Volgende track',
+      'Piste suivante',
+      'Bài tiếp');
+  String get playAdhanTitle => _s(
+      'Play adhan voice',
+      'اذان کی آواز چلائیں',
+      'تشغيل صوت الأذان',
+      'Adhan-stem afspelen',
+      "Jouer l'adhan",
+      'Phát giọng adhan');
+  String get playAdhanSubtitle => _s(
+      'Plays the call to prayer at each prayer time',
+      'ہر نماز کے وقت پر اذان چلتی ہے',
+      'يشغّل الأذان عند كل وقت صلاة',
+      'Speelt de oproep tot gebed bij elke gebedstijd',
+      "Joue l'appel à la prière à chaque heure",
+      'Phát lời gọi cầu nguyện vào mỗi giờ cầu nguyện');
+  String prayerNotificationBody(String prayer) => _s(
+      'It is time for $prayer',
+      '$prayer کا وقت ہو گیا ہے',
+      'حان وقت صلاة $prayer',
+      'Het is tijd voor $prayer',
+      "C'est l'heure de $prayer",
+      'Đã đến giờ $prayer');
   String get customizeSchedule => _s(
       'Customize schedule',
       'شیڈول حسبِ منشا',

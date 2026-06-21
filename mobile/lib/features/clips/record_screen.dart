@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../../core/layout/shell_messenger.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_icons.dart';
 import '../../core/theme/app_radii.dart';
@@ -59,22 +60,16 @@ class _RecordScreenState extends ConsumerState<RecordScreen> {
         final clip = await service.stopAndSave();
         ref.invalidate(clipsProvider);
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                clip != null
-                    ? l10n.savedClip(clip.title)
-                    : l10n.recordingCancelled,
-              ),
-            ),
-          );
+          final message = clip != null
+              ? l10n.savedClip(clip.title)
+              : l10n.recordingCancelled;
           context.pop();
+          context.showShellSnackBar(message, icon: AppIcons.checkCircle);
         }
       } catch (_) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(l10n.recordingFailed)),
-          );
+          context.showShellSnackBar(l10n.recordingFailed,
+              icon: AppIcons.alertCircle);
         }
       }
     } else {
@@ -83,9 +78,8 @@ class _RecordScreenState extends ConsumerState<RecordScreen> {
         await service.startRecording(_titleController.text.trim());
       } catch (_) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(l10n.recordingFailed)),
-          );
+          context.showShellSnackBar(l10n.recordingFailed,
+              icon: AppIcons.alertCircle);
         }
         return;
       }

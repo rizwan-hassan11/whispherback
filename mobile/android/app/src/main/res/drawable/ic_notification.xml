@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- WhisperBack mark: dual-arch "W" silhouette (24dp). Notifications require a
+     white-tinted icon on a transparent background; the system applies its own
+     accent color. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
@@ -6,5 +9,9 @@
     android:viewportHeight="24">
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M12,3c-4.97,0 -9,4.03 -9,9v7l-2,2v1h22v-1l-2,-2v-7c0,-4.97 -4.03,-9 -9,-9zM12,21c-1.1,0 -2,-0.9 -2,-2h4c0,1.1 -0.9,2 -2,2z" />
+        android:pathData="M5,6 C5,12.5 6.5,17 9.5,17 C12.5,17 13,12.5 13,12.5 C13,12.5 13.5,17 16.5,17 C19.5,17 21,12.5 21,6 L18.5,6 C18.5,11.5 17.5,14.2 16.5,14.2 C15.5,14.2 14.5,9 14.5,9 L11,9 C11,9 10,14.2 9,14.2 C8,14.2 7,11.5 7,6 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.55"
+        android:pathData="M3.5,18.5 C7,21 17,21 20.5,18.5 L20.5,20.2 C17,22 7,22 3.5,20.2 Z" />
 </vector>

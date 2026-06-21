@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../../core/layout/shell_messenger.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_icons.dart';
 import '../../core/theme/app_radii.dart';
@@ -158,11 +159,9 @@ class BatterySettingsScreen extends StatelessWidget {
                         onPressed: () async {
                           await openAppSettings();
                           if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(l10n.openSystemSettingsSnack),
-                              ),
-                            );
+                            context.showShellSnackBar(
+                                l10n.openSystemSettingsSnack,
+                                icon: AppIcons.settings);
                           }
                         },
                         icon: const Icon(AppIcons.settings, size: 18),

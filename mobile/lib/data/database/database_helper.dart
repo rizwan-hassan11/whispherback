@@ -17,7 +17,7 @@ class DatabaseHelper {
     final path = join(dbPath, 'whisperback.db');
     return openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: (db, version) async {
         await _createSchema(db);
       },
@@ -29,6 +29,11 @@ class DatabaseHelper {
           );
           await db.execute(
             'ALTER TABLE schedules ADD COLUMN days_mask INTEGER NOT NULL DEFAULT 127',
+          );
+        }
+        if (oldVersion < 3) {
+          await db.execute(
+            'ALTER TABLE prayer_settings ADD COLUMN play_adhan INTEGER NOT NULL DEFAULT 1',
           );
         }
       },
@@ -94,7 +99,8 @@ class DatabaseHelper {
             calculation_method TEXT NOT NULL DEFAULT 'Karachi',
             madhab TEXT NOT NULL DEFAULT 'Shafi',
             use_gps INTEGER NOT NULL DEFAULT 1,
-            manual_city TEXT
+            manual_city TEXT,
+            play_adhan INTEGER NOT NULL DEFAULT 1
           )
         ''');
     await db.execute('''

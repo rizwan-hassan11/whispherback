@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../../core/layout/shell_messenger.dart';
+import '../../core/navigation/route_back.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_icons.dart';
 import '../../core/theme/app_theme.dart';
@@ -72,14 +74,10 @@ class _AddClipsToPlaylistScreenState
       ref.invalidate(playlistsProvider);
       ref.invalidate(clipsProvider);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              context.l10n.clipsAddedToPlaylist(toAdd.length, _playlistName),
-            ),
-          ),
-        );
+        final message =
+            context.l10n.clipsAddedToPlaylist(toAdd.length, _playlistName);
         context.pop();
+        context.showShellSnackBar(message, icon: AppIcons.checkCircle);
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -108,7 +106,10 @@ class _AddClipsToPlaylistScreenState
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    return PremiumScreenBackground(
+    final fallback = '/playlists/${widget.playlistId}';
+    return RouteBackScope(
+      fallbackLocation: fallback,
+      child: PremiumScreenBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
         appBar: AppBar(
@@ -119,7 +120,7 @@ class _AddClipsToPlaylistScreenState
           ),
           leading: IconButton(
             icon: Icon(AppIcons.back, color: theme.foreground),
-            onPressed: _saving ? null : () => context.pop(),
+            onPressed: _saving ? null : () => popOrGo(context, fallback),
           ),
         ),
         body: _allClips.isEmpty
@@ -258,6 +259,7 @@ class _AddClipsToPlaylistScreenState
                   ),
                 ],
               ),
+      ),
       ),
     );
   }

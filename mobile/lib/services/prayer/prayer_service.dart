@@ -11,6 +11,11 @@ class PrayerService {
   /// Last resolved GPS coordinates, reused when a fresh fix isn't available.
   Coordinates? _cachedCoords;
 
+  Future<bool> adhanEnabled() async {
+    final settings = await _repository.getSettings();
+    return settings.playAdhan;
+  }
+
   Future<PrayerWindow?> getCurrentPrayerWindow() async {
     final settings = await _repository.getSettings();
     Coordinates? coords;

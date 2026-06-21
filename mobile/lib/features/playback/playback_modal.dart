@@ -294,43 +294,66 @@ class PlaybackModal extends ConsumerWidget {
                           },
                         ),
                         const SizedBox(height: 24),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            if (snapshot.playlistId != null)
-                              _CtrlButton(
-                                semanticLabel: l10n.toggleShuffle,
-                                icon: AppIcons.shuffle,
-                                highlighted: snapshot.shuffleEnabled,
-                                onPressed: () => coordinator.toggleShuffle(
-                                  snapshot.playlistId!,
-                                  !snapshot.shuffleEnabled,
+                        // Scroll horizontally on very narrow phones (≤320 dp)
+                        // so 5 controls never overflow or get clipped.
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          padding: EdgeInsets.zero,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              if (snapshot.playlistId != null)
+                                _CtrlButton(
+                                  semanticLabel: l10n.toggleShuffle,
+                                  icon: AppIcons.shuffle,
+                                  highlighted: snapshot.shuffleEnabled,
+                                  onPressed: () => coordinator.toggleShuffle(
+                                    snapshot.playlistId!,
+                                    !snapshot.shuffleEnabled,
+                                  ),
                                 ),
+                              if (snapshot.playlistId != null)
+                                const SizedBox(width: 12),
+                              if (snapshot.playlistId != null)
+                                _CtrlButton(
+                                  semanticLabel: l10n.previousTrack,
+                                  icon: Icons.skip_previous_rounded,
+                                  onPressed: coordinator.skipPrevious,
+                                ),
+                              if (snapshot.playlistId != null)
+                                const SizedBox(width: 12),
+                              _CtrlButton(
+                                semanticLabel:
+                                    snapshot.isPlaying ? l10n.pause : l10n.play,
+                                icon: snapshot.isPlaying
+                                    ? AppIcons.pause
+                                    : AppIcons.play,
+                                filled: true,
+                                onPressed: () {
+                                  if (snapshot.isPlaying) {
+                                    coordinator.pause();
+                                  } else {
+                                    coordinator.resume();
+                                  }
+                                },
                               ),
-                            if (snapshot.playlistId != null)
-                              const SizedBox(width: 18),
-                            _CtrlButton(
-                              semanticLabel:
-                                  snapshot.isPlaying ? l10n.pause : l10n.play,
-                              icon: snapshot.isPlaying
-                                  ? AppIcons.pause
-                                  : AppIcons.play,
-                              filled: true,
-                              onPressed: () {
-                                if (snapshot.isPlaying) {
-                                  coordinator.pause();
-                                } else {
-                                  coordinator.resume();
-                                }
-                              },
-                            ),
-                            const SizedBox(width: 18),
-                            _CtrlButton(
-                              semanticLabel: l10n.stopPlayback,
-                              icon: AppIcons.stop,
-                              onPressed: coordinator.stop,
-                            ),
-                          ],
+                              if (snapshot.playlistId != null)
+                                const SizedBox(width: 12),
+                              if (snapshot.playlistId != null)
+                                _CtrlButton(
+                                  semanticLabel: l10n.nextTrack,
+                                  icon: Icons.skip_next_rounded,
+                                  onPressed: coordinator.skipNext,
+                                ),
+                              const SizedBox(width: 12),
+                              _CtrlButton(
+                                semanticLabel: l10n.stopPlayback,
+                                icon: AppIcons.stop,
+                                onPressed: coordinator.stop,
+                              ),
+                            ],
+                          ),
                         ),
                       ],
                     ),

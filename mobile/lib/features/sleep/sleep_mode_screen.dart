@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/layout/shell_messenger.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_icons.dart';
 import '../../core/theme/app_radii.dart';
@@ -39,12 +40,9 @@ class _SleepModeScreenState extends ConsumerState<SleepModeScreen> {
     if (mounted) {
       final locale = Localizations.localeOf(context).toString();
       final endLabel = DateFormat.jm(locale).format(end);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(context.l10n.sleepModeUntil(endLabel)),
-        ),
-      );
+      final message = context.l10n.sleepModeUntil(endLabel);
       context.pop();
+      context.showShellSnackBar(message, icon: AppIcons.bedtime);
     }
   }
 

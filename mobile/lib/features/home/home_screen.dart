@@ -141,6 +141,8 @@ class HomeScreen extends ConsumerWidget {
                                     appState: appState,
                                     schedules:
                                         ref.read(scheduleRepositoryProvider),
+                                    prayer:
+                                        ref.read(prayerRepositoryProvider),
                                   );
                                   if (nowActive && context.mounted) {
                                     await runSchedulingSetupWizard(context);
@@ -482,12 +484,13 @@ class _ZzzButton extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(14),
-        color: AppColors.neon.withValues(alpha: theme.isDark ? 0.16 : 0.12),
-        border: Border.all(color: AppColors.neon.withValues(alpha: 0.45)),
+        color: AppColors.neon.withValues(alpha: theme.isDark ? 0.14 : 0.1),
+        border: Border.all(color: AppColors.neon.withValues(alpha: 0.4)),
         boxShadow: [
           BoxShadow(
-            color: AppColors.neon.withValues(alpha: theme.isDark ? 0.4 : 0.28),
-            blurRadius: 16,
+            color: AppColors.neon.withValues(alpha: theme.isDark ? 0.22 : 0.15),
+            blurRadius: 10,
+            spreadRadius: -2,
           ),
         ],
       ),
@@ -498,19 +501,13 @@ class _ZzzButton extends StatelessWidget {
           onTap: onPressed,
           borderRadius: BorderRadius.circular(14),
           splashColor: AppColors.neonCyan.withValues(alpha: 0.18),
-          child: SizedBox(
+          child: const SizedBox(
             width: 48,
             height: 48,
             child: Icon(
               AppIcons.bedtime,
-              size: 21,
+              size: 22,
               color: AppColors.neonBright,
-              shadows: [
-                Shadow(
-                  color: AppColors.neonCyan.withValues(alpha: 0.7),
-                  blurRadius: 10,
-                ),
-              ],
             ),
           ),
         ),

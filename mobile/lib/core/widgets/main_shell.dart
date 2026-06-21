@@ -130,9 +130,14 @@ class _MainShellState extends ConsumerState<MainShell> {
                         children: [
                           const AudioServiceWarningBanner(),
                           Expanded(
-                            child: Padding(
-                              padding: EdgeInsets.only(bottom: shellBottomReserve),
-                              child: widget.child,
+                            child: MediaQuery.removePadding(
+                              context: context,
+                              removeBottom: true,
+                              child: Padding(
+                                padding:
+                                    EdgeInsets.only(bottom: shellBottomReserve),
+                                child: widget.child,
+                              ),
                             ),
                           ),
                         ],

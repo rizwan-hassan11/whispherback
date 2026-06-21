@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 
 import 'package:google_fonts/google_fonts.dart';
 
+import '../../core/layout/shell_messenger.dart';
 import '../../core/theme/app_colors.dart';
 
 import '../../core/theme/app_icons.dart';
@@ -74,17 +75,14 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
       ref.invalidate(clipsProvider);
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(l10n.importedClip(title))),
-        );
-
         context.pop();
+        context.showShellSnackBar(l10n.importedClip(title),
+            icon: AppIcons.checkCircle);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(userFacingError(e, l10n))),
-        );
+        context.showShellSnackBar(userFacingError(e, l10n),
+            icon: AppIcons.alertCircle);
         setState(() => _importing = false);
       }
     }

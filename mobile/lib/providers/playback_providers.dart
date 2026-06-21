@@ -39,6 +39,7 @@ final playbackCoordinatorProvider = Provider<PlaybackCoordinator>((ref) {
     await syncWhisperNotifications(
       appState: ref.read(appStateRepositoryProvider),
       schedules: ref.read(scheduleRepositoryProvider),
+      prayer: ref.read(prayerRepositoryProvider),
     );
   };
   ref.onDispose(coordinator.dispose);

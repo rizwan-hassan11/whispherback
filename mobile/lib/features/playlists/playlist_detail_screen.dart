@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/layout/responsive.dart';
+import '../../core/layout/shell_messenger.dart';
 import '../../core/navigation/route_back.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_icons.dart';
@@ -97,9 +98,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     ref.invalidate(playlistsProvider);
     if (mounted) {
       setState(() => _playlist = _playlist!.copyWith(name: name));
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l10n.playlistRenamed)),
-      );
+      context.showShellSnackBar(l10n.playlistRenamed, icon: AppIcons.checkCircle);
     }
   }
 
@@ -128,21 +127,20 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
         await ref.read(playlistRepositoryProvider).delete(widget.playlistId);
     if (!mounted) return;
     if (!deleted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l10n.deletePlaylistBlocked)),
-      );
+      context.showShellSnackBar(l10n.deletePlaylistBlocked,
+          icon: AppIcons.alertCircle);
       return;
     }
     ref.invalidate(playlistsProvider);
     await syncWhisperNotifications(
       appState: ref.read(appStateRepositoryProvider),
       schedules: ref.read(scheduleRepositoryProvider),
+      prayer: ref.read(prayerRepositoryProvider),
     );
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l10n.playlistDeleted)),
-      );
       context.go('/playlists');
+      context.showShellSnackBar(l10n.playlistDeleted,
+          icon: AppIcons.checkCircle);
     }
   }
 
@@ -153,9 +151,8 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     ref.invalidate(playlistsProvider);
     await _load();
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(context.l10n.clipRemovedFromPlaylist)),
-      );
+      context.showShellSnackBar(context.l10n.clipRemovedFromPlaylist,
+          icon: AppIcons.checkCircle);
     }
   }
 
