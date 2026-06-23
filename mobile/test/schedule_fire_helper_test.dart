@@ -56,6 +56,42 @@ void main() {
     );
   });
 
+  test(
+    'nextFireTime measures interval from playback completion when '
+    'lastFired carries the actual end-of-clip timestamp',
+    () {
+      // Reproduces the user-reported bug: 5-minute interval + 4-minute
+      // playlist must NOT fire again 1 minute after completion. With the
+      // engine stamping `lastFired = completionTime`, the next slot should
+      // be `completion + interval`, i.e. 9:09 (not 9:05).
+      final schedule = _schedule(intervalMinutes: 5);
+      final completedAt = DateTime(2026, 6, 12, 9, 4);
+      final now = DateTime(2026, 6, 12, 9, 4, 30);
+      expect(
+        ScheduleFireHelper.nextFireTime(schedule, now, lastFired: completedAt),
+        DateTime(2026, 6, 12, 9, 9),
+      );
+      // Nothing should fire at 9:05 — that gap belongs to the interval.
+      expect(
+        ScheduleFireHelper.slotToFire(
+          schedule,
+          DateTime(2026, 6, 12, 9, 5),
+          completedAt,
+        ),
+        isNull,
+      );
+      // At 9:09 the next run should be due.
+      expect(
+        ScheduleFireHelper.slotToFire(
+          schedule,
+          DateTime(2026, 6, 12, 9, 9),
+          completedAt,
+        ),
+        DateTime(2026, 6, 12, 9, 9),
+      );
+    },
+  );
+
   test('upcomingEvents lists multiple future slots', () {
     final schedule = _schedule(intervalMinutes: 15);
     final now = DateTime(2026, 6, 12, 9, 0);

@@ -115,6 +115,8 @@ class _ScheduleBuilderScreenState extends ConsumerState<ScheduleBuilderScreen> {
     final start = _todayAt(_startTime);
     final end = _endTime != null ? _todayAt(_endTime!) : null;
 
+    // Step 1 — persist the schedule. Only this DB write may legitimately fail
+    // with a user-visible error (e.g. overlap with another schedule).
     try {
       await ref.read(scheduleRepositoryProvider).save(
             id: _existingScheduleId,
@@ -126,21 +128,6 @@ class _ScheduleBuilderScreenState extends ConsumerState<ScheduleBuilderScreen> {
             alarmEnabled: _alarm,
             daysMask: _daysMask,
           );
-      ref.invalidate(schedulesProvider);
-      ref.invalidate(playlistsProvider);
-      await syncWhisperNotifications(
-        appState: ref.read(appStateRepositoryProvider),
-        schedules: ref.read(scheduleRepositoryProvider),
-        prayer: ref.read(prayerRepositoryProvider),
-      );
-      if (mounted) {
-        final l10n = context.l10n;
-        context.pop();
-        context.showShellSnackBar(
-          l10n.scheduleSavedTurnActive,
-          icon: AppIcons.checkCircle,
-        );
-      }
     } on ScheduleConflictException catch (e) {
       if (!mounted) return;
       setState(() => _saving = false);
@@ -152,10 +139,13 @@ class _ScheduleBuilderScreenState extends ConsumerState<ScheduleBuilderScreen> {
           content: Text(l10n.scheduleConflictMessage(e.existingPlaylistName)),
           actions: [
             FilledButton(
-                onPressed: () => Navigator.pop(ctx), child: Text(l10n.ok)),
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(l10n.ok),
+            ),
           ],
         ),
       );
+      return;
     } catch (_) {
       if (!mounted) return;
       setState(() => _saving = false);
@@ -163,7 +153,33 @@ class _ScheduleBuilderScreenState extends ConsumerState<ScheduleBuilderScreen> {
         context.l10n.genericErrorTryAgain,
         icon: AppIcons.alertCircle,
       );
+      return;
     }
+
+    // Step 2 — refresh derived state. These are best-effort: a missing
+    // notification permission or geolocator hiccup must NOT roll back the
+    // save the user just made. `syncWhisperNotifications` already swallows
+    // its own errors; we double-guard here so an unrelated exception in the
+    // refresh path never surfaces a false "Something went wrong" toast.
+    ref.invalidate(schedulesProvider);
+    ref.invalidate(playlistsProvider);
+    try {
+      await syncWhisperNotifications(
+        appState: ref.read(appStateRepositoryProvider),
+        schedules: ref.read(scheduleRepositoryProvider),
+        prayer: ref.read(prayerRepositoryProvider),
+      );
+    } catch (_) {
+      // Already logged by syncWhisperNotifications; swallow here.
+    }
+
+    if (!mounted) return;
+    final l10n = context.l10n;
+    context.pop();
+    context.showShellSnackBar(
+      l10n.scheduleSavedTurnActive,
+      icon: AppIcons.checkCircle,
+    );
   }
 
   Future<void> _remove() async {

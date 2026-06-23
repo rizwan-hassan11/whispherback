@@ -30,47 +30,59 @@ class PrayerNotificationScheduler {
 
   /// Re-arms upcoming prayer-time notifications. Independent of WhisperBack's
   /// Active toggle — adhan reminders are a standalone feature.
+  ///
+  /// Best-effort: any failure (geolocation, OS scheduling quirks, exact-alarm
+  /// permission revocation on Android 14+) is swallowed and logged so the
+  /// caller — typically the schedule Save flow — never surfaces a false
+  /// "Something went wrong" toast to the user.
   Future<void> sync() async {
-    await _cancelAll();
+    try {
+      await _cancelAll();
 
-    final settings = await _prayer.getSettings();
-    if (!settings.playAdhan) return;
+      final settings = await _prayer.getSettings();
+      if (!settings.playAdhan) return;
 
-    final coords = await _resolveCoords(settings);
-    if (coords == null) return;
+      final coords = await _resolveCoords(settings);
+      if (coords == null) return;
 
-    final params = _paramsForMethod(settings.calculationMethod);
-    params.madhab = settings.madhab == 'Hanafi' ? Madhab.hanafi : Madhab.shafi;
+      final params = _paramsForMethod(settings.calculationMethod);
+      params.madhab =
+          settings.madhab == 'Hanafi' ? Madhab.hanafi : Madhab.shafi;
 
-    final now = DateTime.now();
-    final upcoming = <(_PrayerKey, DateTime)>[];
+      final now = DateTime.now();
+      final upcoming = <(_PrayerKey, DateTime)>[];
 
-    for (var d = 0; d < _daysAhead; d++) {
-      final day = now.add(Duration(days: d));
-      final times = d == 0
-          ? PrayerTimes.today(coords, params)
-          : PrayerTimes(coords, DateComponents.from(day), params);
-      upcoming.addAll([
-        (_PrayerKey.fajr, times.fajr),
-        (_PrayerKey.dhuhr, times.dhuhr),
-        (_PrayerKey.asr, times.asr),
-        (_PrayerKey.maghrib, times.maghrib),
-        (_PrayerKey.isha, times.isha),
-      ]);
-    }
+      for (var d = 0; d < _daysAhead; d++) {
+        final day = now.add(Duration(days: d));
+        final times = d == 0
+            ? PrayerTimes.today(coords, params)
+            : PrayerTimes(coords, DateComponents.from(day), params);
+        upcoming.addAll([
+          (_PrayerKey.fajr, times.fajr),
+          (_PrayerKey.dhuhr, times.dhuhr),
+          (_PrayerKey.asr, times.asr),
+          (_PrayerKey.maghrib, times.maghrib),
+          (_PrayerKey.isha, times.isha),
+        ]);
+      }
 
-    final future = upcoming
-        .where((e) => e.$2.isAfter(now))
-        .take(_slotCount)
-        .toList(growable: false);
+      final future = upcoming
+          .where((e) => e.$2.isAfter(now))
+          .take(_slotCount)
+          .toList(growable: false);
 
-    for (var i = 0; i < future.length; i++) {
-      final entry = future[i];
-      await _scheduleOne(
-        id: _baseId + i,
-        when: entry.$2,
-        prayerName: entry.$1.label,
-      );
+      for (var i = 0; i < future.length; i++) {
+        final entry = future[i];
+        await _scheduleOne(
+          id: _baseId + i,
+          when: entry.$2,
+          prayerName: entry.$1.label,
+        );
+      }
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint('PrayerNotificationScheduler.sync failed: $e\n$st');
+      }
     }
   }
 
@@ -127,17 +139,28 @@ class PrayerNotificationScheduler {
         uiLocalNotificationDateInterpretation:
             UILocalNotificationDateInterpretation.absoluteTime,
       );
-    } catch (_) {
-      await _plugin.zonedSchedule(
-        id,
-        prayerName,
-        body,
-        tzWhen,
-        details,
-        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-        uiLocalNotificationDateInterpretation:
-            UILocalNotificationDateInterpretation.absoluteTime,
-      );
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('Prayer notification $id exact-schedule failed: $e');
+      }
+      try {
+        await _plugin.zonedSchedule(
+          id,
+          prayerName,
+          body,
+          tzWhen,
+          details,
+          androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+          uiLocalNotificationDateInterpretation:
+              UILocalNotificationDateInterpretation.absoluteTime,
+        );
+      } catch (e2) {
+        // Best-effort: one missing prayer slot should never break the rest of
+        // the sync or surface as a save failure to the user.
+        if (kDebugMode) {
+          debugPrint('Prayer notification $id inexact-fallback failed: $e2');
+        }
+      }
     }
   }
 

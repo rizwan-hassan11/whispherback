@@ -27,7 +27,14 @@ class ScheduleEngine {
   })  : _appState = appStateRepository,
         _schedules = scheduleRepository,
         _coordinator = coordinator,
-        _lastFired = lastFiredStore;
+        _lastFired = lastFiredStore {
+    // Whenever a scheduled clip finishes naturally, stamp `lastFired` with the
+    // actual completion timestamp so the next slot is computed as
+    // `completionTime + intervalMinutes`. Without this, the next fire would
+    // be `slotStart + interval`, which collapses to ~1 minute of silence for
+    // a 4-minute playlist on a 5-minute interval.
+    _coordinator.onScheduledPlaybackCompleted = _onScheduledCompleted;
+  }
 
   final AppStateRepository _appState;
   final ScheduleRepository _schedules;
@@ -79,10 +86,16 @@ class ScheduleEngine {
         // Skip if another schedule already claimed this exact slot.
         if (_slotTakenByOtherSchedule(all, schedule.id, slot, now)) continue;
 
-        final played =
-            await _coordinator.requestScheduledPlay(schedule.playlistId);
+        final played = await _coordinator.requestScheduledPlay(
+          schedule.playlistId,
+          scheduleId: schedule.id,
+        );
         if (!played) continue;
 
+        // Stamp the slot start so the ticker stops re-firing this schedule
+        // during the playback window. `_onScheduledCompleted` will overwrite
+        // this with the actual completion time so the next interval is
+        // measured from the END of playback, not the START.
         await _lastFired.set(schedule.id, slot);
         await onNotificationsSync?.call();
         break;
@@ -90,6 +103,14 @@ class ScheduleEngine {
     } finally {
       _tickInFlight = false;
     }
+  }
+
+  Future<void> _onScheduledCompleted(
+    String scheduleId,
+    DateTime completedAt,
+  ) async {
+    await _lastFired.set(scheduleId, completedAt);
+    await onNotificationsSync?.call();
   }
 
   /// Ignore stale [lastFired] from a previous calendar day.

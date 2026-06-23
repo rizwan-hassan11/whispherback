@@ -44,8 +44,14 @@ class PlaybackCoordinator {
   StreamSubscription<PlayerState>? _playerSub;
   Timer? _modeCheckTimer;
   String? _pendingScheduledPlaylistId;
+  String? _pendingScheduledScheduleId;
   int? _playlistClipIndex;
   String? _lastAdhanWindowKey;
+
+  /// Schedule id behind the currently running scheduled playback (if any).
+  /// Lets us stamp `lastFired = completionTime` so the user-configured
+  /// interval is measured from the END of playback, not the START.
+  String? _activeScheduleId;
 
   /// Snapshot of the clip list shown when the user tapped a library clip.
   /// Lets us walk Next/Previous through the Clip Library, not just playlists.
@@ -54,6 +60,14 @@ class PlaybackCoordinator {
 
   /// Called after a scheduled whisper finishes so notifications show the next slot.
   Future<void> Function()? refreshScheduleNotifications;
+
+  /// Invoked when a scheduled clip finishes naturally. Carries the schedule id
+  /// of the run that just completed and the wall-clock time it finished so
+  /// the engine can update `lastFired` and compute the next slot relative to
+  /// playback end (interval = gap after the clip stops, not from when it
+  /// started).
+  Future<void> Function(String scheduleId, DateTime completedAt)?
+      onScheduledPlaybackCompleted;
 
   /// Replays the current snapshot to every new listener so the UI never misses
   /// the restored "active" state on a cold start (broadcast streams otherwise
@@ -103,6 +117,8 @@ class PlaybackCoordinator {
 
   Future<void> _finalizeClipStopFromNotification() async {
     _playlistClipIndex = null;
+    // System-stop from the media notification ≠ natural completion.
+    _activeScheduleId = null;
     final active = await _appState.isActive();
     if (active) {
       _emit(const PlaybackSnapshot(
@@ -266,6 +282,8 @@ class PlaybackCoordinator {
   }
 
   Future<void> _finishScheduledClip() async {
+    final completedScheduleId = _activeScheduleId;
+    _activeScheduleId = null;
     final active = await _appState.isActive();
     _emit(PlaybackSnapshot(
       state: active ? AppPlaybackState.activeIdle : AppPlaybackState.inactive,
@@ -273,6 +291,15 @@ class PlaybackCoordinator {
       modalVisible: false,
     ));
     await _audio.stop();
+    if (completedScheduleId != null) {
+      // Stamp completion *before* refreshing notifications so the engine's
+      // "next slot" math uses the post-playback timestamp and the upcoming
+      // banner reflects the correct interval-from-end.
+      await onScheduledPlaybackCompleted?.call(
+        completedScheduleId,
+        DateTime.now(),
+      );
+    }
     await refreshScheduleNotifications?.call();
     await _drainPendingScheduled();
   }
@@ -290,24 +317,41 @@ class PlaybackCoordinator {
   Future<void> _drainPendingScheduled() async {
     final next = _pendingScheduledPlaylistId;
     if (next == null) return;
+    final pendingScheduleId = _pendingScheduledScheduleId;
     _pendingScheduledPlaylistId = null;
-    await requestScheduledPlay(next);
+    _pendingScheduledScheduleId = null;
+    await requestScheduledPlay(next, scheduleId: pendingScheduleId);
   }
 
   /// Called by [ScheduleEngine]. Scheduled whispers take priority over manual
   /// preview/playlist playback — current audio is stopped first.
   /// Returns true when clip playback actually started.
-  Future<bool> requestScheduledPlay(String playlistId) async {
+  ///
+  /// [scheduleId] is the id of the [PlaybackSchedule] that triggered this run.
+  /// We hold it so that when playback finishes naturally, we can fire
+  /// [onScheduledPlaybackCompleted] with the actual completion timestamp and
+  /// the engine can measure the next interval from playback END (not START).
+  Future<bool> requestScheduledPlay(
+    String playlistId, {
+    String? scheduleId,
+  }) async {
     await _interruptForSchedule();
-    return playPlaylist(playlistId, fromSchedule: true);
+    _activeScheduleId = scheduleId;
+    final started = await playPlaylist(playlistId, fromSchedule: true);
+    if (!started) _activeScheduleId = null;
+    return started;
   }
 
   Future<void> _interruptForSchedule() async {
     if (!_snapshot.isPlaying &&
         _snapshot.state != AppPlaybackState.manualPlaying &&
         _snapshot.state != AppPlaybackState.scheduledPlaying) {
+      _activeScheduleId = null;
       return;
     }
+    // The current scheduled run never finished — drop the tracking so the
+    // interrupted schedule doesn't get a phantom completion timestamp.
+    _activeScheduleId = null;
     await _audio.stop();
     final active = await _appState.isActive();
     _emit(PlaybackSnapshot(
@@ -484,6 +528,9 @@ class PlaybackCoordinator {
     _playlistClipIndex = null;
     _libraryQueue = const [];
     _libraryIndex = -1;
+    // User-initiated stop must not count as a "successful completion": skip
+    // the interval-from-end stamp so the next slot still fires on its grid.
+    _activeScheduleId = null;
 
     // Optimistically hide the player UI BEFORE waiting on audio_service. This
     // prevents the modal/mini-player from flashing 00:00 frames while the

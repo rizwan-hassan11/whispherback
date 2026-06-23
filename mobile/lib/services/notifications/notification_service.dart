@@ -303,20 +303,32 @@ class NotificationService {
         matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
         payload: payload,
       );
-    } catch (_) {
-      // Exact alarms may be disallowed; fall back to inexact.
-      await _plugin.zonedSchedule(
-        id,
-        title,
-        body,
-        when,
-        details,
-        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-        uiLocalNotificationDateInterpretation:
-            UILocalNotificationDateInterpretation.absoluteTime,
-        matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
-        payload: payload,
-      );
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('Scheduled alarm $id exact-schedule failed: $e');
+      }
+      try {
+        // Exact alarms may be disallowed (Android 14+); try inexact instead.
+        await _plugin.zonedSchedule(
+          id,
+          title,
+          body,
+          when,
+          details,
+          androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+          uiLocalNotificationDateInterpretation:
+              UILocalNotificationDateInterpretation.absoluteTime,
+          matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
+          payload: payload,
+        );
+      } catch (e2) {
+        // Best-effort: a single alarm slot must never break the rest of the
+        // sync or surface as a save failure to the user. Foreground ticking
+        // still drives playback even when the OS denies background alarms.
+        if (kDebugMode) {
+          debugPrint('Scheduled alarm $id inexact-fallback failed: $e2');
+        }
+      }
     }
   }
 
@@ -345,7 +357,9 @@ class NotificationService {
 
   Future<void> _cancelAllScheduleAlarms() async {
     for (var id = _scheduleBase; id < _scheduleBase + 400; id++) {
-      await _plugin.cancel(id);
+      try {
+        await _plugin.cancel(id);
+      } catch (_) {}
     }
   }
 
