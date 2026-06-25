@@ -40,8 +40,7 @@ abstract final class ScheduleFireHelper {
     if (schedule.endTime == null) return false;
     final startMinutes =
         schedule.startTime.hour * 60 + schedule.startTime.minute;
-    final endMinutes =
-        schedule.endTime!.hour * 60 + schedule.endTime!.minute;
+    final endMinutes = schedule.endTime!.hour * 60 + schedule.endTime!.minute;
     return endMinutes <= startMinutes;
   }
 

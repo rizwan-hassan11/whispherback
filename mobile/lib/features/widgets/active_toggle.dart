@@ -104,7 +104,8 @@ class _ActiveToggleState extends State<ActiveToggle>
 
     return Semantics(
       button: true,
-      label: widget.isActive ? l10n.activeWhispersPlaying : l10n.tapPowerToBegin,
+      label:
+          widget.isActive ? l10n.activeWhispersPlaying : l10n.tapPowerToBegin,
       hint: l10n.active,
       child: RepaintBoundary(
         child: GestureDetector(
@@ -118,171 +119,173 @@ class _ActiveToggleState extends State<ActiveToggle>
             child: AnimatedBuilder(
               animation: Listenable.merge([_power, _charge, _breathe]),
               builder: (context, child) {
-            final t = _ignite.value.clamp(0.0, 1.0);
-            final on = _power.value;
-            final breathe = widget.isActive
-                ? (math.sin(_breathe.value * math.pi * 2) + 1) / 2
-                : 0.0;
+                final t = _ignite.value.clamp(0.0, 1.0);
+                final on = _power.value;
+                final breathe = widget.isActive
+                    ? (math.sin(_breathe.value * math.pi * 2) + 1) / 2
+                    : 0.0;
 
-            final iconColor = Color.lerp(
-              const Color(0xFF5A6B8C),
-              AppColors.neonCyan,
-              on,
-            )!;
+                final iconColor = Color.lerp(
+                  const Color(0xFF5A6B8C),
+                  AppColors.neonCyan,
+                  on,
+                )!;
 
-            return Stack(
-              alignment: Alignment.center,
-              children: [
-                // Expanding pulse halos while active.
-                if (widget.isActive) ...[
-                  _PulseRing(progress: _breathe.value, size: heroSize),
-                  _PulseRing(
-                    progress: (_breathe.value + 0.5) % 1,
-                    size: heroSize,
-                  ),
-                ],
-
-                // One-shot ignition charge ring.
-                if (_charge.isAnimating)
-                  _ChargeRing(progress: _charge.value, size: heroSize),
-
-                // Outer neon halo (fades in with power).
-                Container(
-                  width: discSize,
-                  height: discSize,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppColors.neon.withValues(
-                            alpha: 0.55 * on * (0.7 + breathe * 0.3)),
-                        blurRadius: 48 + breathe * 18,
-                        spreadRadius: 2 + breathe * 4,
-                      ),
-                      BoxShadow(
-                        color: AppColors.neonCyan.withValues(alpha: 0.30 * on),
-                        blurRadius: 110,
-                        spreadRadius: 6,
+                return Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    // Expanding pulse halos while active.
+                    if (widget.isActive) ...[
+                      _PulseRing(progress: _breathe.value, size: heroSize),
+                      _PulseRing(
+                        progress: (_breathe.value + 0.5) % 1,
+                        size: heroSize,
                       ),
                     ],
-                  ),
-                ),
 
-                // The physical disc.
-                Transform.scale(
-                  scale: (_pressed ? 0.95 : 1.0) * (0.9 + 0.1 * t),
-                  child: Container(
-                    width: discSize,
-                    height: discSize,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: on > 0.02
-                          ? LinearGradient(
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                              colors: [
-                                Color.lerp(
-                                  const Color(0xFF0B1730),
-                                  const Color(0xFF143A82),
-                                  on,
-                                )!,
-                                Color.lerp(
-                                  const Color(0xFF060E22),
-                                  const Color(0xFF071A40),
-                                  on,
-                                )!,
-                              ],
-                            )
-                          : AppColors.powerOffGradient,
-                      border: Border.all(
-                        color: Color.lerp(
-                          AppColors.glassBorder,
-                          AppColors.neonBright.withValues(alpha: 0.9),
-                          on,
-                        )!,
-                        width: 1.5 + on,
+                    // One-shot ignition charge ring.
+                    if (_charge.isAnimating)
+                      _ChargeRing(progress: _charge.value, size: heroSize),
+
+                    // Outer neon halo (fades in with power).
+                    Container(
+                      width: discSize,
+                      height: discSize,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.neon.withValues(
+                                alpha: 0.55 * on * (0.7 + breathe * 0.3)),
+                            blurRadius: 48 + breathe * 18,
+                            spreadRadius: 2 + breathe * 4,
+                          ),
+                          BoxShadow(
+                            color:
+                                AppColors.neonCyan.withValues(alpha: 0.30 * on),
+                            blurRadius: 110,
+                            spreadRadius: 6,
+                          ),
+                        ],
                       ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.5),
-                          offset: const Offset(0, 16),
-                          blurRadius: 30,
-                          spreadRadius: -6,
-                        ),
-                      ],
                     ),
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        // Inner glow gradient when lit.
-                        Positioned.fill(
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              gradient: RadialGradient(
-                                colors: [
-                                  AppColors.neon.withValues(alpha: 0.35 * on),
-                                  AppColors.neon.withValues(alpha: 0),
-                                ],
-                                stops: const [0, 0.85],
-                              ),
-                            ),
+
+                    // The physical disc.
+                    Transform.scale(
+                      scale: (_pressed ? 0.95 : 1.0) * (0.9 + 0.1 * t),
+                      child: Container(
+                        width: discSize,
+                        height: discSize,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: on > 0.02
+                              ? LinearGradient(
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                  colors: [
+                                    Color.lerp(
+                                      const Color(0xFF0B1730),
+                                      const Color(0xFF143A82),
+                                      on,
+                                    )!,
+                                    Color.lerp(
+                                      const Color(0xFF060E22),
+                                      const Color(0xFF071A40),
+                                      on,
+                                    )!,
+                                  ],
+                                )
+                              : AppColors.powerOffGradient,
+                          border: Border.all(
+                            color: Color.lerp(
+                              AppColors.glassBorder,
+                              AppColors.neonBright.withValues(alpha: 0.9),
+                              on,
+                            )!,
+                            width: 1.5 + on,
                           ),
-                        ),
-                        // Top specular highlight for a glassy dome.
-                        Positioned(
-                          top: discSize * 0.12,
-                          child: Container(
-                            width: discSize * 0.6,
-                            height: discSize * 0.32,
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(999),
-                              gradient: LinearGradient(
-                                begin: Alignment.topCenter,
-                                end: Alignment.bottomCenter,
-                                colors: [
-                                  Colors.white
-                                      .withValues(alpha: 0.10 + 0.06 * on),
-                                  Colors.white.withValues(alpha: 0),
-                                ],
-                              ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.5),
+                              offset: const Offset(0, 16),
+                              blurRadius: 30,
+                              spreadRadius: -6,
                             ),
-                          ),
+                          ],
                         ),
-                        // Thin neon ring just inside the rim when lit.
-                        Container(
-                          width: discSize * 0.82,
-                          height: discSize * 0.82,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: AppColors.neonCyan.withValues(
-                                  alpha: 0.5 * on * (0.6 + breathe * 0.4)),
-                              width: 1.4,
-                            ),
-                          ),
-                        ),
-                        Icon(
-                          AppIcons.power,
-                          size: iconSize,
-                          color: iconColor,
-                          shadows: on > 0.05
-                              ? [
-                                  Shadow(
-                                    color: AppColors.neonCyan
-                                        .withValues(alpha: 0.9 * on),
-                                    blurRadius: 18 + breathe * 8,
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            // Inner glow gradient when lit.
+                            Positioned.fill(
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  gradient: RadialGradient(
+                                    colors: [
+                                      AppColors.neon
+                                          .withValues(alpha: 0.35 * on),
+                                      AppColors.neon.withValues(alpha: 0),
+                                    ],
+                                    stops: const [0, 0.85],
                                   ),
-                                ]
-                              : null,
+                                ),
+                              ),
+                            ),
+                            // Top specular highlight for a glassy dome.
+                            Positioned(
+                              top: discSize * 0.12,
+                              child: Container(
+                                width: discSize * 0.6,
+                                height: discSize * 0.32,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(999),
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                    colors: [
+                                      Colors.white
+                                          .withValues(alpha: 0.10 + 0.06 * on),
+                                      Colors.white.withValues(alpha: 0),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            // Thin neon ring just inside the rim when lit.
+                            Container(
+                              width: discSize * 0.82,
+                              height: discSize * 0.82,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: AppColors.neonCyan.withValues(
+                                      alpha: 0.5 * on * (0.6 + breathe * 0.4)),
+                                  width: 1.4,
+                                ),
+                              ),
+                            ),
+                            Icon(
+                              AppIcons.power,
+                              size: iconSize,
+                              color: iconColor,
+                              shadows: on > 0.05
+                                  ? [
+                                      Shadow(
+                                        color: AppColors.neonCyan
+                                            .withValues(alpha: 0.9 * on),
+                                        blurRadius: 18 + breathe * 8,
+                                      ),
+                                    ]
+                                  : null,
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
-                  ),
-                ),
-              ],
-            );
-          },
+                  ],
+                );
+              },
             ),
           ),
         ),

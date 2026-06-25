@@ -50,8 +50,15 @@ class _AddClipsToPlaylistScreenState
     if (!mounted) return;
     setState(() {
       _playlistName = playlist?.name ?? context.l10n.playlist;
-      _alreadyInPlaylist.addAll(inPlaylist.map((c) => c.id));
-      _selected.addAll(_alreadyInPlaylist);
+      // Reset before refill so reload (e.g. after recording from this screen)
+      // can't leak stale "already added" ids that would lock previously
+      // removed clips.
+      _alreadyInPlaylist
+        ..clear()
+        ..addAll(inPlaylist.map((c) => c.id));
+      _selected
+        ..clear()
+        ..addAll(_alreadyInPlaylist);
       _allClips = all;
       _loading = false;
     });
@@ -110,156 +117,158 @@ class _AddClipsToPlaylistScreenState
     return RouteBackScope(
       fallbackLocation: fallback,
       child: PremiumScreenBackground(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
+        child: Scaffold(
           backgroundColor: Colors.transparent,
-          title: Text(
-            l10n.addClips,
-            style: GoogleFonts.fraunces(fontWeight: FontWeight.w700),
+          appBar: AppBar(
+            backgroundColor: Colors.transparent,
+            title: Text(
+              l10n.addClips,
+              style: GoogleFonts.fraunces(fontWeight: FontWeight.w700),
+            ),
+            leading: IconButton(
+              icon: Icon(AppIcons.back, color: theme.foreground),
+              onPressed: _saving ? null : () => popOrGo(context, fallback),
+            ),
           ),
-          leading: IconButton(
-            icon: Icon(AppIcons.back, color: theme.foreground),
-            onPressed: _saving ? null : () => popOrGo(context, fallback),
-          ),
-        ),
-        body: _allClips.isEmpty
-            ? _EmptyState(
-                theme: theme,
-                onRecord: () async {
-                  await context.push('/clips/record');
-                  await _load();
-                },
-                onImport: () async {
-                  await context.push('/clips/import');
-                  await _load();
-                },
-              )
-            : Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _playlistName,
-                          style: GoogleFonts.fraunces(
-                            fontSize: 22,
-                            fontWeight: FontWeight.w700,
-                            color: theme.foreground,
+          body: _allClips.isEmpty
+              ? _EmptyState(
+                  theme: theme,
+                  onRecord: () async {
+                    await context.push('/clips/record');
+                    await _load();
+                  },
+                  onImport: () async {
+                    await context.push('/clips/import');
+                    await _load();
+                  },
+                )
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _playlistName,
+                            style: GoogleFonts.fraunces(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w700,
+                              color: theme.foreground,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          l10n.selectClipsForPlaylist,
-                          style: TextStyle(color: theme.muted, fontSize: 13),
-                        ),
-                      ],
+                          const SizedBox(height: 4),
+                          Text(
+                            l10n.selectClipsForPlaylist,
+                            style: TextStyle(color: theme.muted, fontSize: 13),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  Expanded(
-                    child: ListView.separated(
-                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-                      itemCount: _allClips.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 8),
-                      itemBuilder: (context, i) {
-                        final clip = _allClips[i];
-                        final inPlaylist = _alreadyInPlaylist.contains(clip.id);
-                        final checked = _selected.contains(clip.id);
-                        return Material(
-                          color: theme.glass,
-                          borderRadius: BorderRadius.circular(12),
-                          child: InkWell(
+                    Expanded(
+                      child: ListView.separated(
+                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                        itemCount: _allClips.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 8),
+                        itemBuilder: (context, i) {
+                          final clip = _allClips[i];
+                          final inPlaylist =
+                              _alreadyInPlaylist.contains(clip.id);
+                          final checked = _selected.contains(clip.id);
+                          return Material(
+                            color: theme.glass,
                             borderRadius: BorderRadius.circular(12),
-                            onTap: inPlaylist ? null : () => _toggle(clip.id),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                                vertical: 12,
-                              ),
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    checked
-                                        ? AppIcons.checkCircle
-                                        : AppIcons.circleOutline,
-                                    color: inPlaylist
-                                        ? theme.muted
-                                        : (checked
-                                            ? AppColors.success
-                                            : theme.muted),
-                                    size: 22,
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          clip.title,
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.w600,
-                                            color: theme.foreground,
-                                          ),
-                                        ),
-                                        Text(
-                                          formatPlaylistDurationLocalized(
-                                            context,
-                                            clip.durationMs,
-                                          ),
-                                          style: TextStyle(
-                                            fontSize: 12,
-                                            color: theme.muted,
-                                          ),
-                                        ),
-                                      ],
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(12),
+                              onTap: inPlaylist ? null : () => _toggle(clip.id),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 12,
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      checked
+                                          ? AppIcons.checkCircle
+                                          : AppIcons.circleOutline,
+                                      color: inPlaylist
+                                          ? theme.muted
+                                          : (checked
+                                              ? AppColors.success
+                                              : theme.muted),
+                                      size: 22,
                                     ),
-                                  ),
-                                  if (inPlaylist)
-                                    Text(
-                                      l10n.added,
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: theme.muted,
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            clip.title,
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.w600,
+                                              color: theme.foreground,
+                                            ),
+                                          ),
+                                          Text(
+                                            formatPlaylistDurationLocalized(
+                                              context,
+                                              clip.durationMs,
+                                            ),
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: theme.muted,
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                     ),
-                                ],
+                                    if (inPlaylist)
+                                      Text(
+                                        l10n.added,
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: theme.muted,
+                                        ),
+                                      ),
+                                  ],
+                                ),
                               ),
                             ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-                    child: FilledButton(
-                      onPressed: _saving || newCount == 0 ? null : _save,
-                      style: FilledButton.styleFrom(
-                        minimumSize: const Size.fromHeight(52),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
+                          );
+                        },
                       ),
-                      child: _saving
-                          ? const SizedBox(
-                              width: 22,
-                              height: 22,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : Text(
-                              newCount == 0
-                                  ? l10n.done
-                                  : l10n.addClipsCount(newCount),
-                            ),
                     ),
-                  ),
-                ],
-              ),
-      ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                      child: FilledButton(
+                        onPressed: _saving || newCount == 0 ? null : _save,
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size.fromHeight(52),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        child: _saving
+                            ? const SizedBox(
+                                width: 22,
+                                height: 22,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : Text(
+                                newCount == 0
+                                    ? l10n.done
+                                    : l10n.addClipsCount(newCount),
+                              ),
+                      ),
+                    ),
+                  ],
+                ),
+        ),
       ),
     );
   }

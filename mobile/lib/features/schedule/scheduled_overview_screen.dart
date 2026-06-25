@@ -62,6 +62,15 @@ class ScheduledOverviewScreen extends ConsumerWidget {
                   await ref
                       .read(scheduleRepositoryProvider)
                       .setEnabled(s.playlistId, enabled);
+                  // If the user disables a schedule whose clip is currently
+                  // playing, stop immediately instead of waiting up to 5s
+                  // for the next engine tick to notice and tear it down.
+                  if (!enabled) {
+                    final coordinator = ref.read(playbackCoordinatorProvider);
+                    if (coordinator.activeScheduleId == s.id) {
+                      await coordinator.stop();
+                    }
+                  }
                   ref.invalidate(schedulesProvider);
                   await syncWhisperNotifications(
                     appState: ref.read(appStateRepositoryProvider),
@@ -163,8 +172,7 @@ class _ScheduleBodyState extends State<_ScheduleBody> {
     super.dispose();
   }
 
-  int get _alarmCount =>
-      widget.schedules.where((s) => s.alarmEnabled).length;
+  int get _alarmCount => widget.schedules.where((s) => s.alarmEnabled).length;
 
   int get _activeCount => widget.schedules.where((s) => s.enabled).length;
 

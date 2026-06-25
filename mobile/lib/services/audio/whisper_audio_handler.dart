@@ -101,8 +101,60 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     if (_audioSessionReady) return;
     final session = await AudioSession.instance;
     await session.configure(const AudioSessionConfiguration.music());
+    // Phone calls, alarms, navigation prompts, and other apps with higher
+    // audio focus need to interrupt us cleanly. Without this hook the clip
+    // would keep playing under the call (or stay paused after the call ends
+    // and the user has to manually tap Play). We pause on focus loss and
+    // duck (volume reduce) on transient ducks; resume on focus restore only
+    // if we were actually playing a clip when interrupted.
+    session.interruptionEventStream.listen((event) {
+      if (event.begin) {
+        switch (event.type) {
+          case AudioInterruptionType.duck:
+            if (_playingClip) {
+              unawaited(_player.setVolume(0.3));
+            }
+            break;
+          case AudioInterruptionType.pause:
+          case AudioInterruptionType.unknown:
+            if (_playingClip && _player.playing) {
+              _wasPlayingBeforeInterruption = true;
+              unawaited(_player.pause());
+            }
+            break;
+        }
+      } else {
+        switch (event.type) {
+          case AudioInterruptionType.duck:
+            if (_playingClip) {
+              unawaited(_player.setVolume(1));
+            }
+            break;
+          case AudioInterruptionType.pause:
+            if (_wasPlayingBeforeInterruption && _playingClip) {
+              _wasPlayingBeforeInterruption = false;
+              unawaited(_player.play());
+            }
+            break;
+          case AudioInterruptionType.unknown:
+            // OS told us interruption ended but the type was unknown; do
+            // nothing here — the user can hit Play if they want to resume.
+            break;
+        }
+      }
+    });
+    // Disconnected headphones (or BT) — pause clip so the user doesn't
+    // accidentally blast the speaker.
+    session.becomingNoisyEventStream.listen((_) {
+      if (_playingClip && _player.playing) {
+        _wasPlayingBeforeInterruption = false;
+        unawaited(_player.pause());
+      }
+    });
     _audioSessionReady = true;
   }
+
+  bool _wasPlayingBeforeInterruption = false;
 
   // ── Active session (scheduling keep-alive, no media notification) ───────────
 

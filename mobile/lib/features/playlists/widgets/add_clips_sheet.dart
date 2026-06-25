@@ -69,7 +69,14 @@ class _AddClipsSheetState extends ConsumerState<_AddClipsSheet> {
     final all = await clipRepo.getAll();
     if (!mounted) return;
     setState(() {
-      _alreadyInPlaylist.addAll(inPlaylist.map((c) => c.id));
+      // Reset before refill — otherwise on reload (e.g. after recording a
+      // new clip from the empty state) the "already in playlist" set keeps
+      // growing and previously-removed clips appear locked, which matches
+      // the client report of "deleted clips were still there".
+      _alreadyInPlaylist
+        ..clear()
+        ..addAll(inPlaylist.map((c) => c.id));
+      _selected.removeWhere((id) => !all.any((c) => c.id == id));
       _allClips = all;
       _loading = false;
     });
@@ -160,14 +167,16 @@ class _AddClipsSheetState extends ConsumerState<_AddClipsSheet> {
                             ),
                             Text(
                               widget.playlistName,
-                              style: TextStyle(color: theme.muted, fontSize: 13),
+                              style:
+                                  TextStyle(color: theme.muted, fontSize: 13),
                             ),
                           ],
                         ),
                       ),
                       IconButton(
                         icon: Icon(AppIcons.close, color: theme.muted),
-                        onPressed: _saving ? null : () => Navigator.pop(context),
+                        onPressed:
+                            _saving ? null : () => Navigator.pop(context),
                       ),
                     ],
                   ),
@@ -190,7 +199,8 @@ class _AddClipsSheetState extends ConsumerState<_AddClipsSheet> {
                     padding: const EdgeInsets.all(24),
                     child: Column(
                       children: [
-                        Text(l10n.noClipsYet, style: TextStyle(color: theme.muted)),
+                        Text(l10n.noClipsYet,
+                            style: TextStyle(color: theme.muted)),
                         const SizedBox(height: 16),
                         FilledButton.icon(
                           onPressed: () async {
@@ -213,7 +223,8 @@ class _AddClipsSheetState extends ConsumerState<_AddClipsSheet> {
                       itemBuilder: (context, i) {
                         final clip = _allClips[i];
                         final inPlaylist = _alreadyInPlaylist.contains(clip.id);
-                        final checked = inPlaylist || _selected.contains(clip.id);
+                        final checked =
+                            inPlaylist || _selected.contains(clip.id);
                         return Material(
                           color: checked && !inPlaylist
                               ? AppColors.neon.withValues(alpha: 0.08)
@@ -246,9 +257,10 @@ class _AddClipsSheetState extends ConsumerState<_AddClipsSheet> {
                                     height: 36,
                                     decoration: BoxDecoration(
                                       borderRadius: BorderRadius.circular(10),
-                                      color: AppColors.neon.withValues(alpha: 0.15),
+                                      color: AppColors.neon
+                                          .withValues(alpha: 0.15),
                                     ),
-                                    child:                                     Icon(
+                                    child: Icon(
                                       clip.source == ClipSource.recorded
                                           ? AppIcons.mic
                                           : AppIcons.audioFile,
@@ -259,7 +271,8 @@ class _AddClipsSheetState extends ConsumerState<_AddClipsSheet> {
                                   const SizedBox(width: 12),
                                   Expanded(
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
                                         Text(
                                           clip.title,

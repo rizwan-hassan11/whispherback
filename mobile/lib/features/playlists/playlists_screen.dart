@@ -123,7 +123,8 @@ class _PlaylistsBody extends StatelessWidget {
                             ),
                           ),
                           Text(
-                            l10n.collectionsSummary(playlists.length, totalClips),
+                            l10n.collectionsSummary(
+                                playlists.length, totalClips),
                             style: TextStyle(fontSize: 13, color: theme.muted),
                           ),
                         ],

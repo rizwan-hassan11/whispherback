@@ -1,5 +1,7 @@
 import '../../data/database/database_helper.dart';
 import '../../data/database/seed_service.dart';
+import '../../data/repositories/clip_repository.dart';
+import '../../services/audio/audio_services.dart';
 import '../../services/audio/clip_path_guard.dart';
 import '../../services/scheduler/schedule_last_fired_store.dart';
 
@@ -22,5 +24,10 @@ abstract final class AppBootstrap {
     await SeedService.seedIfEmpty();
     await ClipPathGuard.ensureLoaded();
     await ScheduleLastFiredStore.ensureLoaded();
+    // Clean up `.m4a` files left behind by process-death mid-recording or
+    // import failures. Best-effort: never blocks startup if it fails.
+    await reconcileOrphanClipFiles(
+      ClipRepository(DatabaseHelper.instance),
+    );
   }
 }

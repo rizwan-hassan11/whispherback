@@ -26,8 +26,9 @@ abstract final class ClipPathGuard {
 
     final normalized = p.normalize(filePath);
     final lower = normalized.toLowerCase();
-    final isAudio =
-        lower.endsWith('.m4a') || lower.endsWith('.mp3') || lower.endsWith('.aac');
+    final isAudio = lower.endsWith('.m4a') ||
+        lower.endsWith('.mp3') ||
+        lower.endsWith('.aac');
 
     final root = _clipsRoot;
     if (root != null && p.isWithin(root, normalized)) {

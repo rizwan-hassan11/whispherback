@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -35,13 +36,29 @@ class AudioRecordingService {
     if (!await clipsDir.exists()) await clipsDir.create(recursive: true);
     final filePath = p.join(clipsDir.path, '${_uuid.v4()}.m4a');
 
-    await _recorder.start(
-      const RecordConfig(
-          encoder: AudioEncoder.aacLc, sampleRate: 44100, numChannels: 1),
-      path: filePath,
-    );
+    // Stamp the pending state BEFORE calling `_recorder.start` so that if the
+    // OS throws (mic permission revoked mid-flight, FGS denied on Android 14,
+    // disk full) we still know which file to clean up. Previously the throw
+    // happened before `_pendingPath` was set and we leaked an empty `.m4a`.
     _pendingPath = filePath;
     _pendingTitle = title;
+    try {
+      await _recorder.start(
+        const RecordConfig(
+            encoder: AudioEncoder.aacLc, sampleRate: 44100, numChannels: 1),
+        path: filePath,
+      );
+    } catch (e) {
+      _pendingPath = null;
+      _pendingTitle = null;
+      // Try to remove the partial file `record` may have created; best-effort
+      // so the orphan sweep on next bootstrap will handle anything we miss.
+      try {
+        final partial = File(filePath);
+        if (await partial.exists()) await partial.delete();
+      } catch (_) {}
+      rethrow;
+    }
     return AudioClip(
       id: 'pending',
       title: title,
@@ -56,31 +73,69 @@ class AudioRecordingService {
   String? _pendingTitle;
 
   Future<AudioClip?> stopAndSave() async {
-    final path = await _recorder.stop();
-    final filePath = path ?? _pendingPath;
-    final title = _pendingTitle ?? 'Recording';
-    _pendingPath = null;
-    _pendingTitle = null;
-    if (filePath == null) return null;
+    // Snapshot the pending state into locals up front but DO NOT null the
+    // instance fields yet — if probe or DB create fails we use them to clean
+    // up the orphan file. The old code cleared them eagerly and the file
+    // was lost forever on the failure path.
+    final pendingPath = _pendingPath;
+    final pendingTitle = _pendingTitle ?? 'Recording';
+    final stopPath = await _recorder.stop();
+    final filePath = stopPath ?? pendingPath;
+    if (filePath == null) {
+      _pendingPath = null;
+      _pendingTitle = null;
+      return null;
+    }
 
-    final player = AudioPlayer();
-    await player.setFilePath(filePath);
-    final durationMs = player.duration?.inMilliseconds ?? 0;
-    await player.dispose();
-
-    return _clipRepository.create(
-      title: title,
-      filePath: filePath,
-      durationMs: durationMs,
-      source: ClipSource.recorded,
-    );
+    AudioClip? created;
+    try {
+      final player = AudioPlayer();
+      int durationMs = 0;
+      try {
+        await player.setFilePath(filePath);
+        durationMs = player.duration?.inMilliseconds ?? 0;
+      } finally {
+        await player.dispose();
+      }
+      // Empty titles are coerced so the UI never shows a blank tile that
+      // the user can't easily tell apart from another anonymous recording.
+      final normalizedTitle =
+          pendingTitle.trim().isEmpty ? 'Recording' : pendingTitle.trim();
+      created = await _clipRepository.create(
+        title: normalizedTitle,
+        filePath: filePath,
+        durationMs: durationMs,
+        source: ClipSource.recorded,
+      );
+      _pendingPath = null;
+      _pendingTitle = null;
+      return created;
+    } catch (e) {
+      // Probe or DB write failed — delete the partial file so we don't leak
+      // a recording the user will never be able to access, then surface the
+      // error so the UI can show a real toast (not silent failure).
+      try {
+        final f = File(filePath);
+        if (await f.exists()) await f.delete();
+      } catch (_) {}
+      _pendingPath = null;
+      _pendingTitle = null;
+      rethrow;
+    }
   }
 
   Future<void> cancel() async {
-    await _recorder.stop();
+    try {
+      await _recorder.stop();
+    } catch (_) {
+      // Stop on an idle recorder throws on some OEMs — swallow so cancel()
+      // is always safe to call (e.g. from Navigator.didPopRoute).
+    }
     if (_pendingPath != null) {
       final f = File(_pendingPath!);
-      if (await f.exists()) await f.delete();
+      try {
+        if (await f.exists()) await f.delete();
+      } catch (_) {}
     }
     _pendingPath = null;
     _pendingTitle = null;
@@ -91,31 +146,112 @@ class AudioRecordingService {
   }
 }
 
+/// Removes audio files in the sandbox `clips/` directory that no longer have
+/// a matching row in the `clips` table. This handles:
+///
+/// * Process death mid-recording → orphan `.m4a` left by `record` plugin.
+/// * `stopAndSave` write succeeds but `_clipRepository.create` fails after a
+///   crash (rare but real on devices with intermittent SQLite locks).
+/// * Manual file deletes from external file managers (uncommon, but cheap to
+///   handle).
+///
+/// Called once during bootstrap. Best-effort: any failure is logged and the
+/// app keeps starting.
+Future<void> reconcileOrphanClipFiles(ClipRepository clipRepository) async {
+  try {
+    final dir = await getApplicationDocumentsDirectory();
+    final clipsDir = Directory(p.join(dir.path, 'clips'));
+    if (!await clipsDir.exists()) return;
+    final known = (await clipRepository.getAll())
+        .map((c) => p.normalize(c.filePath))
+        .toSet();
+    final entries = await clipsDir.list().toList();
+    for (final entry in entries) {
+      if (entry is! File) continue;
+      final normalized = p.normalize(entry.path);
+      if (known.contains(normalized)) continue;
+      // Don't blow away non-audio files just in case; only known clip
+      // extensions are eligible for cleanup.
+      final ext = p.extension(normalized).toLowerCase();
+      if (ext != '.m4a' && ext != '.mp3' && ext != '.aac' && ext != '.wav') {
+        continue;
+      }
+      try {
+        await entry.delete();
+        if (kDebugMode) {
+          debugPrint('Cleaned orphan clip file: ${entry.path}');
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          debugPrint('Failed to clean orphan clip ${entry.path}: $e');
+        }
+      }
+    }
+  } catch (e, st) {
+    if (kDebugMode) {
+      debugPrint('reconcileOrphanClipFiles failed: $e\n$st');
+    }
+  }
+}
+
 class AudioImportService {
   AudioImportService(this._clipRepository);
 
   final ClipRepository _clipRepository;
   final _uuid = const Uuid();
 
-  Stream<double> importFile(String sourcePath, String title) async* {
-    if (!ClipPathGuard.isAllowedImportExtension(sourcePath)) {
+  /// Copies a picked audio file into the app sandbox and creates a DB row.
+  ///
+  /// [sourcePath] is the file system path returned by the picker — may be
+  /// `null` on Android 10+ scoped storage. When `null`, [sourceBytes] **must**
+  /// carry the file contents (use `file_picker`'s `withData: true`).
+  /// [fileName] is the original display name and is required to derive the
+  /// extension when [sourcePath] is unavailable.
+  Stream<double> importFile(
+    String? sourcePath,
+    String title, {
+    Uint8List? sourceBytes,
+    String? fileName,
+  }) async* {
+    final referenceName = fileName ?? sourcePath ?? '';
+    if (!ClipPathGuard.isAllowedImportExtension(referenceName)) {
       throw ArgumentError('Only MP3 and M4A files are supported');
+    }
+    if (sourcePath == null && (sourceBytes == null || sourceBytes.isEmpty)) {
+      throw ArgumentError('Picked file has no readable contents');
     }
     yield 0.1;
     final dir = await getApplicationDocumentsDirectory();
     final clipsDir = Directory(p.join(dir.path, 'clips'));
     if (!await clipsDir.exists()) await clipsDir.create(recursive: true);
 
-    final ext = p.extension(sourcePath);
+    final ext = p.extension(referenceName).toLowerCase();
     final destPath = p.join(clipsDir.path, '${_uuid.v4()}$ext');
     yield 0.3;
 
-    await File(sourcePath).copy(destPath);
+    if (sourcePath != null && File(sourcePath).existsSync()) {
+      await File(sourcePath).copy(destPath);
+    } else {
+      // Scoped-storage fallback: write the in-memory bytes the picker handed
+      // us. This is the path Samsung devices on Android 10+ frequently take
+      // because the OS returns a content:// URI with no real file path.
+      await File(destPath).writeAsBytes(sourceBytes!, flush: true);
+    }
     yield 0.7;
 
     final player = AudioPlayer();
-    await player.setFilePath(destPath);
-    final durationMs = player.duration?.inMilliseconds ?? 0;
+    int durationMs = 0;
+    try {
+      await player.setFilePath(destPath);
+      durationMs = player.duration?.inMilliseconds ?? 0;
+    } catch (_) {
+      // Bad encoding / corrupt file — surface a friendly error to the user.
+      try {
+        await File(destPath).delete();
+      } catch (_) {}
+      await player.dispose();
+      throw ArgumentError('Only MP3 and M4A files are supported');
+    }
     await player.dispose();
     yield 0.9;
 
@@ -142,7 +278,8 @@ class AudioPlaybackService {
 
   Stream<Duration?> get positionStream => _handler.player.positionStream;
   Stream<Duration?> get durationStream => _handler.player.durationStream;
-  Stream<PlayerState> get playerStateStream => _handler.player.playerStateStream;
+  Stream<PlayerState> get playerStateStream =>
+      _handler.player.playerStateStream;
 
   Future<void> playFile(
     String path, {

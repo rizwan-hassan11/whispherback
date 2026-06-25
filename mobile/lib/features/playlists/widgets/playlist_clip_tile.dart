@@ -116,7 +116,8 @@ class PlaylistClipTile extends StatelessWidget {
                 ProminentPlayButton(onTap: onPlay),
                 if (onRemove != null)
                   IconButton(
-                    icon: Icon(AppIcons.removeFromList, color: theme.muted, size: 22),
+                    icon: Icon(AppIcons.removeFromList,
+                        color: theme.muted, size: 22),
                     tooltip: l10n.removeFromPlaylist,
                     onPressed: onRemove,
                   ),

@@ -117,8 +117,7 @@ class HomeScreen extends ConsumerWidget {
                                     appState: appState,
                                     schedules:
                                         ref.read(scheduleRepositoryProvider),
-                                    prayer:
-                                        ref.read(prayerRepositoryProvider),
+                                    prayer: ref.read(prayerRepositoryProvider),
                                   );
                                   if (nowActive && context.mounted) {
                                     await runSchedulingSetupWizard(context);

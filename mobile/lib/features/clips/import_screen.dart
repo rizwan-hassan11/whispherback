@@ -47,28 +47,61 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
       return;
     }
 
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['mp3', 'm4a'],
-    );
+    FilePickerResult? result;
+    try {
+      // `withData: true` is critical on Android 10+ / Samsung One UI where the
+      // OS returns a content:// URI with no real file path. With bytes we can
+      // always copy into the app sandbox even when `path` is null.
+      result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['mp3', 'm4a'],
+        withData: true,
+      );
+    } catch (e) {
+      if (mounted) {
+        context.showShellSnackBar(
+          userFacingError(e, l10n),
+          icon: AppIcons.alertCircle,
+        );
+      }
+      return;
+    }
 
-    if (result == null || result.files.single.path == null) return;
+    if (result == null || result.files.isEmpty) {
+      // User cancelled the picker — stay quiet, no error toast needed.
+      return;
+    }
 
-    final path = result.files.single.path!;
+    final picked = result.files.single;
+    final path = picked.path;
+    final bytes = picked.bytes;
+    final title = picked.name;
 
-    final title = result.files.single.name;
+    if ((path == null || path.isEmpty) && (bytes == null || bytes.isEmpty)) {
+      // Picker returned a file we can neither read nor copy — this used to
+      // silently no-op and made the Import button look broken on Samsung.
+      if (mounted) {
+        context.showShellSnackBar(
+          l10n.importFailed,
+          icon: AppIcons.alertCircle,
+        );
+      }
+      return;
+    }
 
     setState(() {
       _importing = true;
-
       _progress = 0;
-
       _fileName = title;
     });
 
     try {
-      await for (final p
-          in ref.read(audioImportServiceProvider).importFile(path, title)) {
+      await for (final p in ref.read(audioImportServiceProvider).importFile(
+            path,
+            title,
+            sourceBytes: bytes,
+            fileName: title,
+          )) {
         if (mounted) setState(() => _progress = p);
       }
 

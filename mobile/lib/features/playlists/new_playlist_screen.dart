@@ -76,6 +76,23 @@ class _NewPlaylistScreenState extends ConsumerState<NewPlaylistScreen> {
         context.showShellSnackBar(l10n.playlistLimitReached(e.limit),
             icon: AppIcons.alertCircle);
       }
+    } on DuplicatePlaylistNameException {
+      if (mounted) {
+        context.showShellSnackBar(
+          l10n.playlistNameTaken(name),
+          icon: AppIcons.alertCircle,
+        );
+      }
+    } catch (_) {
+      // Any other DB error (disk full, locked, etc.) — show a generic
+      // message so the user knows the playlist wasn't saved instead of
+      // seeing a spinner forever or an unhandled exception toast.
+      if (mounted) {
+        context.showShellSnackBar(
+          l10n.couldNotSavePlaylist,
+          icon: AppIcons.alertCircle,
+        );
+      }
     } finally {
       if (mounted) setState(() => _creating = false);
     }
@@ -110,7 +127,8 @@ class _NewPlaylistScreenState extends ConsumerState<NewPlaylistScreen> {
                 _SubTopBar(
                   theme: theme,
                   title: l10n.newPlaylist,
-                  onBack: _creating ? null : () => popOrGo(context, '/playlists'),
+                  onBack:
+                      _creating ? null : () => popOrGo(context, '/playlists'),
                 ),
                 Expanded(
                   child: ListView(
@@ -330,7 +348,8 @@ class _HeroIcon extends StatelessWidget {
                 ),
               ],
             ),
-            child: const Icon(AppIcons.playlists, size: 32, color: Colors.white),
+            child:
+                const Icon(AppIcons.playlists, size: 32, color: Colors.white),
           ),
         ],
       ),

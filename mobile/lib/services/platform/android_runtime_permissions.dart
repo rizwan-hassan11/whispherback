@@ -15,8 +15,7 @@ class AndroidSchedulingPermissions {
   final bool exactAlarmsGranted;
   final bool batteryUnrestricted;
 
-  bool get schedulingReady =>
-      notificationsGranted && exactAlarmsGranted;
+  bool get schedulingReady => notificationsGranted && exactAlarmsGranted;
 
   bool get fullyReady => schedulingReady && batteryUnrestricted;
 }

@@ -184,14 +184,17 @@ Future<bool> ensurePermissionWithUi(
     return false;
   }
 
+  // Use the shell messenger so the snackbar floats *above* the bottom nav and
+  // survives any route pop. The previous raw ScaffoldMessenger call was
+  // routinely hidden behind the floating bar on Samsung One UI / Pixel —
+  // users perceived the mic / browse buttons as "doing nothing".
   final snack = copy.deniedSnack ?? l10n.permissionDeniedSnack;
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: Text(snack),
-      action: SnackBarAction(
-        label: l10n.permissionOpenSettings,
-        onPressed: () => openAppSettings(),
-      ),
+  context.showShellSnackBar(
+    snack,
+    duration: const Duration(seconds: 5),
+    action: SnackBarAction(
+      label: l10n.permissionOpenSettings,
+      onPressed: () => openAppSettings(),
     ),
   );
   return false;

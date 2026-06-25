@@ -149,13 +149,10 @@ class ScheduleRepository {
     final startSeconds = start.hour * 3600 + start.minute * 60 + start.second;
     final endMinutes = end != null ? end.hour * 60 + end.minute : null;
     final startMinutes = start.hour * 60 + start.minute;
-    final overnight =
-        endMinutes != null && endMinutes <= startMinutes;
+    final overnight = endMinutes != null && endMinutes <= startMinutes;
     final windowEndSeconds = endMinutes == null
         ? startSeconds + (24 * 3600)
-        : (overnight
-            ? endMinutes * 60 + 24 * 3600
-            : endMinutes * 60);
+        : (overnight ? endMinutes * 60 + 24 * 3600 : endMinutes * 60);
 
     final slots = <int>[];
     var cursor = startSeconds;

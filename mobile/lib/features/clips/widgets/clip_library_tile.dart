@@ -149,7 +149,8 @@ class ClipLibraryTile extends StatelessWidget {
                     if (onDelete != null) ...[
                       const SizedBox(width: 4),
                       IconButton(
-                        icon: const Icon(AppIcons.trash, color: AppColors.error, size: 20),
+                        icon: const Icon(AppIcons.trash,
+                            color: AppColors.error, size: 20),
                         tooltip: l10n.deleteClip,
                         onPressed: onDelete,
                       ),

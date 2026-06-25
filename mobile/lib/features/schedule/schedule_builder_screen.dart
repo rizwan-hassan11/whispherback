@@ -289,8 +289,7 @@ class _ScheduleBuilderScreenState extends ConsumerState<ScheduleBuilderScreen> {
                         boxShadow: on
                             ? [
                                 BoxShadow(
-                                  color:
-                                      AppColors.neon.withValues(alpha: 0.4),
+                                  color: AppColors.neon.withValues(alpha: 0.4),
                                   blurRadius: 12,
                                 ),
                               ]

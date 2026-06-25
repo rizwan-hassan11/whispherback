@@ -19,7 +19,8 @@ class LanguageScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = context.l10n;
     final theme = whisperTheme(context);
-    final current = AppLanguage.fromCode(ref.watch(localeProvider).languageCode);
+    final current =
+        AppLanguage.fromCode(ref.watch(localeProvider).languageCode);
 
     return PremiumScreenBackground(
       child: Scaffold(
@@ -53,14 +54,12 @@ class LanguageScreen extends ConsumerWidget {
                 child: InkWell(
                   borderRadius: BorderRadius.circular(14),
                   onTap: () async {
-                    await ref
-                        .read(localeProvider.notifier)
-                        .setLanguage(lang);
+                    await ref.read(localeProvider.notifier).setLanguage(lang);
                     if (context.mounted) context.pop();
                   },
                   child: Padding(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 14),
                     child: Row(
                       children: [
                         Expanded(

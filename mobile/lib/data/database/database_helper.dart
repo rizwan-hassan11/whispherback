@@ -18,6 +18,16 @@ class DatabaseHelper {
     return openDatabase(
       path,
       version: 3,
+      onConfigure: (db) async {
+        // SQLite ships with foreign keys OFF; the schema declares
+        // `ON DELETE CASCADE` for `playlist_clips` and `schedules` rows that
+        // depend on `playlists`. Without this PRAGMA those cascades are silent
+        // no-ops and we'd leak orphan rows after manual deletes from
+        // anywhere outside the repositories. Repositories still do explicit
+        // deletes as a belt-and-suspenders, but this guards against any
+        // future SQL that forgets to chain the cleanup.
+        await db.execute('PRAGMA foreign_keys = ON');
+      },
       onCreate: (db, version) async {
         await _createSchema(db);
       },

@@ -429,13 +429,8 @@ class AppLocalizations {
       'Afspeellijst verwijderd',
       'Playlist supprimée',
       'Đã xóa danh sách phát');
-  String get playlistRenamed => _s(
-      'Playlist renamed',
-      'نام تبدیل ہو گیا',
-      'تمت إعادة التسمية',
-      'Naam gewijzigd',
-      'Playlist renommée',
-      'Đã đổi tên');
+  String get playlistRenamed => _s('Playlist renamed', 'نام تبدیل ہو گیا',
+      'تمت إعادة التسمية', 'Naam gewijzigd', 'Playlist renommée', 'Đã đổi tên');
   String get removeFromPlaylist => _s(
       'Remove from playlist',
       'پلے لسٹ سے ہٹائیں',
@@ -450,15 +445,10 @@ class AppLocalizations {
       'Selecteer clips om toe te voegen',
       'Sélectionnez des clips à ajouter',
       'Chọn đoạn ghi để thêm');
-  String get delete => _s(
-      'Delete', 'حذف', 'حذف', 'Verwijderen', 'Supprimer', 'Xóa');
-  String get deleteClip => _s(
-      'Delete clip',
-      'کلپ حذف کریں',
-      'حذف المقطع',
-      'Clip verwijderen',
-      'Supprimer le clip',
-      'Xóa đoạn ghi');
+  String get delete =>
+      _s('Delete', 'حذف', 'حذف', 'Verwijderen', 'Supprimer', 'Xóa');
+  String get deleteClip => _s('Delete clip', 'کلپ حذف کریں', 'حذف المقطع',
+      'Clip verwijderen', 'Supprimer le clip', 'Xóa đoạn ghi');
   String get deleteClipConfirm => _s(
       'Delete this clip permanently? It will be removed from all playlists.',
       'یہ کلپ مستقل حذف ہو گی؟ تمام پلے لسٹس سے ہٹ جائے گی۔',
@@ -466,13 +456,8 @@ class AppLocalizations {
       'Deze clip permanent verwijderen? Verwijderd uit alle afspeellijsten.',
       'Supprimer ce clip définitivement ? Retiré de toutes les playlists.',
       'Xóa vĩnh viễn đoạn ghi này? Sẽ bị gỡ khỏi mọi danh sách phát.');
-  String get clipDeleted => _s(
-      'Clip deleted',
-      'کلپ حذف ہو گئی',
-      'تم حذف المقطع',
-      'Clip verwijderd',
-      'Clip supprimé',
-      'Đã xóa đoạn ghi');
+  String get clipDeleted => _s('Clip deleted', 'کلپ حذف ہو گئی',
+      'تم حذف المقطع', 'Clip verwijderd', 'Clip supprimé', 'Đã xóa đoạn ghi');
   String get removeFromPlaylistConfirm => _s(
       'Remove from this playlist? The clip stays in your library.',
       'اس پلے لسٹ سے ہٹائیں؟ کلپ آپ کی لائبریری میں رہے گی۔',
@@ -707,20 +692,10 @@ class AppLocalizations {
       _s('Alarms', 'الارم', 'تنبيهات', 'Alarmen', 'Alarmes', 'Báo thức');
   String get next =>
       _s('Next', 'اگلا', 'التالي', 'Volgende', 'Suivant', 'Tiếp theo');
-  String get previousTrack => _s(
-      'Previous track',
-      'پچھلا ٹریک',
-      'المسار السابق',
-      'Vorige track',
-      'Piste précédente',
-      'Bài trước');
-  String get nextTrack => _s(
-      'Next track',
-      'اگلا ٹریک',
-      'المسار التالي',
-      'Volgende track',
-      'Piste suivante',
-      'Bài tiếp');
+  String get previousTrack => _s('Previous track', 'پچھلا ٹریک',
+      'المسار السابق', 'Vorige track', 'Piste précédente', 'Bài trước');
+  String get nextTrack => _s('Next track', 'اگلا ٹریک', 'المسار التالي',
+      'Volgende track', 'Piste suivante', 'Bài tiếp');
   String get playAdhanTitle => _s(
       'Play adhan voice',
       'اذان کی آواز چلائیں',
@@ -839,13 +814,8 @@ class AppLocalizations {
       'Báo khi đến giờ mỗi lời thì thầm');
   String get saveSchedule => _s('Save Schedule', 'شیڈول محفوظ کریں',
       'حفظ الجدول', 'Schema opslaan', 'Enregistrer le planning', 'Lưu lịch');
-  String get savingSchedule => _s(
-      'Saving…',
-      'محفوظ کر رہا ہے…',
-      'جارٍ الحفظ…',
-      'Bezig met opslaan…',
-      'Enregistrement…',
-      'Đang lưu…');
+  String get savingSchedule => _s('Saving…', 'محفوظ کر رہا ہے…', 'جارٍ الحفظ…',
+      'Bezig met opslaan…', 'Enregistrement…', 'Đang lưu…');
   String get scheduleSaved => _s(
       'Schedule saved',
       'شیڈول محفوظ',
@@ -915,13 +885,8 @@ class AppLocalizations {
       'Inhoud laden mislukt',
       'Impossible de charger le contenu',
       'Không tải được nội dung');
-  String get importFailed => _s(
-      'Import failed',
-      'درآمد ناکام',
-      'فشل الاستيراد',
-      'Importeren mislukt',
-      'Échec de l\'importation',
-      'Nhập thất bại');
+  String get importFailed => _s('Import failed', 'درآمد ناکام', 'فشل الاستيراد',
+      'Importeren mislukt', 'Échec de l\'importation', 'Nhập thất bại');
   String get importInvalidFormat => _s(
       'Only MP3 and M4A audio files are supported.',
       'صرف MP3 اور M4A فائلیں سپورٹ ہیں۔',
@@ -936,19 +901,49 @@ class AppLocalizations {
       'Opnemen mislukt. Controleer opslag en probeer opnieuw.',
       'Échec de l\'enregistrement. Vérifiez l\'espace et réessayez.',
       'Ghi âm thất bại. Kiểm tra bộ nhớ và thử lại.');
-  String get retry =>
-      _s('Try again', 'دوبارہ کوشش', 'حاول مجدداً', 'Opnieuw', 'Réessayer', 'Thử lại');
+  String get playbackClipUnavailable => _s(
+      "We can't open this clip. Try recording or importing it again.",
+      'ہم یہ کلپ نہیں کھول سکتے۔ دوبارہ ریکارڈ یا امپورٹ کریں۔',
+      'تعذر فتح هذا المقطع. حاول التسجيل أو الاستيراد مرة أخرى.',
+      'We kunnen deze clip niet openen. Probeer opnieuw op te nemen of te importeren.',
+      "Impossible d'ouvrir ce clip. Réenregistrez-le ou réimportez-le.",
+      'Không thể mở đoạn này. Hãy ghi lại hoặc nhập lại.');
+  String playbackClipUnavailableNamed(String title) => _s(
+      "We can't open \"$title\". Try recording or importing it again.",
+      'ہم "$title" نہیں کھول سکتے۔ دوبارہ ریکارڈ یا امپورٹ کریں۔',
+      'تعذر فتح "$title". حاول التسجيل أو الاستيراد مرة أخرى.',
+      'We kunnen "$title" niet openen. Probeer opnieuw op te nemen of te importeren.',
+      'Impossible d\'ouvrir « $title ». Réenregistrez-le ou réimportez-le.',
+      'Không thể mở "$title". Hãy ghi lại hoặc nhập lại.');
+  String get playbackClipFailed => _s(
+      "Playback failed. Restart the app and try again.",
+      'پلے بیک ناکام۔ ایپ ری اسٹارٹ کریں اور دوبارہ کوشش کریں۔',
+      'فشل التشغيل. أعد تشغيل التطبيق وحاول مرة أخرى.',
+      'Afspelen mislukt. Start de app opnieuw en probeer opnieuw.',
+      "Échec de la lecture. Redémarrez l'app et réessayez.",
+      'Phát thất bại. Khởi động lại ứng dụng và thử lại.');
+  String playbackClipFailedNamed(String title) => _s(
+      "Couldn't play \"$title\". Restart the app and try again.",
+      '"$title" نہ چل سکا۔ ایپ ری اسٹارٹ کریں اور دوبارہ کوشش کریں۔',
+      'تعذر تشغيل "$title". أعد تشغيل التطبيق وحاول مرة أخرى.',
+      'Kon "$title" niet afspelen. Start de app opnieuw en probeer opnieuw.',
+      "Lecture de « $title » impossible. Redémarrez l'app et réessayez.",
+      'Không thể phát "$title". Khởi động lại ứng dụng và thử lại.');
+  String get playbackEmptyPlaylist => _s(
+      'This playlist is empty. Add clips before playing.',
+      'یہ پلے لسٹ خالی ہے۔ پلے کرنے سے پہلے کلپس شامل کریں۔',
+      'هذه القائمة فارغة. أضف مقاطع قبل التشغيل.',
+      'Deze playlist is leeg. Voeg clips toe voordat je afspeelt.',
+      'Cette playlist est vide. Ajoutez des clips avant de lire.',
+      'Danh sách này trống. Hãy thêm đoạn ghi trước khi phát.');
+  String get retry => _s('Try again', 'دوبارہ کوشش', 'حاول مجدداً', 'Opnieuw',
+      'Réessayer', 'Thử lại');
   String get today =>
       _s('Today', 'آج', 'اليوم', 'Vandaag', 'Aujourd\'hui', 'Hôm nay');
   String get yesterday =>
       _s('Yesterday', 'کل', 'أمس', 'Gisteren', 'Hier', 'Hôm qua');
-  String daysAgo(int days) => _s(
-      '${days}d ago',
-      '$days دن پہلے',
-      'منذ $days ي',
-      '$days d geleden',
-      'Il y a $days j',
-      '$days ngày trước');
+  String daysAgo(int days) => _s('${days}d ago', '$days دن پہلے', 'منذ $days ي',
+      '$days d geleden', 'Il y a $days j', '$days ngày trước');
   String get audioServiceUnavailableTitle => _s(
       'Background audio unavailable',
       'پس منظر آڈیو دستیاب نہیں',
@@ -1482,8 +1477,8 @@ class AppLocalizations {
       );
 
   // ── Permission prompts ──────────────────────────────────────────────────────
-  String get permissionNotNow =>
-      _s('Not now', 'ابھی نہیں', 'ليس الآن', 'Niet nu', 'Pas maintenant', 'Để sau');
+  String get permissionNotNow => _s('Not now', 'ابھی نہیں', 'ليس الآن',
+      'Niet nu', 'Pas maintenant', 'Để sau');
   String get permissionOpenSettings => _s(
       'Open Settings',
       'ترتیبات کھولیں',
@@ -1569,8 +1564,8 @@ class AppLocalizations {
       'Sta meldingen toe zodat geplande whispers op tijd spelen.',
       'Autorisez les notifications pour les murmures planifiés.',
       'Cho phép thông báo để phát lời thì thầm đúng giờ.');
-  String get permissionNotificationsShort =>
-      _s('Notifications', 'اطلاعات', 'الإشعارات', 'Meldingen', 'Notifications', 'Thông báo');
+  String get permissionNotificationsShort => _s('Notifications', 'اطلاعات',
+      'الإشعارات', 'Meldingen', 'Notifications', 'Thông báo');
   String get permissionExactAlarmsTitle => _s(
       'Alarms & reminders required',
       'الارم اور یاددہانی درکار',
@@ -1616,8 +1611,13 @@ class AppLocalizations {
       'Onbeperkte batterij helpt whispers af te spelen als de telefoon idle is.',
       'Batterie non restreinte pour jouer les murmures quand le téléphone est inactif.',
       'Pin không hạn chế giúp phát khi điện thoại nghỉ.');
-  String get permissionBatteryShort =>
-      _s('Battery (Unrestricted)', 'بیٹری (غیر محدود)', 'البطارية (غير مقيدة)', 'Batterij (onbeperkt)', 'Batterie (non restreinte)', 'Pin (không hạn chế)');
+  String get permissionBatteryShort => _s(
+      'Battery (Unrestricted)',
+      'بیٹری (غیر محدود)',
+      'البطارية (غير مقيدة)',
+      'Batterij (onbeperkt)',
+      'Batterie (non restreinte)',
+      'Pin (không hạn chế)');
   String get permissionAudioTitle => _s(
       'Audio access required',
       'آڈیو رسائی درکار',
@@ -1855,6 +1855,22 @@ class AppLocalizations {
         'Limiet bereikt ($limit). Upgrade naar Premium voor meer.',
         'Limite atteinte ($limit). Passez à Premium pour plus.',
         'Đã đạt giới hạn ($limit). Nâng cấp Premium để thêm.',
+      );
+  String playlistNameTaken(String name) => _s(
+        'A playlist called "$name" already exists.',
+        '"$name" نام کی پلے لسٹ پہلے سے موجود ہے۔',
+        'توجد قائمة باسم "$name" بالفعل.',
+        'Er bestaat al een playlist met de naam "$name".',
+        'Une playlist nommée "$name" existe déjà.',
+        'Đã có danh sách phát tên "$name".',
+      );
+  String get couldNotSavePlaylist => _s(
+        "Could not save playlist. Please try again.",
+        'پلے لسٹ محفوظ نہیں ہو سکی۔ دوبارہ کوشش کریں۔',
+        'تعذر حفظ القائمة. حاول مرة أخرى.',
+        'Kan playlist niet opslaan. Probeer opnieuw.',
+        "Impossible d'enregistrer la playlist. Réessayez.",
+        'Không thể lưu danh sách. Vui lòng thử lại.',
       );
   String get ideaMorningWhispers => _s(
       'Morning Whispers',

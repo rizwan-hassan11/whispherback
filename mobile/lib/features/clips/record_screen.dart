@@ -40,6 +40,14 @@ class _RecordScreenState extends ConsumerState<RecordScreen> {
   @override
   void dispose() {
     _elapsedTimer?.cancel();
+    // If the user swipes away (or the OS pops the route) while a recording
+    // is in flight, cancel it so we don't leave the singleton recorder in
+    // an "active" state and leak the partial `.m4a`. Best-effort: cancel
+    // tolerates an already-stopped recorder.
+    if (_recording) {
+      final service = ref.read(audioRecordingServiceProvider);
+      unawaited(service.cancel());
+    }
     _titleController.dispose();
     super.dispose();
   }
@@ -99,6 +107,23 @@ class _RecordScreenState extends ConsumerState<RecordScreen> {
     return '$m:$s';
   }
 
+  Future<void> _cancelAndPop() async {
+    final service = ref.read(audioRecordingServiceProvider);
+    final messenger = context.l10n.recordingCancelled;
+    try {
+      await service.cancel();
+    } catch (_) {}
+    _elapsedTimer?.cancel();
+    if (mounted) {
+      setState(() {
+        _recording = false;
+        _elapsed = Duration.zero;
+      });
+      context.pop();
+      context.showShellSnackBar(messenger, icon: AppIcons.checkCircle);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
@@ -106,157 +131,171 @@ class _RecordScreenState extends ConsumerState<RecordScreen> {
     final theme = whisperTheme(context);
     final defaultTitle = l10n.newRecording;
 
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: theme.isDark
-                  ? [AppColors.deep2, AppColors.deep]
-                  : [AppColors.lightBg, AppColors.lightBg2],
+    // PopScope wraps the entire screen so the Android system back gesture
+    // (or 3-button back) goes through `_cancelAndPop` whenever a recording
+    // is in flight. Without this, the user could swipe back and the
+    // recorder kept running invisibly with no way to retrieve the file.
+    return PopScope(
+      canPop: !_recording,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        unawaited(_cancelAndPop());
+      },
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: theme.isDark
+                    ? [AppColors.deep2, AppColors.deep]
+                    : [AppColors.lightBg, AppColors.lightBg2],
+              ),
             ),
           ),
-        ),
-        _RecordAmbience(isDark: theme.isDark, recording: _recording),
-        Scaffold(
-          backgroundColor: Colors.transparent,
-          body: SafeArea(
-            child: Column(
-              children: [
-                _SubTopBar(
-                  theme: theme,
-                  title: l10n.recordTitle,
-                  onBack: _recording ? null : () => context.pop(),
-                ),
-                Expanded(
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
-                    children: [
-                      if (_recording) ...[
-                        _RecordingBadge(theme: theme),
-                        const SizedBox(height: 28),
-                        Text(
-                          _formatElapsed(_elapsed),
-                          textAlign: TextAlign.center,
-                          style: GoogleFonts.fraunces(
-                            fontSize: 48,
-                            fontWeight: FontWeight.w700,
-                            color: theme.foreground,
-                            letterSpacing: 2,
-                            height: 1,
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-                        StreamBuilder(
-                          stream: recordingService.amplitudeStream,
-                          builder: (context, snap) {
-                            final amp = snap.data?.current ?? -40;
-                            final level = ((amp + 40) / 40).clamp(0.0, 1.0);
-                            return _WaveformBars(theme: theme, level: level);
-                          },
-                        ),
-                        const SizedBox(height: 28),
-                        Text(
-                          _titleController.text.trim().isEmpty
-                              ? defaultTitle
-                              : _titleController.text.trim(),
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                            color: theme.muted,
-                          ),
-                        ),
-                      ] else ...[
-                        _MicHero(theme: theme),
-                        const SizedBox(height: 24),
-                        Text(
-                          l10n.captureAWhisper,
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 1.4,
-                            color: theme.muted,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          l10n.recordNewClip,
-                          textAlign: TextAlign.center,
-                          style: GoogleFonts.fraunces(
-                            fontSize: 24,
-                            fontWeight: FontWeight.w700,
-                            color: theme.foreground,
-                            height: 1.15,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Text(
-                          l10n.recordSpeakClearlyHint,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: theme.muted,
-                            fontSize: 14,
-                            height: 1.55,
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-                        _TitleField(theme: theme, controller: _titleController),
-                      ],
-                      const SizedBox(height: 32),
-                      DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient:
-                              _recording ? null : AppColors.neonGradient,
-                          color: _recording ? AppColors.error : null,
-                          borderRadius: BorderRadius.circular(AppRadii.sm),
-                          boxShadow: [
-                            BoxShadow(
-                              color: (_recording
-                                      ? AppColors.error
-                                      : AppColors.neon)
-                                  .withValues(alpha: 0.45),
-                              blurRadius: 22,
-                              offset: const Offset(0, 6),
-                            ),
-                          ],
-                        ),
-                        child: FilledButton.icon(
-                          style: FilledButton.styleFrom(
-                            backgroundColor: Colors.transparent,
-                            foregroundColor: Colors.white,
-                            shadowColor: Colors.transparent,
-                            minimumSize: const Size(double.infinity, 52),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(AppRadii.sm),
-                            ),
-                          ),
-                          onPressed: _toggleRecord,
-                          icon: Icon(_recording ? AppIcons.stop : AppIcons.mic),
-                          label: Text(_recording
-                              ? l10n.stopAndSave
-                              : l10n.startRecording),
-                        ),
-                      ),
-                      if (!_recording) ...[
-                        const SizedBox(height: 12),
-                        Text(
-                          l10n.micPermissionRequired,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(fontSize: 12, color: theme.muted),
-                        ),
-                      ],
-                    ],
+          _RecordAmbience(isDark: theme.isDark, recording: _recording),
+          Scaffold(
+            backgroundColor: Colors.transparent,
+            body: SafeArea(
+              child: Column(
+                children: [
+                  _SubTopBar(
+                    theme: theme,
+                    title: l10n.recordTitle,
+                    onBack: _recording ? null : () => context.pop(),
                   ),
-                ),
-              ],
+                  Expanded(
+                    child: ListView(
+                      padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+                      children: [
+                        if (_recording) ...[
+                          _RecordingBadge(theme: theme),
+                          const SizedBox(height: 28),
+                          Text(
+                            _formatElapsed(_elapsed),
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.fraunces(
+                              fontSize: 48,
+                              fontWeight: FontWeight.w700,
+                              color: theme.foreground,
+                              letterSpacing: 2,
+                              height: 1,
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          StreamBuilder(
+                            stream: recordingService.amplitudeStream,
+                            builder: (context, snap) {
+                              final amp = snap.data?.current ?? -40;
+                              final level = ((amp + 40) / 40).clamp(0.0, 1.0);
+                              return _WaveformBars(theme: theme, level: level);
+                            },
+                          ),
+                          const SizedBox(height: 28),
+                          Text(
+                            _titleController.text.trim().isEmpty
+                                ? defaultTitle
+                                : _titleController.text.trim(),
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: theme.muted,
+                            ),
+                          ),
+                        ] else ...[
+                          _MicHero(theme: theme),
+                          const SizedBox(height: 24),
+                          Text(
+                            l10n.captureAWhisper,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 1.4,
+                              color: theme.muted,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            l10n.recordNewClip,
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.fraunces(
+                              fontSize: 24,
+                              fontWeight: FontWeight.w700,
+                              color: theme.foreground,
+                              height: 1.15,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            l10n.recordSpeakClearlyHint,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: theme.muted,
+                              fontSize: 14,
+                              height: 1.55,
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          _TitleField(
+                              theme: theme, controller: _titleController),
+                        ],
+                        const SizedBox(height: 32),
+                        DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient:
+                                _recording ? null : AppColors.neonGradient,
+                            color: _recording ? AppColors.error : null,
+                            borderRadius: BorderRadius.circular(AppRadii.sm),
+                            boxShadow: [
+                              BoxShadow(
+                                color: (_recording
+                                        ? AppColors.error
+                                        : AppColors.neon)
+                                    .withValues(alpha: 0.45),
+                                blurRadius: 22,
+                                offset: const Offset(0, 6),
+                              ),
+                            ],
+                          ),
+                          child: FilledButton.icon(
+                            style: FilledButton.styleFrom(
+                              backgroundColor: Colors.transparent,
+                              foregroundColor: Colors.white,
+                              shadowColor: Colors.transparent,
+                              minimumSize: const Size(double.infinity, 52),
+                              shape: RoundedRectangleBorder(
+                                borderRadius:
+                                    BorderRadius.circular(AppRadii.sm),
+                              ),
+                            ),
+                            onPressed: _toggleRecord,
+                            icon:
+                                Icon(_recording ? AppIcons.stop : AppIcons.mic),
+                            label: Text(_recording
+                                ? l10n.stopAndSave
+                                : l10n.startRecording),
+                          ),
+                        ),
+                        if (!_recording) ...[
+                          const SizedBox(height: 12),
+                          Text(
+                            l10n.micPermissionRequired,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 12, color: theme.muted),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

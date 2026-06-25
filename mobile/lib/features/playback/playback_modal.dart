@@ -60,262 +60,269 @@ class PlaybackModal extends ConsumerWidget {
                     const BorderRadius.vertical(top: Radius.circular(28)),
                 child: BackdropFilter(
                   filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-            child: DecoratedBox(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Color(0xFA081634), Color(0xFA020611)],
-                ),
-                border: Border(top: BorderSide(color: AppColors.glassBorder)),
-              ),
-              child: Stack(
-                children: [
-                  Positioned(
-                    top: -80,
-                    left: 0,
-                    right: 0,
-                    child: Center(
-                      child: Container(
-                        width: 280,
-                        height: 160,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: RadialGradient(
-                            colors: [
-                              Colors.white.withValues(alpha: 0.07),
-                              Colors.transparent,
-                            ],
-                          ),
-                        ),
+                  child: DecoratedBox(
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Color(0xFA081634), Color(0xFA020611)],
                       ),
+                      border:
+                          Border(top: BorderSide(color: AppColors.glassBorder)),
                     ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                    child: Stack(
                       children: [
-                        Center(
-                          child: Container(
-                            width: 36,
-                            height: 4,
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(2),
+                        Positioned(
+                          top: -80,
+                          left: 0,
+                          right: 0,
+                          child: Center(
+                            child: Container(
+                              width: 280,
+                              height: 160,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                gradient: RadialGradient(
+                                  colors: [
+                                    Colors.white.withValues(alpha: 0.07),
+                                    Colors.transparent,
+                                  ],
+                                ),
+                              ),
                             ),
                           ),
                         ),
-                        const SizedBox(height: 16),
-                        const _NowPlayingChip(),
-                        const SizedBox(height: 18),
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _CoverArt(isPlaying: snapshot.isPlaying),
-                            const SizedBox(width: 14),
-                            Expanded(
-                              child: Column(
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Center(
+                                child: Container(
+                                  width: 36,
+                                  height: 4,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(2),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              const _NowPlayingChip(),
+                              const SizedBox(height: 18),
+                              Row(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(
-                                    snapshot.playlistName ?? '',
-                                    style: const TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w700,
-                                      letterSpacing: 1.1,
-                                      color: AppColors.muted,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    snapshot.clipTitle ?? '',
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: GoogleFonts.fraunces(
-                                      fontSize: 22,
-                                      fontWeight: FontWeight.w700,
-                                      height: 1.15,
-                                      color: AppColors.soft,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Semantics(
-                              label: l10n.minimizePlayer,
-                              button: true,
-                              child: Material(
-                                color: AppColors.glass,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                  side: const BorderSide(
-                                      color: AppColors.glassBorder),
-                                ),
-                                child: InkWell(
-                                  onTap: coordinator.dismissModal,
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: const SizedBox(
-                                    width: 36,
-                                    height: 36,
-                                    child: Icon(
-                                      AppIcons.chevronDown,
-                                      size: 22,
-                                      color: AppColors.muted,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 22),
-                        StreamBuilder<Duration?>(
-                          stream: audio.positionStream,
-                          builder: (context, posSnap) {
-                            return StreamBuilder<Duration?>(
-                              stream: audio.durationStream,
-                              builder: (context, durSnap) {
-                                final rawPos = posSnap.data ?? Duration.zero;
-                                final dur = durSnap.data ?? Duration.zero;
-                                final maxMs = dur.inMilliseconds;
-                                final posMs = maxMs > 0
-                                    ? rawPos.inMilliseconds.clamp(0, maxMs)
-                                    : rawPos.inMilliseconds.clamp(0, 1 << 31);
-                                final pos = Duration(milliseconds: posMs);
-                                final progress =
-                                    maxMs > 0 ? posMs / maxMs : 0.0;
-                                final clamped = progress.clamp(0.0, 1.0);
-                                final remainingMs =
-                                    (maxMs - posMs).clamp(0, maxMs);
-                                final remaining =
-                                    Duration(milliseconds: remainingMs);
-
-                                return Column(
-                                  children: [
-                                    _WaveformProgress(progress: clamped),
-                                    const SizedBox(height: 10),
-                                    _SeekBar(
-                                      progress: clamped,
-                                      enabled: maxMs > 0,
-                                      onSeek: (fraction) {
-                                        if (maxMs <= 0) return;
-                                        final target = Duration(
-                                          milliseconds:
-                                              (fraction * maxMs).round(),
-                                        );
-                                        coordinator.seek(target);
-                                      },
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.spaceBetween,
+                                  _CoverArt(isPlaying: snapshot.isPlaying),
+                                  const SizedBox(width: 14),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
                                         Text(
-                                          _format(pos),
+                                          snapshot.playlistName ?? '',
                                           style: const TextStyle(
                                             fontSize: 11,
-                                            fontWeight: FontWeight.w600,
-                                            color: AppColors.soft,
-                                            fontFeatures: [
-                                              FontFeature.tabularFigures()
-                                            ],
+                                            fontWeight: FontWeight.w700,
+                                            letterSpacing: 1.1,
+                                            color: AppColors.muted,
                                           ),
                                         ),
+                                        const SizedBox(height: 4),
                                         Text(
-                                          remaining.isNegative
-                                              ? _format(Duration.zero)
-                                              : '−${_format(remaining)}',
-                                          style: const TextStyle(
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.w600,
-                                            color: AppColors.muted,
-                                            fontFeatures: [
-                                              FontFeature.tabularFigures()
-                                            ],
+                                          snapshot.clipTitle ?? '',
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: GoogleFonts.fraunces(
+                                            fontSize: 22,
+                                            fontWeight: FontWeight.w700,
+                                            height: 1.15,
+                                            color: AppColors.soft,
                                           ),
                                         ),
                                       ],
                                     ),
-                                  ],
-                                );
-                              },
-                            );
-                          },
-                        ),
-                        const SizedBox(height: 24),
-                        Builder(builder: (context) {
-                          final canSkip = coordinator.canSkipClips;
-                          final isPlaylistContext = snapshot.playlistId != null;
-                          // Scroll horizontally on very narrow phones (≤320 dp)
-                          // so the controls row never overflows or gets clipped.
-                          return SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            padding: EdgeInsets.zero,
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                if (isPlaylistContext)
-                                  _CtrlButton(
-                                    semanticLabel: l10n.toggleShuffle,
-                                    icon: AppIcons.shuffle,
-                                    highlighted: snapshot.shuffleEnabled,
-                                    onPressed: () => coordinator.toggleShuffle(
-                                      snapshot.playlistId!,
-                                      !snapshot.shuffleEnabled,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Semantics(
+                                    label: l10n.minimizePlayer,
+                                    button: true,
+                                    child: Material(
+                                      color: AppColors.glass,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                        side: const BorderSide(
+                                            color: AppColors.glassBorder),
+                                      ),
+                                      child: InkWell(
+                                        onTap: coordinator.dismissModal,
+                                        borderRadius: BorderRadius.circular(12),
+                                        child: const SizedBox(
+                                          width: 36,
+                                          height: 36,
+                                          child: Icon(
+                                            AppIcons.chevronDown,
+                                            size: 22,
+                                            color: AppColors.muted,
+                                          ),
+                                        ),
+                                      ),
                                     ),
                                   ),
-                                if (isPlaylistContext)
-                                  const SizedBox(width: 12),
-                                if (canSkip)
-                                  _CtrlButton(
-                                    semanticLabel: l10n.previousTrack,
-                                    icon: Icons.skip_previous_rounded,
-                                    onPressed: coordinator.skipPrevious,
+                                ],
+                              ),
+                              const SizedBox(height: 22),
+                              StreamBuilder<Duration?>(
+                                stream: audio.positionStream,
+                                builder: (context, posSnap) {
+                                  return StreamBuilder<Duration?>(
+                                    stream: audio.durationStream,
+                                    builder: (context, durSnap) {
+                                      final rawPos =
+                                          posSnap.data ?? Duration.zero;
+                                      final dur = durSnap.data ?? Duration.zero;
+                                      final maxMs = dur.inMilliseconds;
+                                      final posMs = maxMs > 0
+                                          ? rawPos.inMilliseconds
+                                              .clamp(0, maxMs)
+                                          : rawPos.inMilliseconds
+                                              .clamp(0, 1 << 31);
+                                      final pos = Duration(milliseconds: posMs);
+                                      final progress =
+                                          maxMs > 0 ? posMs / maxMs : 0.0;
+                                      final clamped = progress.clamp(0.0, 1.0);
+                                      final remainingMs =
+                                          (maxMs - posMs).clamp(0, maxMs);
+                                      final remaining =
+                                          Duration(milliseconds: remainingMs);
+
+                                      return Column(
+                                        children: [
+                                          _WaveformProgress(progress: clamped),
+                                          const SizedBox(height: 10),
+                                          _SeekBar(
+                                            progress: clamped,
+                                            enabled: maxMs > 0,
+                                            onSeek: (fraction) {
+                                              if (maxMs <= 0) return;
+                                              final target = Duration(
+                                                milliseconds:
+                                                    (fraction * maxMs).round(),
+                                              );
+                                              coordinator.seek(target);
+                                            },
+                                          ),
+                                          const SizedBox(height: 8),
+                                          Row(
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.spaceBetween,
+                                            children: [
+                                              Text(
+                                                _format(pos),
+                                                style: const TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: AppColors.soft,
+                                                  fontFeatures: [
+                                                    FontFeature.tabularFigures()
+                                                  ],
+                                                ),
+                                              ),
+                                              Text(
+                                                remaining.isNegative
+                                                    ? _format(Duration.zero)
+                                                    : '−${_format(remaining)}',
+                                                style: const TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: AppColors.muted,
+                                                  fontFeatures: [
+                                                    FontFeature.tabularFigures()
+                                                  ],
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ],
+                                      );
+                                    },
+                                  );
+                                },
+                              ),
+                              const SizedBox(height: 24),
+                              Builder(builder: (context) {
+                                final canSkip = coordinator.canSkipClips;
+                                final isPlaylistContext =
+                                    snapshot.playlistId != null;
+                                // Scroll horizontally on very narrow phones (≤320 dp)
+                                // so the controls row never overflows or gets clipped.
+                                return SingleChildScrollView(
+                                  scrollDirection: Axis.horizontal,
+                                  padding: EdgeInsets.zero,
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      if (isPlaylistContext)
+                                        _CtrlButton(
+                                          semanticLabel: l10n.toggleShuffle,
+                                          icon: AppIcons.shuffle,
+                                          highlighted: snapshot.shuffleEnabled,
+                                          onPressed: () =>
+                                              coordinator.toggleShuffle(
+                                            snapshot.playlistId!,
+                                            !snapshot.shuffleEnabled,
+                                          ),
+                                        ),
+                                      if (isPlaylistContext)
+                                        const SizedBox(width: 12),
+                                      if (canSkip)
+                                        _CtrlButton(
+                                          semanticLabel: l10n.previousTrack,
+                                          icon: Icons.skip_previous_rounded,
+                                          onPressed: coordinator.skipPrevious,
+                                        ),
+                                      if (canSkip) const SizedBox(width: 12),
+                                      _CtrlButton(
+                                        semanticLabel: snapshot.isPlaying
+                                            ? l10n.pause
+                                            : l10n.play,
+                                        icon: snapshot.isPlaying
+                                            ? AppIcons.pause
+                                            : AppIcons.play,
+                                        filled: true,
+                                        onPressed: () {
+                                          if (snapshot.isPlaying) {
+                                            coordinator.pause();
+                                          } else {
+                                            coordinator.resume();
+                                          }
+                                        },
+                                      ),
+                                      if (canSkip) const SizedBox(width: 12),
+                                      if (canSkip)
+                                        _CtrlButton(
+                                          semanticLabel: l10n.nextTrack,
+                                          icon: Icons.skip_next_rounded,
+                                          onPressed: coordinator.skipNext,
+                                        ),
+                                      const SizedBox(width: 12),
+                                      _CtrlButton(
+                                        semanticLabel: l10n.stopPlayback,
+                                        icon: AppIcons.close,
+                                        onPressed: coordinator.stop,
+                                      ),
+                                    ],
                                   ),
-                                if (canSkip) const SizedBox(width: 12),
-                                _CtrlButton(
-                                  semanticLabel: snapshot.isPlaying
-                                      ? l10n.pause
-                                      : l10n.play,
-                                  icon: snapshot.isPlaying
-                                      ? AppIcons.pause
-                                      : AppIcons.play,
-                                  filled: true,
-                                  onPressed: () {
-                                    if (snapshot.isPlaying) {
-                                      coordinator.pause();
-                                    } else {
-                                      coordinator.resume();
-                                    }
-                                  },
-                                ),
-                                if (canSkip) const SizedBox(width: 12),
-                                if (canSkip)
-                                  _CtrlButton(
-                                    semanticLabel: l10n.nextTrack,
-                                    icon: Icons.skip_next_rounded,
-                                    onPressed: coordinator.skipNext,
-                                  ),
-                                const SizedBox(width: 12),
-                                _CtrlButton(
-                                  semanticLabel: l10n.stopPlayback,
-                                  icon: AppIcons.close,
-                                  onPressed: coordinator.stop,
-                                ),
-                              ],
-                            ),
-                          );
-                        }),
+                                );
+                              }),
+                            ],
+                          ),
+                        ),
                       ],
                     ),
-                  ),
-                ],
-              ),
                   ),
                 ),
               ),
@@ -607,8 +614,7 @@ class _SeekBarState extends State<_SeekBar> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
-        final fraction =
-            (_draggingFraction ?? widget.progress).clamp(0.0, 1.0);
+        final fraction = (_draggingFraction ?? widget.progress).clamp(0.0, 1.0);
         final thumbLeft = (fraction * width - 9).clamp(0.0, width - 18);
 
         return GestureDetector(
@@ -621,7 +627,8 @@ class _SeekBarState extends State<_SeekBar> {
           onHorizontalDragUpdate: (d) =>
               _handleUpdate(d.localPosition.dx, width),
           onHorizontalDragEnd: (_) => _commit(),
-          onHorizontalDragCancel: () => setState(() => _draggingFraction = null),
+          onHorizontalDragCancel: () =>
+              setState(() => _draggingFraction = null),
           child: SizedBox(
             // Tall hit area for a finger-friendly tap/drag target.
             height: 28,

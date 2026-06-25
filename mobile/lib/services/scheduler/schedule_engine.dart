@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/repositories/app_state_repository.dart';
@@ -28,12 +29,16 @@ class ScheduleEngine {
         _schedules = scheduleRepository,
         _coordinator = coordinator,
         _lastFired = lastFiredStore {
-    // Whenever a scheduled clip finishes naturally, stamp `lastFired` with the
+    // Whenever a scheduled clip finishes naturally, stamp `completion` with the
     // actual completion timestamp so the next slot is computed as
     // `completionTime + intervalMinutes`. Without this, the next fire would
     // be `slotStart + interval`, which collapses to ~1 minute of silence for
     // a 4-minute playlist on a 5-minute interval.
     _coordinator.onScheduledPlaybackCompleted = _onScheduledCompleted;
+    // Listen for playback errors during scheduled runs so we can clear the
+    // active schedule lock and let the next tick retry instead of being stuck
+    // with `_activeScheduleId` set but no completion ever arriving.
+    _errorSubscription = _coordinator.errors.listen(_onPlaybackError);
   }
 
   final AppStateRepository _appState;
@@ -42,21 +47,37 @@ class ScheduleEngine {
   final ScheduleLastFiredStore _lastFired;
   final ScheduleNotificationSync? onNotificationsSync;
   Timer? _timer;
+  StreamSubscription<PlaybackErrorEvent>? _errorSubscription;
 
   bool _started = false;
   bool _tickInFlight = false;
+
+  /// Watchdog: if a tick body hangs longer than this, force `_tickInFlight`
+  /// back to false so we don't lock all future scheduling. 30s is generous
+  /// enough that real DB I/O + notification sync won't trip it.
+  static const _tickWatchdog = Duration(seconds: 30);
+
+  /// Cooldown after an empty-playlist or unplayable scheduled fire so we
+  /// don't hammer the engine every 5s while the user is fixing the playlist.
+  static final Map<String, DateTime> _failureBackoff = {};
+  static const _failureBackoffDuration = Duration(minutes: 1);
 
   void start() {
     if (_started) return;
     _timer?.cancel();
     _started = true;
     unawaited(fireNow());
-    _timer = Timer.periodic(const Duration(seconds: 5), (_) => unawaited(fireNow()));
+    _timer = Timer.periodic(const Duration(seconds: 5), (_) {
+      _evictStuckTick();
+      unawaited(fireNow());
+    });
   }
 
   void stop() {
     _started = false;
     _timer?.cancel();
+    _errorSubscription?.cancel();
+    _errorSubscription = null;
   }
 
   bool get isRunning => _started;
@@ -66,42 +87,107 @@ class ScheduleEngine {
     if (!_started || _tickInFlight) return;
     _tickInFlight = true;
     try {
-      if (!await _appState.isActive()) return;
-
-      if (_coordinator.snapshot.state == AppPlaybackState.scheduledPlaying &&
-          _coordinator.snapshot.isPlaying) {
-        return;
-      }
-
-      final all = await _schedules.getAll();
-      final now = DateTime.now();
-
-      for (final schedule in all) {
-        if (!schedule.enabled) continue;
-
-        final last = _lastFiredForToday(schedule.id, now);
-        final slot = ScheduleFireHelper.slotToFire(schedule, now, last);
-        if (slot == null) continue;
-
-        // Skip if another schedule already claimed this exact slot.
-        if (_slotTakenByOtherSchedule(all, schedule.id, slot, now)) continue;
-
-        final played = await _coordinator.requestScheduledPlay(
-          schedule.playlistId,
-          scheduleId: schedule.id,
-        );
-        if (!played) continue;
-
-        // Stamp the slot start so the ticker stops re-firing this schedule
-        // during the playback window. `_onScheduledCompleted` will overwrite
-        // this with the actual completion time so the next interval is
-        // measured from the END of playback, not the START.
-        await _lastFired.set(schedule.id, slot);
-        await onNotificationsSync?.call();
-        break;
+      // Run the tick body; if it never resolves (DB hang, plugin deadlock),
+      // a sibling cancellation polls every periodic tick check that
+      // `_tickInFlight` hasn't gone stale via `_stuckSince`. Avoids relying
+      // on a `Future.timeout` Timer that would otherwise survive a widget
+      // test's container dispose and trigger the "pending timers" assert.
+      _stuckSince = DateTime.now();
+      await _runTick();
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint('ScheduleEngine: tick failed: $e\n$st');
       }
     } finally {
       _tickInFlight = false;
+      _stuckSince = null;
+    }
+  }
+
+  DateTime? _stuckSince;
+
+  /// Called by the periodic timer to clear `_tickInFlight` if a previous tick
+  /// has been running longer than the watchdog window. Lets the engine
+  /// recover from a single hung tick without spawning its own Timer.
+  void _evictStuckTick() {
+    final since = _stuckSince;
+    if (since == null) return;
+    if (DateTime.now().difference(since) <= _tickWatchdog) return;
+    if (kDebugMode) {
+      debugPrint(
+        'ScheduleEngine: previous tick stuck > $_tickWatchdog — releasing lock.',
+      );
+    }
+    _tickInFlight = false;
+    _stuckSince = null;
+  }
+
+  Future<void> _runTick() async {
+    if (!await _appState.isActive()) return;
+
+    if (_coordinator.snapshot.state == AppPlaybackState.scheduledPlaying &&
+        _coordinator.snapshot.isPlaying) {
+      return;
+    }
+
+    final all = await _schedules.getAll();
+    final now = DateTime.now();
+
+    // Stop tracking any in-flight schedule whose row was deleted or disabled
+    // while the clip was playing — otherwise the coordinator would still try
+    // to stamp a completion for a schedule that no longer exists.
+    final activeId = _coordinator.activeScheduleId;
+    if (activeId != null && !all.any((s) => s.id == activeId && s.enabled)) {
+      await _coordinator.stop();
+    }
+
+    for (final schedule in all) {
+      if (!schedule.enabled) continue;
+
+      // Respect cooldown after a failed fire (empty playlist, unplayable
+      // first clip, etc.).
+      final backoffUntil = _failureBackoff[schedule.id];
+      if (backoffUntil != null && now.isBefore(backoffUntil)) continue;
+
+      final last = _lastFiredForCurrentCycle(schedule, now);
+      final slot = ScheduleFireHelper.slotToFire(schedule, now, last);
+      if (slot == null) continue;
+
+      // Skip if another schedule already claimed this exact slot in this
+      // cycle. Compare against the GRID slot stamp, not the completion stamp,
+      // so the dedup keeps working after we add `setCompletion`.
+      if (_slotTakenByOtherSchedule(all, schedule.id, slot)) continue;
+
+      // Optimistically stamp the slot start BEFORE asking the coordinator to
+      // play. If `requestScheduledPlay` returns false we roll the stamp back
+      // so the next tick can retry the same slot inside the grace window.
+      await _lastFired.setSlot(schedule.id, slot);
+      // Mirror completion so existing `nextSlotAfter` math (which still reads
+      // a single timestamp) reflects "we just started this slot". The real
+      // completion stamp overwrites this when playback finishes naturally.
+      await _lastFired.setCompletion(schedule.id, slot);
+
+      final played = await _coordinator.requestScheduledPlay(
+        schedule.playlistId,
+        scheduleId: schedule.id,
+        shuffle: schedule.shuffleEnabled,
+      );
+
+      if (!played) {
+        // Roll back the stamps so the engine doesn't think this slot was
+        // honored. Apply a 1-minute backoff so we don't spin every 5s.
+        await _lastFired.clear(schedule.id);
+        _failureBackoff[schedule.id] = now.add(_failureBackoffDuration);
+        debugPrint(
+          'ScheduleEngine: schedule ${schedule.id} did not play — '
+          'backing off for $_failureBackoffDuration.',
+        );
+        continue;
+      }
+      _failureBackoff.remove(schedule.id);
+
+      await onNotificationsSync?.call();
+      break;
     }
   }
 
@@ -109,32 +195,74 @@ class ScheduleEngine {
     String scheduleId,
     DateTime completedAt,
   ) async {
-    await _lastFired.set(scheduleId, completedAt);
+    await _lastFired.setCompletion(scheduleId, completedAt);
     await onNotificationsSync?.call();
   }
 
-  /// Ignore stale [lastFired] from a previous calendar day.
-  DateTime? _lastFiredForToday(String scheduleId, DateTime now) {
-    final last = _lastFired.get(scheduleId);
-    if (last == null) return null;
-    if (last.year != now.year ||
-        last.month != now.month ||
-        last.day != now.day) {
-      return null;
-    }
-    return last;
+  void _onPlaybackError(PlaybackErrorEvent event) {
+    final id = _coordinator.activeScheduleId;
+    if (id == null) return;
+    // Roll back the stamps so the next tick retries within the grace window
+    // instead of waiting for the *next* interval boundary.
+    _lastFired.clear(id);
+    _failureBackoff[id] = DateTime.now().add(_failureBackoffDuration);
   }
 
-  /// True when another enabled schedule already fired at [slot] today.
+  /// Slot dedup needs the GRID time, not the completion time. Returns the
+  /// `slot` stamp if it's in the current session, else null.
+  ///
+  /// "Current session" means: same calendar day for daytime schedules, or
+  /// inside the active overnight window (e.g. Mon 22:00 stamp is still
+  /// current at Tue 03:00 if window is 22:00–06:00).
+  DateTime? _lastFiredForCurrentCycle(
+    PlaybackSchedule schedule,
+    DateTime now,
+  ) {
+    // Completion-based last fired drives interval-from-end math; this is what
+    // `slotToFire` consumes to decide the next grid line. We must keep
+    // returning the completion stamp here so a 4-minute playlist on a
+    // 5-minute interval still waits 5 minutes after playback ends.
+    final completion = _lastFired.completion(schedule.id);
+    if (completion == null) return null;
+    if (!_sameSessionAs(schedule, completion, now)) return null;
+    return completion;
+  }
+
+  bool _sameSessionAs(
+    PlaybackSchedule schedule,
+    DateTime stamp,
+    DateTime now,
+  ) {
+    // Daytime schedule: same calendar day.
+    if (stamp.year == now.year &&
+        stamp.month == now.month &&
+        stamp.day == now.day) {
+      return true;
+    }
+    // Overnight schedule: stamp from the previous day's start window counts
+    // as the same session if we're still inside the wrap-around morning end.
+    if (ScheduleFireHelper.isInWindow(schedule, now)) {
+      final yesterday = now.subtract(const Duration(days: 1));
+      if (stamp.year == yesterday.year &&
+          stamp.month == yesterday.month &&
+          stamp.day == yesterday.day) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// True when another enabled schedule already claimed [slot] in its current
+  /// session. Compares against the GRID stamp (`slot()`), not the completion
+  /// stamp, so the dedup keeps working after the interval-from-end change.
   bool _slotTakenByOtherSchedule(
     List<PlaybackSchedule> all,
     String scheduleId,
     DateTime slot,
-    DateTime now,
   ) {
     for (final other in all) {
       if (other.id == scheduleId || !other.enabled) continue;
-      final last = _lastFiredForToday(other.id, now);
+      final last = _lastFired.slot(other.id);
       if (last == null) continue;
       if (last.year == slot.year &&
           last.month == slot.month &&

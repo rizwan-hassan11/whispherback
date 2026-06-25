@@ -58,6 +58,15 @@ class _ClipsScreenState extends ConsumerState<ClipsScreen> {
       ),
     );
     if (ok != true) return;
+    // If the clip being deleted is the one currently playing (library
+    // preview or as part of a playlist), stop playback first so the user
+    // doesn't hear the audio_service notification trying to scrub a file
+    // that's about to vanish from disk.
+    final coordinator = ref.read(playbackCoordinatorProvider);
+    final snapshot = coordinator.snapshot;
+    if (snapshot.isPlaying && snapshot.clipTitle == clip.title) {
+      await coordinator.stop();
+    }
     await ref.read(clipRepositoryProvider).delete(clip.id);
     ref.invalidate(clipsProvider);
     ref.invalidate(playlistsProvider);

@@ -10,6 +10,7 @@ import '../../core/navigation/route_back.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_icons.dart';
 import '../../core/theme/app_theme.dart';
+import '../../data/repositories/playlist_repository.dart';
 import '../../domain/entities/audio_clip.dart';
 import '../../domain/entities/playback_schedule.dart';
 import '../../domain/entities/playlist.dart';
@@ -94,11 +95,32 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
       ),
     );
     if (name == null || name.isEmpty || name == _playlist!.name) return;
-    await ref.read(playlistRepositoryProvider).rename(widget.playlistId, name);
+    try {
+      await ref
+          .read(playlistRepositoryProvider)
+          .rename(widget.playlistId, name);
+    } on DuplicatePlaylistNameException {
+      if (mounted) {
+        context.showShellSnackBar(
+          l10n.playlistNameTaken(name),
+          icon: AppIcons.alertCircle,
+        );
+      }
+      return;
+    } catch (_) {
+      if (mounted) {
+        context.showShellSnackBar(
+          l10n.couldNotSavePlaylist,
+          icon: AppIcons.alertCircle,
+        );
+      }
+      return;
+    }
     ref.invalidate(playlistsProvider);
     if (mounted) {
       setState(() => _playlist = _playlist!.copyWith(name: name));
-      context.showShellSnackBar(l10n.playlistRenamed, icon: AppIcons.checkCircle);
+      context.showShellSnackBar(l10n.playlistRenamed,
+          icon: AppIcons.checkCircle);
     }
   }
 
@@ -123,6 +145,16 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     );
     if (ok != true) return;
 
+    // Stop any in-flight playback for this playlist BEFORE deleting the rows.
+    // Otherwise the audio_service stream keeps pulling clips that no longer
+    // exist and the mini-player shows a ghost title until the next manual
+    // tap. This matches what a user expects: "if I delete it, it should
+    // stop right now".
+    final coordinator = ref.read(playbackCoordinatorProvider);
+    if (coordinator.snapshot.playlistId == widget.playlistId) {
+      await coordinator.stop();
+    }
+
     final deleted =
         await ref.read(playlistRepositoryProvider).delete(widget.playlistId);
     if (!mounted) return;
@@ -145,6 +177,16 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
   }
 
   Future<void> _removeClip(AudioClip clip) async {
+    // If the removed clip is the one currently playing in this playlist
+    // context, stop first so the user doesn't hear silence or hit a "clip
+    // unavailable" toast on the next auto-advance.
+    final coordinator = ref.read(playbackCoordinatorProvider);
+    final snapshot = coordinator.snapshot;
+    if (snapshot.playlistId == widget.playlistId &&
+        snapshot.clipTitle == clip.title &&
+        snapshot.isPlaying) {
+      await coordinator.stop();
+    }
     await ref
         .read(playlistRepositoryProvider)
         .removeClip(widget.playlistId, clip.id);
@@ -198,217 +240,223 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     return RouteBackScope(
       fallbackLocation: '/playlists',
       child: Stack(
-      fit: StackFit.expand,
-      children: [
-        DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: theme.isDark
-                  ? [AppColors.deep2, AppColors.deep]
-                  : [AppColors.lightBg, AppColors.lightBg2],
-            ),
-          ),
-        ),
-        Positioned(
-          top: 0,
-          left: 0,
-          right: 0,
-          height: 280,
-          child: DecoratedBox(
+        fit: StackFit.expand,
+        children: [
+          DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  AppColors.brand.withValues(alpha: theme.isDark ? 0.45 : 0.2),
-                  AppColors.brandLight
-                      .withValues(alpha: theme.isDark ? 0.15 : 0.08),
-                  Colors.transparent,
-                ],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: theme.isDark
+                    ? [AppColors.deep2, AppColors.deep]
+                    : [AppColors.lightBg, AppColors.lightBg2],
               ),
             ),
           ),
-        ),
-        Scaffold(
-          backgroundColor: Colors.transparent,
-          body: CustomScrollView(
-            slivers: [
-              SliverAppBar(
-                pinned: true,
-                primary: true,
-                backgroundColor: Colors.transparent,
-                surfaceTintColor: Colors.transparent,
-                leading: IconButton(
-                  icon: Icon(AppIcons.back, color: theme.foreground),
-                  onPressed: () => popOrGo(context, '/playlists'),
-                ),
-                actions: [
-                  IconButton(
-                    tooltip: l10n.schedules,
-                    icon: Icon(AppIcons.schedule, color: theme.foreground),
-                    onPressed: () =>
-                        context.push('/schedule/build/${widget.playlistId}'),
-                  ),
-                  PopupMenuButton<String>(
-                    icon: Icon(AppIcons.moreVertical, color: theme.foreground),
-                    onSelected: (v) {
-                      switch (v) {
-                        case 'rename':
-                          _rename();
-                        case 'delete':
-                          _delete();
-                      }
-                    },
-                    itemBuilder: (ctx) => [
-                      PopupMenuItem(
-                        value: 'rename',
-                        child: Row(
-                          children: [
-                            Icon(AppIcons.edit, size: 18, color: theme.foreground),
-                            const SizedBox(width: 10),
-                            Text(l10n.renamePlaylist),
-                          ],
-                        ),
-                      ),
-                      PopupMenuItem(
-                        value: 'delete',
-                        child: Row(
-                          children: [
-                            const Icon(AppIcons.trash, size: 18, color: AppColors.error),
-                            const SizedBox(width: 10),
-                            Text(l10n.deletePlaylist,
-                                style: const TextStyle(color: AppColors.error)),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-                expandedHeight: 0,
-                toolbarHeight: 56,
-              ),
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _PlaylistHero(
-                        theme: theme,
-                        name: name,
-                        clipCount: _clips.length,
-                        totalDuration:
-                            formatPlaylistDurationLocalized(context, _totalMs),
-                        hasSchedule: _schedule != null,
-                      ),
-                      const SizedBox(height: 16),
-                      _ActionRow(
-                        theme: theme,
-                        shuffleOn: shuffle,
-                        canPlay: _clips.isNotEmpty,
-                        onPlayAll: () => ref
-                            .read(playbackCoordinatorProvider)
-                            .playPlaylist(widget.playlistId),
-                        onShuffle: _toggleShuffle,
-                        onSchedule: () => context
-                            .push('/schedule/build/${widget.playlistId}'),
-                        onAddClips: _showAddClips,
-                      ),
-                      if (_schedule != null) ...[
-                        const SizedBox(height: 16),
-                        _ScheduleCard(schedule: _schedule!, theme: theme),
-                      ],
-                      const SizedBox(height: 24),
-                      Text(
-                        l10n.clipsUpper,
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 1.4,
-                          color: theme.muted,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        l10n.dragToReorder,
-                        style: TextStyle(fontSize: 12, color: theme.muted),
-                      ),
-                      const SizedBox(height: 12),
-                    ],
-                  ),
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            height: 280,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    AppColors.brand
+                        .withValues(alpha: theme.isDark ? 0.45 : 0.2),
+                    AppColors.brandLight
+                        .withValues(alpha: theme.isDark ? 0.15 : 0.08),
+                    Colors.transparent,
+                  ],
                 ),
               ),
-              if (_clips.isEmpty)
-                SliverFillRemaining(
-                  hasScrollBody: false,
-                  child: _EmptyClipsState(
-                    theme: theme,
-                    onAdd: _showAddClips,
-                  ),
-                )
-              else
-                SliverPadding(
-                  padding: EdgeInsets.fromLTRB(
-                      20, 0, 20, context.shellScrollPadding.bottom),
-                  sliver: SliverReorderableList(
-                    itemCount: _clips.length,
-                    // ignore: deprecated_member_use
-                    onReorder: _reorderClips,
-                    itemBuilder: (context, i) {
-                      final clip = _clips[i];
-                      return ReorderableDelayedDragStartListener(
-                        key: ValueKey(clip.id),
-                        index: i,
-                        child: Padding(
-                          padding: EdgeInsets.only(
-                            bottom: i < _clips.length - 1 ? 10 : 0,
-                          ),
-                          child: PlaylistClipTile(
-                            clip: clip,
-                            index: i,
-                            dragHandle: Icon(
-                              AppIcons.gripVertical,
-                              color: theme.muted,
-                              size: 20,
-                            ),
-                            onPlay: () => ref
-                                .read(playbackCoordinatorProvider)
-                                .playClip(clip, queue: _clips),
-                            onRemove: () async {
-                              final ok = await showDialog<bool>(
-                                context: context,
-                                builder: (ctx) => AlertDialog(
-                                  title: Text(l10n.removeFromPlaylist),
-                                  content: Text(l10n.removeFromPlaylistConfirm),
-                                  actions: [
-                                    TextButton(
-                                      onPressed: () =>
-                                          Navigator.pop(ctx, false),
-                                      child: Text(l10n.cancel),
-                                    ),
-                                    FilledButton(
-                                      onPressed: () =>
-                                          Navigator.pop(ctx, true),
-                                      child: Text(l10n.remove),
-                                    ),
-                                  ],
-                                ),
-                              );
-                              if (ok == true) await _removeClip(clip);
-                            },
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-            ],
+            ),
           ),
-        ),
-      ],
-    ),
+          Scaffold(
+            backgroundColor: Colors.transparent,
+            body: CustomScrollView(
+              slivers: [
+                SliverAppBar(
+                  pinned: true,
+                  primary: true,
+                  backgroundColor: Colors.transparent,
+                  surfaceTintColor: Colors.transparent,
+                  leading: IconButton(
+                    icon: Icon(AppIcons.back, color: theme.foreground),
+                    onPressed: () => popOrGo(context, '/playlists'),
+                  ),
+                  actions: [
+                    IconButton(
+                      tooltip: l10n.schedules,
+                      icon: Icon(AppIcons.schedule, color: theme.foreground),
+                      onPressed: () =>
+                          context.push('/schedule/build/${widget.playlistId}'),
+                    ),
+                    PopupMenuButton<String>(
+                      icon:
+                          Icon(AppIcons.moreVertical, color: theme.foreground),
+                      onSelected: (v) {
+                        switch (v) {
+                          case 'rename':
+                            _rename();
+                          case 'delete':
+                            _delete();
+                        }
+                      },
+                      itemBuilder: (ctx) => [
+                        PopupMenuItem(
+                          value: 'rename',
+                          child: Row(
+                            children: [
+                              Icon(AppIcons.edit,
+                                  size: 18, color: theme.foreground),
+                              const SizedBox(width: 10),
+                              Text(l10n.renamePlaylist),
+                            ],
+                          ),
+                        ),
+                        PopupMenuItem(
+                          value: 'delete',
+                          child: Row(
+                            children: [
+                              const Icon(AppIcons.trash,
+                                  size: 18, color: AppColors.error),
+                              const SizedBox(width: 10),
+                              Text(l10n.deletePlaylist,
+                                  style:
+                                      const TextStyle(color: AppColors.error)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                  expandedHeight: 0,
+                  toolbarHeight: 56,
+                ),
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _PlaylistHero(
+                          theme: theme,
+                          name: name,
+                          clipCount: _clips.length,
+                          totalDuration: formatPlaylistDurationLocalized(
+                              context, _totalMs),
+                          hasSchedule: _schedule != null,
+                        ),
+                        const SizedBox(height: 16),
+                        _ActionRow(
+                          theme: theme,
+                          shuffleOn: shuffle,
+                          canPlay: _clips.isNotEmpty,
+                          onPlayAll: () => ref
+                              .read(playbackCoordinatorProvider)
+                              .playPlaylist(widget.playlistId),
+                          onShuffle: _toggleShuffle,
+                          onSchedule: () => context
+                              .push('/schedule/build/${widget.playlistId}'),
+                          onAddClips: _showAddClips,
+                        ),
+                        if (_schedule != null) ...[
+                          const SizedBox(height: 16),
+                          _ScheduleCard(schedule: _schedule!, theme: theme),
+                        ],
+                        const SizedBox(height: 24),
+                        Text(
+                          l10n.clipsUpper,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1.4,
+                            color: theme.muted,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          l10n.dragToReorder,
+                          style: TextStyle(fontSize: 12, color: theme.muted),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                    ),
+                  ),
+                ),
+                if (_clips.isEmpty)
+                  SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: _EmptyClipsState(
+                      theme: theme,
+                      onAdd: _showAddClips,
+                    ),
+                  )
+                else
+                  SliverPadding(
+                    padding: EdgeInsets.fromLTRB(
+                        20, 0, 20, context.shellScrollPadding.bottom),
+                    sliver: SliverReorderableList(
+                      itemCount: _clips.length,
+                      // ignore: deprecated_member_use
+                      onReorder: _reorderClips,
+                      itemBuilder: (context, i) {
+                        final clip = _clips[i];
+                        return ReorderableDelayedDragStartListener(
+                          key: ValueKey(clip.id),
+                          index: i,
+                          child: Padding(
+                            padding: EdgeInsets.only(
+                              bottom: i < _clips.length - 1 ? 10 : 0,
+                            ),
+                            child: PlaylistClipTile(
+                              clip: clip,
+                              index: i,
+                              dragHandle: Icon(
+                                AppIcons.gripVertical,
+                                color: theme.muted,
+                                size: 20,
+                              ),
+                              onPlay: () => ref
+                                  .read(playbackCoordinatorProvider)
+                                  .playClip(clip, queue: _clips),
+                              onRemove: () async {
+                                final ok = await showDialog<bool>(
+                                  context: context,
+                                  builder: (ctx) => AlertDialog(
+                                    title: Text(l10n.removeFromPlaylist),
+                                    content:
+                                        Text(l10n.removeFromPlaylistConfirm),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () =>
+                                            Navigator.pop(ctx, false),
+                                        child: Text(l10n.cancel),
+                                      ),
+                                      FilledButton(
+                                        onPressed: () =>
+                                            Navigator.pop(ctx, true),
+                                        child: Text(l10n.remove),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                                if (ok == true) await _removeClip(clip);
+                              },
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -962,4 +1010,3 @@ class _EmptyClipsState extends StatelessWidget {
     );
   }
 }
-

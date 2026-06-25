@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -7,6 +9,8 @@ import '../../features/playback/playback_modal.dart';
 import '../../domain/playback/playback_state.dart';
 import '../../l10n/app_localizations.dart';
 import '../../providers/playback_providers.dart';
+import '../../services/playback/playback_coordinator.dart';
+import '../layout/shell_messenger.dart';
 import '../layout/responsive.dart';
 import '../theme/app_icons.dart';
 import '../theme/app_theme.dart';
@@ -25,6 +29,42 @@ class MainShell extends ConsumerStatefulWidget {
 
 class _MainShellState extends ConsumerState<MainShell> {
   String? _lastLocation;
+  StreamSubscription<PlaybackErrorEvent>? _errorSub;
+
+  @override
+  void initState() {
+    super.initState();
+    // Subscribe to playback failures so every play tap gets feedback — a
+    // silent no-op was the root cause of the client report "tried to play my
+    // recording, nothing happened". Deferred to the next frame so the
+    // ScaffoldMessenger is mounted before the first event is dispatched.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _errorSub =
+          ref.read(playbackCoordinatorProvider).errors.listen(_onPlaybackError);
+    });
+  }
+
+  @override
+  void dispose() {
+    _errorSub?.cancel();
+    super.dispose();
+  }
+
+  void _onPlaybackError(PlaybackErrorEvent event) {
+    if (!mounted) return;
+    final l10n = context.l10n;
+    final message = switch (event.reason) {
+      PlaybackErrorReason.pathRejected => event.clipTitle == null
+          ? l10n.playbackClipUnavailable
+          : l10n.playbackClipUnavailableNamed(event.clipTitle!),
+      PlaybackErrorReason.decodeFailed => event.clipTitle == null
+          ? l10n.playbackClipFailed
+          : l10n.playbackClipFailedNamed(event.clipTitle!),
+      PlaybackErrorReason.emptyPlaylist => l10n.playbackEmptyPlaylist,
+    };
+    context.showShellSnackBar(message, icon: AppIcons.alertCircle);
+  }
 
   static List<GlassNavDestination> _destinations(BuildContext context) {
     final l10n = context.l10n;

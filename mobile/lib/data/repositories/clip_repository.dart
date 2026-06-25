@@ -51,13 +51,26 @@ class ClipRepository {
   Future<void> delete(String id) async {
     final clip = await getById(id);
     final db = await _db.database;
-    await db.delete('playlist_clips', where: 'clip_id = ?', whereArgs: [id]);
-    await db.delete('clips', where: 'id = ?', whereArgs: [id]);
+    // Atomic DB delete: the join-table cleanup and the clips row must succeed
+    // or fail together so we never end up with a `playlist_clips` row that
+    // joins to a missing clip (would crash `getClips` for the playlist).
+    await db.transaction((txn) async {
+      await txn.delete(
+        'playlist_clips',
+        where: 'clip_id = ?',
+        whereArgs: [id],
+      );
+      await txn.delete('clips', where: 'id = ?', whereArgs: [id]);
+    });
     if (clip != null) {
       try {
         final file = File(clip.filePath);
         if (await file.exists()) await file.delete();
-      } catch (_) {}
+      } catch (_) {
+        // File delete is best-effort. If it fails (file locked by another
+        // reader, FS error), the orphan-file sweep on next bootstrap will
+        // clean it up. We don't want a stuck file to block the DB delete.
+      }
     }
   }
 
