@@ -5,8 +5,10 @@ import 'package:just_audio/just_audio.dart';
 
 import '../../data/repositories/app_state_repository.dart';
 import '../../data/repositories/playlist_repository.dart';
+import '../../data/repositories/schedule_repository.dart';
 import '../../data/repositories/sleep_repository.dart';
 import '../../domain/entities/audio_clip.dart';
+import '../../domain/entities/playback_schedule.dart';
 import '../../domain/playback/playback_state.dart';
 import '../audio/audio_services.dart';
 import '../audio/clip_path_guard.dart';
@@ -51,17 +53,25 @@ class PlaybackCoordinator {
     required SleepRepository sleepRepository,
     required PrayerService prayerService,
     required AudioPlaybackService playbackService,
+    ScheduleRepository? scheduleRepository,
   })  : _appState = appStateRepository,
         _playlists = playlistRepository,
         _sleep = sleepRepository,
         _prayer = prayerService,
-        _audio = playbackService;
+        _audio = playbackService,
+        _schedules = scheduleRepository;
 
   final AppStateRepository _appState;
   final PlaylistRepository _playlists;
   final SleepRepository _sleep;
   final PrayerService _prayer;
   final AudioPlaybackService _audio;
+  // Optional: used as a belt-and-suspenders last-moment check that the
+  // schedule the engine just told us to run hasn't been toggled OFF in the
+  // race window between the engine reading the DB and us actually starting
+  // audio. Existing tests construct the coordinator without injecting a
+  // repository, so this is intentionally nullable.
+  final ScheduleRepository? _schedules;
 
   final _snapshotController = StreamController<PlaybackSnapshot>.broadcast();
   // Broadcasts user-facing playback errors (e.g. corrupt file, blocked path,
@@ -78,6 +88,15 @@ class PlaybackCoordinator {
   String? _pendingScheduledScheduleId;
   int? _playlistClipIndex;
   String? _lastAdhanWindowKey;
+
+  /// True once the user has explicitly tapped pause on the current clip.
+  /// Cleared when they explicitly resume, when a new clip starts, or when
+  /// playback is stopped. Used to suppress the playlist auto-advance that
+  /// would otherwise fire if the underlying clip happened to reach
+  /// `completed` between the user's pause tap and the OS actually pausing
+  /// the player — observed on short 2-5 s clips on Samsung devices, where
+  /// the user perceived "pause triggered next clip play".
+  bool _userInitiatedPause = false;
 
   /// Schedule id behind the currently running scheduled playback (if any).
   /// Lets us stamp `lastFired = completionTime` so the user-configured
@@ -225,12 +244,24 @@ class PlaybackCoordinator {
 
   void _syncPlayingSnapshot(bool playing) {
     if (_snapshot.state == AppPlaybackState.inactive) return;
+    if (playing) {
+      // Lock-screen / notification "play" tap should also clear the
+      // user-paused sentinel so the next completion event behaves like a
+      // normal end-of-clip and auto-advances when appropriate.
+      _userInitiatedPause = false;
+    } else {
+      // System "pause" event mirrors the user's intent — treat it the same
+      // way as an in-app pause so we don't auto-advance on a racing
+      // completion event.
+      _userInitiatedPause = true;
+    }
     if (_snapshot.isPlaying == playing) return;
     _emit(_snapshot.copyWith(isPlaying: playing));
   }
 
   Future<void> _finalizeClipStopFromNotification() async {
     _playlistClipIndex = null;
+    _userInitiatedPause = false;
     // System-stop from the media notification ≠ natural completion.
     _activeScheduleId = null;
     _activeScheduleShuffle = null;
@@ -252,6 +283,10 @@ class PlaybackCoordinator {
   Future<void> skipPrevious() => _skipPlaylistClip(next: false);
 
   Future<void> _skipPlaylistClip({required bool next}) async {
+    // Explicit skip is an unambiguous user intent to move forward/back, even
+    // if they had previously tapped pause. Clear the sentinel so the next
+    // natural completion in the new clip behaves normally.
+    _userInitiatedPause = false;
     final playlistId = _snapshot.playlistId;
     if (playlistId == null) {
       // Library-queue context: walk through the currently shown clip list.
@@ -274,6 +309,7 @@ class PlaybackCoordinator {
     }
 
     final clips = await _playlists.getClips(playlistId);
+    _knownPlaylistClipCount = clips.length;
     if (clips.length <= 1) {
       // Single-clip playlist: replay from the top instead of stopping —
       // matches user expectation for a "next" tap on a one-track playlist.
@@ -379,6 +415,23 @@ class PlaybackCoordinator {
   }
 
   Future<void> _onClipCompleted() async {
+    // If the user explicitly paused this clip, treat any completion event
+    // that lands after the pause-tap as "finished at the paused position"
+    // rather than as a natural end-of-clip — otherwise the auto-advance
+    // below would fire the next clip and the user perceives it as
+    // "tapping pause skipped to the next clip". They must explicitly tap
+    // play or skip to move on.
+    if (_userInitiatedPause) {
+      _userInitiatedPause = false;
+      // Park the position at zero so a later resume restarts cleanly and
+      // doesn't immediately re-fire a completion event.
+      try {
+        await _audio.seek(Duration.zero);
+      } catch (_) {}
+      _emit(_snapshot.copyWith(isPlaying: false));
+      return;
+    }
+
     if (_snapshot.state == AppPlaybackState.scheduledPlaying) {
       await _finishScheduledClip();
       return;
@@ -392,6 +445,7 @@ class PlaybackCoordinator {
 
     final playlistId = _snapshot.playlistId!;
     final clips = await _playlists.getClips(playlistId);
+    _knownPlaylistClipCount = clips.length;
     if (clips.isEmpty) {
       await stop();
       await _drainPendingScheduled();
@@ -512,6 +566,7 @@ class PlaybackCoordinator {
   }
 
   Future<void> _finishManualPreview() async {
+    _userInitiatedPause = false;
     final active = await _appState.isActive();
     _emit(PlaybackSnapshot(
       state: active ? AppPlaybackState.activeIdle : AppPlaybackState.inactive,
@@ -547,6 +602,31 @@ class PlaybackCoordinator {
     bool? shuffle,
   }) {
     return _serializePlay(() async {
+      // Belt-and-suspenders disable check at the very last moment before
+      // we touch audio_service. Between the engine reading the schedule
+      // and this body running inside the play-gate, the user may have
+      // toggled the schedule OFF (or the app-wide Active toggle OFF) —
+      // honor that even though the engine already passed its own check.
+      if (!await _appState.isActive()) return false;
+      final schedRepo = _schedules;
+      if (scheduleId != null && schedRepo != null) {
+        final schedules = await schedRepo.getAll();
+        final match = schedules.firstWhere(
+          (s) => s.id == scheduleId,
+          orElse: () => PlaybackSchedule(
+            id: scheduleId,
+            playlistId: playlistId,
+            startTime: DateTime.now(),
+            intervalMinutes: 0,
+            shuffleEnabled: false,
+            alarmEnabled: false,
+            daysMask: 0,
+            enabled: false,
+            playlistName: '',
+          ),
+        );
+        if (!match.enabled || match.daysMask == 0) return false;
+      }
       await _interruptForSchedule();
       _activeScheduleId = scheduleId;
       _activeScheduleShuffle = shuffle;
@@ -561,6 +641,7 @@ class PlaybackCoordinator {
   }
 
   Future<void> _interruptForSchedule() async {
+    _userInitiatedPause = false;
     if (!_snapshot.isPlaying &&
         _snapshot.state != AppPlaybackState.manualPlaying &&
         _snapshot.state != AppPlaybackState.scheduledPlaying) {
@@ -584,6 +665,7 @@ class PlaybackCoordinator {
   Future<ActiveToggleResult> toggleActive() async {
     final active = await _appState.isActive();
     if (active) {
+      _userInitiatedPause = false;
       _emit(const PlaybackSnapshot(state: AppPlaybackState.inactive));
       await _appState.setActive(false);
       await _audio.exitForeground();
@@ -634,6 +716,7 @@ class PlaybackCoordinator {
     if (fromSchedule && !await _appState.isActive()) return false;
 
     final clips = await _playlists.getClips(playlistId);
+    _knownPlaylistClipCount = clips.length;
     if (clips.isEmpty) {
       // Empty playlist tap from the UI should never look like a silent no-op.
       // Scheduled fires intentionally do NOT surface this — the schedule engine
@@ -658,6 +741,10 @@ class PlaybackCoordinator {
     _playlistClipIndex = shuffle ? null : 0;
     _libraryQueue = const [];
     _libraryIndex = -1;
+    // Starting a brand-new playlist clears any "user paused" sentinel from
+    // a prior session — otherwise the very first natural completion in the
+    // new playlist would be swallowed and the auto-advance would never run.
+    _userInitiatedPause = false;
 
     if (!_isPlayablePath(clip.filePath)) {
       if (!fromSchedule) {
@@ -747,6 +834,7 @@ class PlaybackCoordinator {
         (queue == null || queue.isEmpty) ? <AudioClip>[clip] : queue;
     _libraryIndex = _libraryQueue.indexWhere((c) => c.id == clip.id);
     if (_libraryIndex < 0) _libraryIndex = 0;
+    _userInitiatedPause = false;
 
     // Optimistic: show the now-playing sheet instantly for snappy feedback.
     // playlistId is null so completion stops cleanly.
@@ -785,20 +873,42 @@ class PlaybackCoordinator {
   /// controls. With a single-clip context the buttons restart the clip; with
   /// multiple clips they walk the queue / playlist.
   bool get canSkipClips {
-    return _snapshot.state == AppPlaybackState.manualPlaying ||
+    // Hide the skip-next / skip-previous buttons entirely when there is
+    // genuinely nothing to skip to — a single-clip preview or a one-track
+    // playlist. Previously the buttons were always shown for any playing
+    // state, and tapping them just restarted the same clip, which the QA
+    // perceived as "forward / backward do nothing".
+    final inPlayback = _snapshot.state == AppPlaybackState.manualPlaying ||
         _snapshot.state == AppPlaybackState.scheduledPlaying;
+    if (!inPlayback) return false;
+    if (_snapshot.playlistId == null) {
+      return _libraryQueue.length > 1;
+    }
+    return _knownPlaylistClipCount > 1;
   }
+
+  /// Last-known clip count for the active playlist, captured each time we
+  /// load the playlist so the mini-bar / modal don't have to do their own
+  /// async lookups. Defaults to 2 so the buttons appear by default for a
+  /// fresh playback before the first refresh — single-clip playlists are
+  /// the edge case, not the norm.
+  int _knownPlaylistClipCount = 2;
 
   bool _isPlayablePath(String path) {
     return ClipPathGuard.isAllowed(path);
   }
 
   Future<void> pause() async {
+    // Mark BEFORE the await so any completion event that the player races to
+    // emit between the user's tap and `_player.pause()` actually landing is
+    // treated as "paused at the end" rather than "auto-advance to next clip".
+    _userInitiatedPause = true;
     await _audio.pause();
     _emit(_snapshot.copyWith(isPlaying: false));
   }
 
   Future<void> resume() async {
+    _userInitiatedPause = false;
     // Library clip preview does not require the master toggle.
     if (_snapshot.playlistId == null) {
       final path = _audio.currentPath;
@@ -826,6 +936,7 @@ class PlaybackCoordinator {
     _playlistClipIndex = null;
     _libraryQueue = const [];
     _libraryIndex = -1;
+    _userInitiatedPause = false;
     // User-initiated stop must not count as a "successful completion": skip
     // the interval-from-end stamp so the next slot still fires on its grid.
     _activeScheduleId = null;

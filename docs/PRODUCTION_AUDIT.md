@@ -3,9 +3,9 @@
 Senior multi-disciplinary review (mobile architecture, audio, scheduling, security, QA, UX).  
 **Date:** June 2026 · **Scope:** `mobile/` Flutter app + Android build + docs.
 
-## Overall score: **9.8 / 10** (post Round 5 — probe-player ban, gate-recovery timeout, SeekHandler hardening)
+## Overall score: **9.85 / 10** (post Round 6 — user-paused suppression, skip-button truthfulness, schedule disable-races + save-preserves-disabled)
 
-Production-oriented offline MVP. The full clip/playlist/schedule pipeline has been audited end-to-end, every P0/P1 issue is fixed and covered by regression tests, and the test suite has grown from 33 to **83 passing tests**. Play Store submission still needs release signing.
+Production-oriented offline MVP. The full clip/playlist/schedule pipeline has been audited end-to-end, every P0/P1 issue is fixed and covered by regression tests, and the test suite has grown from 33 to **103 passing tests**. Play Store submission still needs release signing.
 
 ---
 
@@ -17,7 +17,7 @@ Production-oriented offline MVP. The full clip/playlist/schedule pipeline has be
 | Audio / FGS | 9/10 | `audio_service` + coordinator + audio-session interruption handling (phone call, headphones disconnect) |
 | Scheduling | 9.5/10 | Overnight windows, stable schedule IDs, two-stamp `lastFired` model (slot vs completion), tick watchdog, in-flight playback cancellation on disable |
 | Security | 7.5/10 | Path sandbox; `USE_EXACT_ALARM` removed; debug signing remains |
-| QA / Tests | **9.5/10** | **83 automated tests** (was 33), covering every Round 3 + 4 + 5 regression |
+| QA / Tests | **9.5/10** | **103 automated tests** (was 33), covering every Round 3 + 4 + 5 + 6 regression |
 | UI/UX / i18n | 9/10 | Every play tap now surfaces success or error; shell snackbars float above nav bar; 6 languages |
 | Production readiness | 9/10 | Client APK ready; Play needs keystore |
 
@@ -95,11 +95,21 @@ A second QA round on a separate Samsung device reproduced everything from Round 
 | **"Notification aaraha ha screen lock wala bh or background wala bh, but Kuch unusual sa behave kar rha ha like pause py click kro to next clip play hooraha"** (re-asserted after Round 4) | The Round 4 fix corrected the controls array shape, but the deeper cause was the `SeekHandler` mixin's default `seekForward` / `seekBackward` callbacks — each performs a continuous 10-second jump. A whisper clip is typically 2-5 seconds, so a single accidental invocation (Samsung firmware sometimes routes a long-press on pause through these system actions) sails past the end, fires `ProcessingState.completed`, and the coordinator's natural-completion handler auto-advances to the next clip. The user perceives it as "tapping pause skipped to next". | Overrode `seekForward`, `seekBackward`, `fastForward`, and `rewind` on `WhisperAudioHandler` to be no-ops. Only the explicit `MediaControl.skipToNext` / `skipToPrevious` buttons can advance the queue now; the in-app scrubber keeps working via precise `seek(Duration)`. Also dropped `MediaAction.seekForward` / `seekBackward` from the published `systemActions` set so the OS no longer advertises these controls at all. New `test/seek_handler_overrides_test.dart` pins both halves of the contract. |
 | **"Save schedule ka notification pop up WORK NAHI kar raha or schedule bh work NAHI kar raha"** (re-asserted after Round 4) | The Round 4 dialog appeared only when Active was OFF; if Active was ON, the only feedback was a snackbar reading *"Schedule saved. Turn the app Active on Home to start whispers."* — which contradicts itself and looks like an error message even on the happy path. Combined with the static `_failureBackoff` poisoning the engine after the first transient warmup throw, the user genuinely never heard playback. The over-aggressive `_confirmPlaybackStarted` deadline made it worse: 2 s was too short for slow Samsung devices, so legitimate plays were turned into `decodeFailed` snackbars AND put the schedule into a 1-minute backoff. | Replaced the contradictory snackbar with a new `scheduleSavedActiveOn` string that reads "Your whispers will fire at the set interval." The `_saving` button-state flag is now always reset on every exit path. The dangerous 2 s deadline is gone — replaced by a non-blocking 5 s `Timer`-based watchdog (`_scheduleStartWatchdog`) that calls `onPlaybackStartFailure` if the player never reached a playable state. The watchdog is cancelled on `stopClip` and on handler dispose, so it can never fire late for a clip the user has already moved on from. `playClip` / `playPlaylist` on an inactive toggle now surface a localized snackbar (`playbackInactiveToggle`) so the gating reason is never silent. |
 
+### Round 6 — third QA-on-device pass (pause-vs-completion race, single-clip skip honesty, schedule re-enable + race on disable)
+
+A third QA round on the same Samsung handset retested the Round 5 patches and exposed three remaining behaviours that the previous fixes only treated symptomatically. Round 6 closes the underlying causes:
+
+| Symptom (verbatim from QA) | Real root cause | Fix |
+|----------------------------|----------------|-----|
+| **"Spotify styled bar thora unusual behave kar rahi ha, like pause press kro to next clip play hora or forward or backward Sy Kuch NAHI hora"** (re-asserted after Rounds 4 + 5) | Two separate bugs colliding under one user perception. **(a)** In a multi-clip playlist a 2-5 s clip can race `ProcessingState.completed` against the user's pause tap. Even though `coordinator.pause()` calls `_player.pause()`, the completion event reaches `_onClipCompleted` first and the playlist auto-advance fires the next clip — the user sees "I tapped pause and got the next song". **(b)** `canSkipClips` returned true for ANY playing state, including single-clip library previews and one-track playlists. Tapping skip in those just restarted the same clip, which is visually indistinguishable from "the button did nothing". | **(a)** Introduced `_userInitiatedPause` sentinel in `PlaybackCoordinator`. `coordinator.pause()` (and the system-side `onPauseRequested`) set it **before** the `await _audio.pause()` so a racing completion is caught. `_onClipCompleted` now branches first on this sentinel: if set, the position is parked at zero and a paused snapshot is emitted — no auto-advance. The sentinel is cleared on explicit resume, on a fresh `playClip` / `playPlaylist` / skip, on `stop`, on `_finishManualPreview`, on `_interruptForSchedule`, on `_finalizeClipStopFromNotification`, and on `toggleActive(off)`. **(b)** Reworked `canSkipClips` to return false when the actual queue length is ≤ 1 (`_libraryQueue.length` for library context, new `_knownPlaylistClipCount` for playlist context). The buttons now disappear instead of appearing broken. The clip-count cache is refreshed at every `_playlists.getClips(...)` call inside the coordinator. New tests: `test/pause_suppresses_auto_advance_test.dart` (7 tests) and `test/skip_buttons_visibility_test.dart` (5 tests). |
+| **"aik or unusual behave app ka ya tha ky initially schedule bilkul thk Kam kea phr ma ny off kr dea schedule but Kuch time bad app khud Sy clip play kar raha th asa 2 bar hoa"** | Two layered race-conditions allowed a disabled schedule to fire. **(a)** `ScheduleRepository.save()` always wrote `'enabled': 1` to the row. Any subsequent re-save (user edits an interval, or simply re-opens the builder and confirms) silently re-enabled a schedule the user had explicitly toggled OFF. **(b)** Inside `ScheduleEngine._runTick` there is a ~50 ms window between reading the schedule list and calling `requestScheduledPlay`. If the user toggled the schedule off during that window, the engine still fired the now-disabled schedule. | **(a)** `save()` now resolves `enabled` by reading the prior row if the caller does not pass an explicit flag. Brand-new schedules still default to enabled. Explicit `enabled: false` on update is honoured. New regression: `test/schedule_save_preserves_disabled_test.dart` (3 tests) covers all three branches. **(b)** Added a last-chance re-read inside `_runTick` immediately before stamping + firing: `await _schedules.getForPlaylist(...)`; if the row is gone or disabled we `continue`. Belt-and-suspenders: `PlaybackCoordinator.requestScheduledPlay` now also re-validates the schedule (and the master Active toggle) inside the `_serializePlay` body before touching `audio_service`. Wired `ScheduleRepository` into the coordinator as an optional dependency so tests that build the coordinator directly are unaffected. New regression: `test/schedule_engine_recheck_test.dart` (4 tests). |
+| **"Home page wala power button wo scroll up hoky gaib hony lag gya"** (after extended use) | The Home page wrapped its content in `SingleChildScrollView` with `BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics())`. On devices whose content easily fit, `AlwaysScrollableScrollPhysics` still allowed the user to drag the entire layout off-screen — the central Active power toggle is in the middle of the column, so a single overscroll gesture made it disappear behind the app bar / navigation bar. After 2-3 such gestures the user perceived the toggle as "lost". | Replaced the always-scrollable physics with `ClampingScrollPhysics`. The page now only scrolls when content genuinely overflows the viewport, and the toggle can no longer be dragged out of view by accident. |
+
 ---
 
-## Test suite (Round 5)
+## Test suite (Round 6)
 
-### Unit + widget tests — 83 passing on every CI run
+### Unit + widget tests — 103 passing on every CI run
 
 | File | Coverage |
 |------|----------|
@@ -125,6 +135,10 @@ A second QA round on a separate Samsung device reproduced everything from Round 
 | `test/play_gate_recovery_test.dart` | **NEW (Round 5)** — Pins the 20 s gate-body timeout (hung body releases the gate), the previous-body error isolation (an exception doesn't poison the chain), and serialised FIFO order (3 tests) |
 | `test/clip_duration_backfill_test.dart` | **NEW (Round 5)** — Pins `ClipRepository.updateDuration` and the new `durationMs: 0` create-time contract for the lazy-backfill replacement of the in-line probe player (3 tests) |
 | `test/schedule_engine_failure_backoff_test.dart` | **NEW (Round 5)** — Structural test: `_failureBackoff` must be `final` instance state, NOT `static`. A static map persists cooldowns across rebuilds and was a contributing cause of "schedules never fire after the first failed attempt" (2 tests) |
+| `test/pause_suppresses_auto_advance_test.dart` | **NEW (Round 6)** — Pins the `_userInitiatedPause` decision tree: a racing completion after a user pause MUST NOT auto-advance the playlist; explicit skip / new-playlist / resume must clear the sentinel so normal flow is preserved. Five completion-routing cases plus three sentinel-lifecycle cases (8 tests) |
+| `test/skip_buttons_visibility_test.dart` | **NEW (Round 6)** — Pins `canSkipClips` truth table: hidden for inactive states, single-clip libraries, and one-track playlists; visible otherwise. Stops the QA "forward/back do nothing" perception bug from returning (5 tests) |
+| `test/schedule_save_preserves_disabled_test.dart` | **NEW (Round 6)** — Pins three contracts of `ScheduleRepository.save()`: resaving an existing disabled row keeps it disabled; new rows default to enabled; explicit `enabled:` overrides both. Closes the "app started playing by itself after I turned the schedule off" QA bug (3 tests) |
+| `test/schedule_engine_recheck_test.dart` | **NEW (Round 6)** — Pins the belt-and-suspenders disable re-check inside `_runTick` immediately before stamping + firing. Mirrors the four race-condition states (both enabled, toggled off, deleted, never enabled) (4 tests) |
 
 ### Integration smoke — `integration_test/app_test.dart`
 
@@ -155,7 +169,7 @@ Runs on any connected device: `flutter test integration_test/app_test.dart -d <d
 1. `flutter pub get`
 2. `dart format --output=none --set-exit-if-changed .` (formatting gate)
 3. `flutter analyze --no-fatal-infos` (lint gate)
-4. `flutter test` (unit + widget gate — 83 tests)
+4. `flutter test` (unit + widget gate — 103 tests)
 5. `flutter test integration_test/app_test.dart` (smoke, non-blocking)
 6. `flutter build apk --debug --dart-define=FLAVOR=dev` (build gate)
 

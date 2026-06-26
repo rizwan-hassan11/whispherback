@@ -189,9 +189,13 @@ class HomeScreen extends ConsumerWidget {
                 padding: EdgeInsets.symmetric(horizontal: r.horizontalGutter),
                 child: scrollable
                     ? SingleChildScrollView(
-                        physics: const BouncingScrollPhysics(
-                          parent: AlwaysScrollableScrollPhysics(),
-                        ),
+                        // Only scroll when the content actually overflows.
+                        // `AlwaysScrollableScrollPhysics` previously let users
+                        // drag the entire page (including the central power
+                        // toggle) off-screen on devices whose content easily
+                        // fit — the QA reported the home power button
+                        // "disappearing after scrolling up" on Samsung.
+                        physics: const ClampingScrollPhysics(),
                         child: ConstrainedBox(
                           constraints:
                               BoxConstraints(minHeight: constraints.maxHeight),

@@ -164,6 +164,17 @@ class ScheduleEngine {
       // so the dedup keeps working after we add `setCompletion`.
       if (_slotTakenByOtherSchedule(all, schedule.id, slot)) continue;
 
+      // Last-chance re-read: between the top of this tick and now (the
+      // playlist lookup + slot computations are I/O-bound and can take 10s
+      // of ms on cold cache devices) the user might have toggled this
+      // schedule OFF. Without this re-check we'd fire a clip the user
+      // explicitly just disabled, which they perceive as "the app started
+      // playing by itself after I turned the schedule off".
+      final fresh = await _schedules.getForPlaylist(schedule.playlistId);
+      if (fresh == null || !fresh.enabled) {
+        continue;
+      }
+
       // Optimistically stamp the slot start BEFORE asking the coordinator to
       // play. If `requestScheduledPlay` returns false we roll the stamp back
       // so the next tick can retry the same slot inside the grace window.

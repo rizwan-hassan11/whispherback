@@ -34,6 +34,7 @@ final playbackCoordinatorProvider = Provider<PlaybackCoordinator>((ref) {
     sleepRepository: ref.watch(sleepRepositoryProvider),
     prayerService: ref.watch(prayerServiceProvider),
     playbackService: ref.watch(audioPlaybackServiceProvider),
+    scheduleRepository: ref.watch(scheduleRepositoryProvider),
   );
   coordinator.refreshScheduleNotifications = () async {
     await syncWhisperNotifications(

@@ -52,6 +52,7 @@ class ScheduleRepository {
     bool shuffleEnabled = false,
     bool alarmEnabled = true,
     int daysMask = 127,
+    bool? enabled,
   }) async {
     final db = await _db.database;
     final existing = await getAll();
@@ -70,6 +71,29 @@ class ScheduleRepository {
     }
 
     final scheduleId = id ?? _uuid.v4();
+    // CRITICAL: Preserve the existing `enabled` flag on edit/update. The
+    // previous code always wrote `enabled: 1`, which silently re-enabled a
+    // schedule that the user had explicitly toggled OFF in the overview —
+    // and then the engine started firing it again "by itself" later. New
+    // schedules (no prior row) default to enabled when the caller doesn't
+    // specify; explicit `enabled:` from the caller wins in all cases.
+    bool resolvedEnabled;
+    if (enabled != null) {
+      resolvedEnabled = enabled;
+    } else {
+      final priorRows = await db.query(
+        'schedules',
+        columns: ['enabled'],
+        where: 'id = ?',
+        whereArgs: [scheduleId],
+        limit: 1,
+      );
+      if (priorRows.isEmpty) {
+        resolvedEnabled = true;
+      } else {
+        resolvedEnabled = (priorRows.first['enabled'] as int? ?? 1) == 1;
+      }
+    }
     await db.insert(
       'schedules',
       {
@@ -81,7 +105,7 @@ class ScheduleRepository {
         'shuffle_enabled': shuffleEnabled ? 1 : 0,
         'alarm_enabled': alarmEnabled ? 1 : 0,
         'days_mask': daysMask,
-        'enabled': 1,
+        'enabled': resolvedEnabled ? 1 : 0,
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
