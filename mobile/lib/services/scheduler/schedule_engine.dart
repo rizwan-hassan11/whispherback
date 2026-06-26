@@ -58,8 +58,14 @@ class ScheduleEngine {
   static const _tickWatchdog = Duration(seconds: 30);
 
   /// Cooldown after an empty-playlist or unplayable scheduled fire so we
-  /// don't hammer the engine every 5s while the user is fixing the playlist.
-  static final Map<String, DateTime> _failureBackoff = {};
+  /// don't hammer the engine every 5s while the user is fixing the
+  /// playlist. NOT `static` — must reset every time the engine is
+  /// re-created (e.g. fresh app launch, dependency injection rebuild).
+  /// A static map persisted spurious cooldowns from previous lifecycles
+  /// and was a contributing factor to the QA report that "schedules never
+  /// fire" after the app had thrown a transient warmup error early in
+  /// the session.
+  final Map<String, DateTime> _failureBackoff = {};
   static const _failureBackoffDuration = Duration(minutes: 1);
 
   void start() {

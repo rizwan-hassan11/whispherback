@@ -1,5 +1,8 @@
+import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+import 'package:just_audio/just_audio.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../domain/entities/audio_clip.dart';
@@ -46,6 +49,60 @@ class ClipRepository {
     final db = await _db.database;
     await db.insert('clips', _toRow(clip));
     return clip;
+  }
+
+  /// Updates [duration_ms] on an existing clip row. Used by the lazy
+  /// duration backfill triggered after import/record so the in-memory
+  /// snapshot the UI shows next time picks up the real length.
+  Future<void> updateDuration(String id, int durationMs) async {
+    final db = await _db.database;
+    await db.update(
+      'clips',
+      {'duration_ms': durationMs},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  /// Best-effort, OFF-SESSION duration probe. Spawns an isolated
+  /// `AudioPlayer`, reads the duration, disposes — and crucially, NEVER
+  /// calls `play()` and NEVER touches the shared `AudioSession`. Failure is
+  /// silent: the clip stays playable, only the length badge stays at 0:00.
+  ///
+  /// Why this is safe vs. the old in-line probe in `audio_services.dart`:
+  ///
+  ///   * Runs on a microtask AFTER the DB row is committed, never during
+  ///     the user's record/import gesture, so a Samsung quirk that auto-
+  ///     starts the probe player no longer collides with the user's next
+  ///     `playClip` tap (which was the "first recorded clip won't play"
+  ///     reproduction recipe).
+  ///   * Wraps everything in try/catch and disposes the player even on
+  ///     error so a corrupt file can't leak the native MediaPlayer.
+  ///   * No `setActive`, no source mutation on the global player.
+  Future<void> backfillDuration(String clipId, String filePath) async {
+    AudioPlayer? probe;
+    try {
+      probe = AudioPlayer();
+      // Yield the event loop so the DB transaction has fully committed and
+      // the foreground audio session (if any) has settled before we touch
+      // the player at all. This is the order-of-operations bug that made
+      // probing-during-import unsafe.
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      final duration = await probe
+          .setFilePath(filePath)
+          .timeout(const Duration(seconds: 5));
+      if (duration != null && duration.inMilliseconds > 0) {
+        await updateDuration(clipId, duration.inMilliseconds);
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('ClipRepository.backfillDuration($clipId) failed: $e');
+      }
+    } finally {
+      try {
+        await probe?.dispose();
+      } catch (_) {}
+    }
   }
 
   Future<void> delete(String id) async {

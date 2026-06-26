@@ -62,6 +62,7 @@ class _MainShellState extends ConsumerState<MainShell> {
           ? l10n.playbackClipFailed
           : l10n.playbackClipFailedNamed(event.clipTitle!),
       PlaybackErrorReason.emptyPlaylist => l10n.playbackEmptyPlaylist,
+      PlaybackErrorReason.inactiveToggle => l10n.playbackInactiveToggle,
     };
     context.showShellSnackBar(message, icon: AppIcons.alertCircle);
   }

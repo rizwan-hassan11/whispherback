@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 
 import '../../data/repositories/app_state_repository.dart';
@@ -30,6 +31,10 @@ enum PlaybackErrorReason {
   /// User tapped Play on an empty playlist. Surfaces a friendly "add clips
   /// to play" message instead of looking like a silent no-op.
   emptyPlaylist,
+
+  /// User tapped Play on a playlist while the master Active toggle is OFF.
+  /// We prompt them to flip it on so scheduled playback works too.
+  inactiveToggle,
 }
 
 class PlaybackErrorEvent {
@@ -102,14 +107,41 @@ class PlaybackCoordinator {
   /// coordinator's POV; the audio_service plugin handles native-side ducking.
   Future<void> _playGate = Future<void>.value();
 
+  /// Hard cap on a single serialized play body. If a play attempt
+  /// genuinely hangs (audio session deadlock, native MediaPlayer hung on
+  /// decode, etc.) we MUST release the gate so the next user tap doesn't
+  /// queue forever — that was the "after a while nothing plays but delete
+  /// still works" symptom: delete bypassed the gate, every play attempt
+  /// was queued behind a permanently-hung previous gate body.
+  static const _playGateBodyTimeout = Duration(seconds: 12);
+
   Future<T> _serializePlay<T>(Future<T> Function() body) {
     final previous = _playGate;
     final completer = Completer<T>();
-    _playGate = previous.then((_) async {
+    _playGate = previous
+        // Swallow any error from the previous body so the chain itself
+        // never enters an unhandled state and starves follow-up plays.
+        .then((_) => null, onError: (Object _, StackTrace __) => null)
+        .then((_) async {
       try {
-        completer.complete(await body());
+        final result = await body().timeout(_playGateBodyTimeout, onTimeout: () {
+          // The body never finished — return a fallback (typed as T) so
+          // the gate can advance. We can't synthesise an arbitrary T here,
+          // so let the timeout propagate via a thrown TimeoutException;
+          // the catch below will release the completer.
+          throw TimeoutException(
+            'PlaybackCoordinator: play body did not complete within '
+            '$_playGateBodyTimeout — releasing the gate so follow-up '
+            'taps are not silently queued forever.',
+            _playGateBodyTimeout,
+          );
+        });
+        if (!completer.isCompleted) completer.complete(result);
       } catch (e, st) {
-        completer.completeError(e, st);
+        if (kDebugMode) {
+          debugPrint('PlaybackCoordinator._serializePlay body failed: $e\n$st');
+        }
+        if (!completer.isCompleted) completer.completeError(e, st);
       }
     });
     return completer.future;
@@ -159,6 +191,19 @@ class PlaybackCoordinator {
     _audio.onSkipToPreviousRequested = () => _skipPlaylistClip(next: false);
     _audio.onClipSessionChanged = () {
       unawaited(refreshScheduleNotifications?.call());
+    };
+    // Soft-fail: if `playFile` returns successfully but the native player
+    // sits in `idle` / `loading` for >5s without ever reaching a playable
+    // state, the handler fires this callback. We surface a snackbar so a
+    // genuinely stuck tap isn't silent — and we DO NOT rewind playback or
+    // touch the player state here, because by the time this fires the user
+    // may already have moved on to another clip.
+    _audio.onPlaybackStartFailure = (title) {
+      if (_errorController.isClosed) return;
+      _errorController.add(PlaybackErrorEvent(
+        PlaybackErrorReason.decodeFailed,
+        clipTitle: title,
+      ));
     };
     _emit(
       PlaybackSnapshot(
@@ -562,7 +607,24 @@ class PlaybackCoordinator {
 
   Future<bool> _playPlaylistInternal(String playlistId,
       {bool fromSchedule = false}) async {
-    if (!fromSchedule && !await _canPlay()) return false;
+    if (!fromSchedule) {
+      if (!await _canPlay()) {
+        // _canPlay() may already have emitted a sleep/prayer snapshot. If
+        // it just returned false because Active is OFF, surface a snackbar
+        // so the user doesn't think the Play button is broken — silent
+        // gating was the exact "playlist won't play but delete works" QA
+        // report. We only emit when the *reason* is the active toggle
+        // (sleep/prayer have their own dedicated banners on the home
+        // screen and the modal).
+        final isActive = await _appState.isActive();
+        if (!isActive) {
+          _errorController.add(const PlaybackErrorEvent(
+            PlaybackErrorReason.inactiveToggle,
+          ));
+        }
+        return false;
+      }
+    }
     if (fromSchedule && !await _appState.isActive()) return false;
 
     final clips = await _playlists.getClips(playlistId);

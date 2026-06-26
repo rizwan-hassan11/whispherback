@@ -9,7 +9,7 @@ void main() {
     // Pinning the public API: every reason listed here is rendered with a
     // dedicated localized message in main_shell.dart. Adding a new reason
     // without a UI mapping would surface as a missing-arm switch warning.
-    expect(PlaybackErrorReason.values, hasLength(3));
+    expect(PlaybackErrorReason.values, hasLength(4));
     expect(
         PlaybackErrorReason.values, contains(PlaybackErrorReason.pathRejected));
     expect(
@@ -17,6 +17,10 @@ void main() {
     expect(
       PlaybackErrorReason.values,
       contains(PlaybackErrorReason.emptyPlaylist),
+    );
+    expect(
+      PlaybackErrorReason.values,
+      contains(PlaybackErrorReason.inactiveToggle),
     );
   });
 

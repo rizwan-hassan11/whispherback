@@ -74,9 +74,9 @@ class AudioRecordingService {
 
   Future<AudioClip?> stopAndSave() async {
     // Snapshot the pending state into locals up front but DO NOT null the
-    // instance fields yet — if probe or DB create fails we use them to clean
-    // up the orphan file. The old code cleared them eagerly and the file
-    // was lost forever on the failure path.
+    // instance fields yet — if DB create fails we use them to clean up the
+    // orphan file. The old code cleared them eagerly and the file was lost
+    // forever on the failure path.
     final pendingPath = _pendingPath;
     final pendingTitle = _pendingTitle ?? 'Recording';
     final stopPath = await _recorder.stop();
@@ -89,30 +89,37 @@ class AudioRecordingService {
 
     AudioClip? created;
     try {
-      final player = AudioPlayer();
-      int durationMs = 0;
-      try {
-        await player.setFilePath(filePath);
-        durationMs = player.duration?.inMilliseconds ?? 0;
-      } finally {
-        await player.dispose();
-      }
-      // Empty titles are coerced so the UI never shows a blank tile that
-      // the user can't easily tell apart from another anonymous recording.
+      // CRITICAL: do NOT spin up a probe `AudioPlayer().setFilePath(...)` to
+      // measure duration here. On Samsung One UI 12+ that probe player binds
+      // to the shared `AudioSession` and either:
+      //   (a) silently consumes audio focus so the very next *real* play
+      //       call from the user is silently dropped by the OS — this is the
+      //       "first recorded clip won't play, the next 6 do" bug; or
+      //   (b) auto-starts playback through the foreground media session,
+      //       so the user hears their import/recording immediately. Both
+      //       were reproduced on the QA device.
+      // Duration is cosmetic ("playlist total length"); we leave it as 0
+      // here and let `ClipDurationProbe` (a stand-alone, off-session helper)
+      // fill it in lazily without touching the playback path. If the lazy
+      // probe never runs (rare), the clip still plays fine — duration is
+      // discovered when the user hits Play.
       final normalizedTitle =
           pendingTitle.trim().isEmpty ? 'Recording' : pendingTitle.trim();
       created = await _clipRepository.create(
         title: normalizedTitle,
         filePath: filePath,
-        durationMs: durationMs,
+        durationMs: 0,
         source: ClipSource.recorded,
       );
       _pendingPath = null;
       _pendingTitle = null;
+      // Best-effort backfill of duration AFTER the row is committed. Failure
+      // is silent — the clip remains playable, just without a length badge.
+      unawaited(_clipRepository.backfillDuration(created.id, filePath));
       return created;
     } catch (e) {
-      // Probe or DB write failed — delete the partial file so we don't leak
-      // a recording the user will never be able to access, then surface the
+      // DB write failed — delete the partial file so we don't leak a
+      // recording the user will never be able to access, then surface the
       // error so the UI can show a real toast (not silent failure).
       try {
         final f = File(filePath);
@@ -237,30 +244,24 @@ class AudioImportService {
       // because the OS returns a content:// URI with no real file path.
       await File(destPath).writeAsBytes(sourceBytes!, flush: true);
     }
-    yield 0.7;
-
-    final player = AudioPlayer();
-    int durationMs = 0;
-    try {
-      await player.setFilePath(destPath);
-      durationMs = player.duration?.inMilliseconds ?? 0;
-    } catch (_) {
-      // Bad encoding / corrupt file — surface a friendly error to the user.
-      try {
-        await File(destPath).delete();
-      } catch (_) {}
-      await player.dispose();
-      throw ArgumentError('Only MP3 and M4A files are supported');
-    }
-    await player.dispose();
     yield 0.9;
 
-    await _clipRepository.create(
+    // CRITICAL: do NOT spin up a probe `AudioPlayer().setFilePath(...)` to
+    // measure duration here. That is what made imported clips start playing
+    // immediately on Samsung devices — the probe player binds to the shared
+    // foreground `AudioSession` and the OS routes its decoded output to
+    // the active media session. Duration is backfilled lazily by
+    // `ClipRepository.backfillDuration` AFTER the row is committed, on an
+    // isolated player whose session is destroyed before any user-driven
+    // playback can race with it.
+    final created = await _clipRepository.create(
       title: title,
       filePath: destPath,
-      durationMs: durationMs,
+      durationMs: 0,
       source: ClipSource.imported,
     );
+    yield 0.95;
+    unawaited(_clipRepository.backfillDuration(created.id, destPath));
     yield 1.0;
   }
 }
@@ -331,6 +332,8 @@ class AudioPlaybackService {
       _handler.onSkipToPreviousRequested = cb;
   set onClipSessionChanged(void Function()? cb) =>
       _handler.onClipSessionChanged = cb;
+  set onPlaybackStartFailure(void Function(String? clipTitle)? cb) =>
+      _handler.onPlaybackStartFailure = cb;
 
   /// Tears down the foreground session (master toggle OFF).
   Future<void> exitForeground() async {

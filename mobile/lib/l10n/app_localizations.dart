@@ -1024,6 +1024,14 @@ class AppLocalizations {
       'Deze playlist is leeg. Voeg clips toe voordat je afspeelt.',
       'Cette playlist est vide. Ajoutez des clips avant de lire.',
       'Danh sách này trống. Hãy thêm đoạn ghi trước khi phát.');
+
+  String get playbackInactiveToggle => _s(
+      'Turn Active on from Home to play this playlist or run schedules.',
+      'پلے لسٹ چلانے یا شیڈولز کے لیے ہوم سے ایکٹو آن کریں۔',
+      'فعّل وضع النشاط من الشاشة الرئيسية لتشغيل القائمة أو الجداول.',
+      'Schakel Actief in vanaf Home om deze playlist te spelen of schemas te draaien.',
+      'Activez le mode Actif depuis Accueil pour lire cette playlist ou exécuter des planifications.',
+      'Bật Hoạt động từ Trang chủ để phát danh sách này hoặc chạy lịch.');
   String get retry => _s('Try again', 'دوبارہ کوشش', 'حاول مجدداً', 'Opnieuw',
       'Réessayer', 'Thử lại');
   String get today =>

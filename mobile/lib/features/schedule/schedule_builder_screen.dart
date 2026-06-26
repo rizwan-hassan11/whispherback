@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -117,6 +118,7 @@ class _ScheduleBuilderScreenState extends ConsumerState<ScheduleBuilderScreen> {
 
     // Step 1 — persist the schedule. Only this DB write may legitimately fail
     // with a user-visible error (e.g. overlap with another schedule).
+    bool persisted = false;
     try {
       await ref.read(scheduleRepositoryProvider).save(
             id: _existingScheduleId,
@@ -128,11 +130,12 @@ class _ScheduleBuilderScreenState extends ConsumerState<ScheduleBuilderScreen> {
             alarmEnabled: _alarm,
             daysMask: _daysMask,
           );
+      persisted = true;
     } on ScheduleConflictException catch (e) {
       if (!mounted) return;
       setState(() => _saving = false);
       final l10n = context.l10n;
-      showDialog<void>(
+      await showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
           title: Text(l10n.scheduleConflict),
@@ -146,15 +149,24 @@ class _ScheduleBuilderScreenState extends ConsumerState<ScheduleBuilderScreen> {
         ),
       );
       return;
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() => _saving = false);
+      // Always show an error toast — silent failure was the original
+      // "save schedule notification doesn't pop up" report.
       context.showShellSnackBar(
         context.l10n.genericErrorTryAgain,
         icon: AppIcons.alertCircle,
       );
+      if (kDebugMode) {
+        debugPrint('Schedule save failed: $e');
+      }
       return;
     }
+
+    // `persisted` exists for symmetry / future hooks but cannot be false here
+    // because every catch branch above returns.
+    assert(persisted);
 
     // Step 2 — refresh derived state. These are best-effort: a missing
     // notification permission or geolocator hiccup must NOT roll back the
@@ -163,6 +175,7 @@ class _ScheduleBuilderScreenState extends ConsumerState<ScheduleBuilderScreen> {
     // refresh path never surfaces a false "Something went wrong" toast.
     ref.invalidate(schedulesProvider);
     ref.invalidate(playlistsProvider);
+    ref.invalidate(isAppActiveProvider);
     try {
       await syncWhisperNotifications(
         appState: ref.read(appStateRepositoryProvider),
@@ -173,7 +186,11 @@ class _ScheduleBuilderScreenState extends ConsumerState<ScheduleBuilderScreen> {
       // Already logged by syncWhisperNotifications; swallow here.
     }
 
-    if (!mounted) return;
+    if (!mounted) {
+      _saving = false;
+      return;
+    }
+    setState(() => _saving = false);
     final l10n = context.l10n;
 
     // Branch: if Active is OFF, the user just saved a schedule that will not
@@ -181,7 +198,14 @@ class _ScheduleBuilderScreenState extends ConsumerState<ScheduleBuilderScreen> {
     // we hard-stop them with a dialog so the connection between "saved" and
     // "Active toggle" is impossible to miss. If Active is ON, fall back to
     // the quick snackbar so the save flow stays snappy.
-    final isActive = await ref.read(appStateRepositoryProvider).isActive();
+    bool isActive = false;
+    try {
+      isActive = await ref.read(appStateRepositoryProvider).isActive();
+    } catch (_) {
+      // If we can't read the toggle, assume OFF so the user still sees the
+      // explainer dialog rather than a silent return.
+      isActive = false;
+    }
     if (!mounted) return;
     if (!isActive) {
       final shouldActivate = await showDialog<bool>(
@@ -204,7 +228,11 @@ class _ScheduleBuilderScreenState extends ConsumerState<ScheduleBuilderScreen> {
       );
       if (!mounted) return;
       if (shouldActivate == true) {
-        await ref.read(playbackCoordinatorProvider).toggleActive();
+        try {
+          await ref.read(playbackCoordinatorProvider).toggleActive();
+        } catch (_) {
+          // Toggle failed — fall through so the user can retry from Home.
+        }
         ref.invalidate(isAppActiveProvider);
         if (!mounted) return;
         context.showShellSnackBar(

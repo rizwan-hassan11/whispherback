@@ -297,25 +297,61 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     await _player.setVolume(1);
     await _player.setSpeed(1);
     await _player.setLoopMode(LoopMode.off);
-    await _player.setAudioSource(AudioSource.file(path), preload: true);
+    // CRITICAL: cap setAudioSource at 8 seconds. The just_audio future can
+    // hang indefinitely if the underlying ExoPlayer / native MediaPlayer
+    // gets into a stuck state (observed on Samsung One UI after rapid
+    // record/import/play cycles). Without this cap the play-gate mutex in
+    // PlaybackCoordinator stays held forever and every subsequent tap
+    // queues behind a dead future — that is the QA report "after some
+    // time clips/playlists delete but don't play".
+    try {
+      await _player
+          .setAudioSource(AudioSource.file(path), preload: true)
+          .timeout(const Duration(seconds: 8));
+    } on TimeoutException {
+      // The player is wedged. Force-stop so the next playFile can rebuild
+      // the source cleanly, and rethrow so the coordinator surfaces a
+      // decodeFailed snackbar instead of silently swallowing the failure.
+      try {
+        await _player.stop();
+      } catch (_) {}
+      rethrow;
+    }
     onClipSessionChanged?.call();
     await play();
 
-    // Belt-and-braces: confirm the player actually moved to a playable state
-    // within a short window. On the very first recording after a fresh
-    // install we used to see `_player.play()` return successfully but the
-    // native side stayed `idle` because the audio session focus hadn't
-    // propagated yet. If we're still not playing after the warmup window,
-    // throw so the coordinator can fire a user-visible error.
-    await _confirmPlaybackStarted();
+    // Fire-and-forget watcher: if the native player never reaches a playable
+    // state within 5s, emit `onPlaybackStartFailure` so the coordinator can
+    // surface a snackbar. We deliberately do NOT block `playFile` on this —
+    // the previous design awaited a 2s deadline INSIDE `playFile`, which on
+    // slow Samsung devices threw spurious errors even for healthy clips,
+    // caused the playback gate to hold for 2s on real failures (blocking the
+    // next user tap), and locked the engine into failure backoff after the
+    // first scheduled fire. Now the watcher is decoupled: playback is
+    // launched immediately, and stuck-state detection happens out of band.
+    _scheduleStartWatchdog();
   }
 
-  Future<void> _confirmPlaybackStarted() async {
-    // 2 seconds is generous: a healthy `playFile` typically reaches `ready`
-    // within 200-500ms even on low-end Samsung devices. Anything longer is
-    // the symptom we're guarding against.
-    final deadline = DateTime.now().add(const Duration(seconds: 2));
-    while (DateTime.now().isBefore(deadline)) {
+  /// Outstanding watchdog for "play() called but processing state never
+  /// advanced". Cancelled and replaced on every new playFile so we never
+  /// fire late for a clip the user has already moved on from.
+  Timer? _startWatchdog;
+
+  /// Optional callback the coordinator wires up to surface a snackbar when
+  /// playback truly never started. We use a callback (not a stream) so the
+  /// signal stays decoupled from `PlaybackErrorEvent` — the coordinator
+  /// decides how to phrase the user-visible message.
+  void Function(String? clipTitle)? onPlaybackStartFailure;
+
+  void _scheduleStartWatchdog() {
+    _startWatchdog?.cancel();
+    final expectedTitle = _clipTitle;
+    _startWatchdog = Timer(const Duration(seconds: 5), () {
+      // If the player did reach `ready` / `buffering` / `completed` or is
+      // actually playing, we're fine — no need to alarm the user. This
+      // catches the genuinely stuck case (audio focus denied, decoder
+      // crash, content URI revoked between picker and play).
+      if (!_playingClip) return;
       final ps = _player.processingState;
       if (ps == ProcessingState.ready ||
           ps == ProcessingState.buffering ||
@@ -323,12 +359,9 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
         return;
       }
       if (_player.playing) return;
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-    }
-    throw StateError(
-      'Playback did not start within the warmup window — '
-      'audio session may not be bound (state=${_player.processingState}).',
-    );
+      // Still in `idle` or `loading` after 5s — surface as a soft warning.
+      onPlaybackStartFailure?.call(expectedTitle);
+    });
   }
 
   MediaItem _clipMediaItem({
@@ -371,6 +404,11 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     if (!_playingClip && _player.processingState == ProcessingState.idle) {
       return;
     }
+
+    // Cancel any pending start-watchdog so we don't fire a stale "playback
+    // start failed" snackbar for a clip the user explicitly stopped.
+    _startWatchdog?.cancel();
+    _startWatchdog = null;
 
     _playingClip = false;
     _clipTitle = null;
@@ -496,6 +534,27 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   @override
   Future<void> seek(Duration position) => _player.seek(position);
 
+  /// `SeekHandler` mixin defaults `seekForward` / `seekBackward` to a 10-second
+  /// jump. On a 2-5 second whisper clip that sails past the end, fires
+  /// `ProcessingState.completed`, and the coordinator's auto-advance kicks
+  /// in — the user perceives this as "tapping pause skipped to the next
+  /// clip" because some Samsung firmware routes a long-press on the
+  /// pause button through these callbacks. We override both to no-ops so
+  /// only the explicit `skipToNext` / `skipToPrevious` buttons can advance
+  /// the playlist. The in-app scrub bar uses precise `seek(position)`
+  /// instead, so this doesn't lose any user-facing functionality.
+  @override
+  Future<void> seekForward(bool begin) async {}
+
+  @override
+  Future<void> seekBackward(bool begin) async {}
+
+  @override
+  Future<void> fastForward() async {}
+
+  @override
+  Future<void> rewind() async {}
+
   @override
   Future<void> stop() async {
     if (_playingClip) {
@@ -597,13 +656,24 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     playbackState.add(
       playbackState.value.copyWith(
         controls: controls,
+        // Deliberately do NOT publish `seekForward` / `seekBackward` here.
+        // On Samsung One UI 6 + Android 13/14 those system actions are
+        // mapped to a 30-second jump that, applied to a short whisper clip,
+        // sails past the end and triggers `processingState.completed` — the
+        // coordinator's natural-completion handler then auto-advances to
+        // the next track. The user reports this as "pause triggers next
+        // clip", because the OS sometimes routes a long-press on pause
+        // through these actions. We still publish `seek` for the scrubber
+        // in our own in-app modal (which uses precise positions), plus
+        // `skipToNext` / `skipToPrevious` for the explicit lock-screen
+        // buttons — neither involves fast-forward.
         systemActions: const {
           MediaAction.seek,
-          MediaAction.seekForward,
-          MediaAction.seekBackward,
           MediaAction.stop,
           MediaAction.pause,
           MediaAction.play,
+          MediaAction.skipToNext,
+          MediaAction.skipToPrevious,
         },
         androidCompactActionIndices: compactIndices,
         processingState: completed
@@ -631,6 +701,8 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   void disposePlayer() {
+    _startWatchdog?.cancel();
+    _startWatchdog = null;
     _player.dispose();
   }
 }
