@@ -73,136 +73,182 @@ class HomeScreen extends ConsumerWidget {
           child: LayoutBuilder(
             builder: (context, constraints) {
               final r = context.responsive;
-              final scrollable =
-                  r.isCompactHeight || constraints.maxHeight < 680;
+              final viewportHeight = constraints.maxHeight;
 
-              Widget buildContent({required bool useSpacers}) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const SizedBox(height: 8),
-                    _HomeHeader(
-                      theme: theme,
-                      onSleep: () => context.push('/sleep'),
-                    ),
-                    SizedBox(height: r.isFlipCover ? 12 : 20),
-                    _GreetingCard(
-                      theme: theme,
-                      playlistCount: playlistsAsync.valueOrNull?.length ?? 0,
-                      greetingPeriod: greetingPeriod,
-                    ),
-                    if (useSpacers)
-                      const Spacer(flex: 3)
-                    else
-                      SizedBox(height: r.isFlipCover ? 16 : 24),
-                    Center(
-                      child: DepthScene(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            HomeWaveBars(active: isActive),
-                            SizedBox(height: r.isFlipCover ? 10 : 16),
-                            ActiveToggle(
-                              isActive: isActive,
-                              onToggle: () {
-                                unawaited(() async {
-                                  await ref
-                                      .read(playbackCoordinatorProvider)
-                                      .toggleActive();
-                                  if (!context.mounted) return;
-                                  final appState =
-                                      ref.read(appStateRepositoryProvider);
-                                  final nowActive = await appState.isActive();
-                                  await syncWhisperNotifications(
-                                    appState: appState,
-                                    schedules:
-                                        ref.read(scheduleRepositoryProvider),
-                                    prayer: ref.read(prayerRepositoryProvider),
-                                  );
-                                  if (nowActive && context.mounted) {
-                                    await runSchedulingSetupWizard(context);
-                                    if (context.mounted &&
-                                        !whisperAudioServiceBound) {
-                                      await showAudioServiceUnavailableDialog(
-                                        context,
-                                      );
-                                    }
+              // The header (greeting) is naturally at the top of the page
+              // and small. The TOGGLE (power button) is the centerpiece —
+              // it MUST remain visible no matter what else is on the page.
+              // The secondary widgets (status pill, schedule chip, quick
+              // stats, next-whisper card, mode chip) may overflow the
+              // viewport depending on form factor + active state — they go
+              // inside a scrollable region BELOW the always-visible toggle.
+              //
+              // Previous implementations put the entire column (including
+              // the toggle) into a single scroll view. On devices where
+              // active-state widgets pushed total height over the viewport,
+              // the user could scroll the toggle out of view and end up
+              // staring at empty space — the exact QA bug:
+              // "power button scroll up hoky gaib hony lag gya".
+
+              final toggleSection = Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(height: 8),
+                  _HomeHeader(
+                    theme: theme,
+                    onSleep: () => context.push('/sleep'),
+                  ),
+                  SizedBox(height: r.isFlipCover ? 12 : 18),
+                  Center(
+                    child: DepthScene(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          HomeWaveBars(active: isActive),
+                          SizedBox(height: r.isFlipCover ? 10 : 16),
+                          ActiveToggle(
+                            isActive: isActive,
+                            onToggle: () {
+                              unawaited(() async {
+                                await ref
+                                    .read(playbackCoordinatorProvider)
+                                    .toggleActive();
+                                if (!context.mounted) return;
+                                final appState =
+                                    ref.read(appStateRepositoryProvider);
+                                final nowActive = await appState.isActive();
+                                await syncWhisperNotifications(
+                                  appState: appState,
+                                  schedules:
+                                      ref.read(scheduleRepositoryProvider),
+                                  prayer: ref.read(prayerRepositoryProvider),
+                                );
+                                if (nowActive && context.mounted) {
+                                  await runSchedulingSetupWizard(context);
+                                  if (context.mounted &&
+                                      !whisperAudioServiceBound) {
+                                    await showAudioServiceUnavailableDialog(
+                                      context,
+                                    );
                                   }
-                                }());
-                              },
-                            ),
-                            const SizedBox(height: 10),
-                            const DepthPedestal(),
-                          ],
-                        ),
+                                }
+                              }());
+                            },
+                          ),
+                          const SizedBox(height: 10),
+                          const DepthPedestal(),
+                        ],
                       ),
                     ),
-                    SizedBox(height: r.isFlipCover ? 6 : 8),
-                    Center(
-                        child: _StatusPill(isActive: isActive, theme: theme)),
-                    if (isActive) ...[
-                      const SizedBox(height: 10),
-                      Center(
-                        child: _SchedulingSetupChip(
-                          isActive: isActive,
-                          theme: theme,
-                        ),
-                      ),
-                    ],
-                    SizedBox(height: r.isFlipCover ? 14 : 20),
-                    _QuickStats(
+                  ),
+                  SizedBox(height: r.isFlipCover ? 6 : 8),
+                  Center(
+                    child: _StatusPill(isActive: isActive, theme: theme),
+                  ),
+                ],
+              );
+
+              final secondaryChildren = <Widget>[
+                _GreetingCard(
+                  theme: theme,
+                  playlistCount: playlistsAsync.valueOrNull?.length ?? 0,
+                  greetingPeriod: greetingPeriod,
+                ),
+                if (isActive) ...[
+                  const SizedBox(height: 10),
+                  Center(
+                    child: _SchedulingSetupChip(
+                      isActive: isActive,
                       theme: theme,
-                      playlistCount: playlistsAsync.valueOrNull?.length ?? 0,
-                      clipCount: clipsAsync.valueOrNull?.length ?? 0,
-                      scheduleCount: schedulesAsync.valueOrNull?.length ?? 0,
                     ),
-                    if (isActive) ...[
-                      const SizedBox(height: 14),
-                      _NextWhisperCard(theme: theme),
-                    ],
-                    if (useSpacers)
-                      const Spacer(flex: 2)
-                    else
-                      const SizedBox(height: 20),
-                    if (snapshot.state == AppPlaybackState.sleepPaused)
-                      _ModeChip(
-                        icon: AppIcons.bedtime,
-                        label: context.l10n.sleepModeActive,
-                        color: AppColors.brandLight,
-                        theme: theme,
-                      ),
-                    if (snapshot.state == AppPlaybackState.prayerPaused)
-                      _ModeChip(
-                        icon: AppIcons.prayer,
-                        label: context.l10n.prayerPauseActive,
-                        color: AppColors.gold,
-                        theme: theme,
-                      ),
-                    SizedBox(
-                        height:
-                            ShellMetrics.scrollBottomInset(context, extra: 4)),
-                  ],
+                  ),
+                ],
+                SizedBox(height: r.isFlipCover ? 14 : 20),
+                _QuickStats(
+                  theme: theme,
+                  playlistCount: playlistsAsync.valueOrNull?.length ?? 0,
+                  clipCount: clipsAsync.valueOrNull?.length ?? 0,
+                  scheduleCount: schedulesAsync.valueOrNull?.length ?? 0,
+                ),
+                if (isActive) ...[
+                  const SizedBox(height: 14),
+                  _NextWhisperCard(theme: theme),
+                ],
+                if (snapshot.state == AppPlaybackState.sleepPaused) ...[
+                  const SizedBox(height: 14),
+                  _ModeChip(
+                    icon: AppIcons.bedtime,
+                    label: context.l10n.sleepModeActive,
+                    color: AppColors.brandLight,
+                    theme: theme,
+                  ),
+                ],
+                if (snapshot.state == AppPlaybackState.prayerPaused) ...[
+                  const SizedBox(height: 14),
+                  _ModeChip(
+                    icon: AppIcons.prayer,
+                    label: context.l10n.prayerPauseActive,
+                    color: AppColors.gold,
+                    theme: theme,
+                  ),
+                ],
+                SizedBox(
+                  height: ShellMetrics.scrollBottomInset(context, extra: 4),
+                ),
+              ];
+
+              // Defensive fallback: on extremely short form factors (flip
+              // covers, split-screen ~250px) the toggle section alone may
+              // exceed the viewport. In that case, layout would crash
+              // with a negative Expanded child. Drop back to a single
+              // scroll view that contains everything — the user can still
+              // scroll to find the toggle, and the layout doesn't blow up.
+              final estimatedToggleHeight = r.isFlipCover ? 360.0 : 440.0;
+              final canPinToggle = viewportHeight >= estimatedToggleHeight;
+
+              if (!canPinToggle) {
+                return Padding(
+                  padding:
+                      EdgeInsets.symmetric(horizontal: r.horizontalGutter),
+                  child: SingleChildScrollView(
+                    physics: const ClampingScrollPhysics(),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        toggleSection,
+                        SizedBox(height: r.isFlipCover ? 12 : 16),
+                        ...secondaryChildren,
+                      ],
+                    ),
+                  ),
                 );
               }
 
               return Padding(
                 padding: EdgeInsets.symmetric(horizontal: r.horizontalGutter),
-                child: scrollable
-                    ? SingleChildScrollView(
-                        // Only scroll when the content actually overflows.
-                        // `AlwaysScrollableScrollPhysics` previously let users
-                        // drag the entire page (including the central power
-                        // toggle) off-screen on devices whose content easily
-                        // fit — the QA reported the home power button
-                        // "disappearing after scrolling up" on Samsung.
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    toggleSection,
+                    SizedBox(height: r.isFlipCover ? 12 : 16),
+                    // Everything below the toggle is allowed to scroll
+                    // INDEPENDENTLY. The toggle stays pinned in place; the
+                    // user can browse stats / cards / mode chips without
+                    // ever losing sight of the master Active control.
+                    // `ClampingScrollPhysics` makes the secondary region
+                    // stop at its last meaningful widget (no bounce into
+                    // empty space).
+                    Expanded(
+                      child: SingleChildScrollView(
                         physics: const ClampingScrollPhysics(),
-                        child: ConstrainedBox(
-                          constraints:
-                              BoxConstraints(minHeight: constraints.maxHeight),
-                          child: buildContent(useSpacers: false),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: secondaryChildren,
                         ),
-                      )
-                    : buildContent(useSpacers: true),
+                      ),
+                    ),
+                  ],
+                ),
               );
             },
           ),

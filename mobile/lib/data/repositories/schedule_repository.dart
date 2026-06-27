@@ -70,29 +70,36 @@ class ScheduleRepository {
       }
     }
 
-    final scheduleId = id ?? _uuid.v4();
+    // Look up any existing row for this PLAYLIST (not by the caller's `id` —
+    // the builder may have raced its async load and passed `null`, in which
+    // case using the caller's id would generate a fresh UUID and skip the
+    // preservation entirely). The schema has UNIQUE(playlist_id), so there
+    // is at most one row to consider.
+    final priorRows = await db.query(
+      'schedules',
+      columns: ['id', 'enabled'],
+      where: 'playlist_id = ?',
+      whereArgs: [playlistId],
+      limit: 1,
+    );
+    final priorRow = priorRows.isEmpty ? null : priorRows.first;
+    // Reuse the existing row's id when the caller didn't supply one. This
+    // keeps the schedule's stable identity across edits, which the engine
+    // relies on for `_lastFired` / `_failureBackoff` keying.
+    final scheduleId = id ?? (priorRow?['id'] as String?) ?? _uuid.v4();
     // CRITICAL: Preserve the existing `enabled` flag on edit/update. The
     // previous code always wrote `enabled: 1`, which silently re-enabled a
     // schedule that the user had explicitly toggled OFF in the overview —
     // and then the engine started firing it again "by itself" later. New
     // schedules (no prior row) default to enabled when the caller doesn't
     // specify; explicit `enabled:` from the caller wins in all cases.
-    bool resolvedEnabled;
+    final bool resolvedEnabled;
     if (enabled != null) {
       resolvedEnabled = enabled;
+    } else if (priorRow == null) {
+      resolvedEnabled = true;
     } else {
-      final priorRows = await db.query(
-        'schedules',
-        columns: ['enabled'],
-        where: 'id = ?',
-        whereArgs: [scheduleId],
-        limit: 1,
-      );
-      if (priorRows.isEmpty) {
-        resolvedEnabled = true;
-      } else {
-        resolvedEnabled = (priorRows.first['enabled'] as int? ?? 1) == 1;
-      }
+      resolvedEnabled = (priorRow['enabled'] as int? ?? 1) == 1;
     }
     await db.insert(
       'schedules',

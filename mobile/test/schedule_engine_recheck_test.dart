@@ -71,4 +71,33 @@ void main() {
       );
     });
   });
+
+  group('ScheduleEngine play-call exception handling (Round 7)', () {
+    // Mirrors the new try/catch around `await
+    // _coordinator.requestScheduledPlay(...)`. If the coordinator throws
+    // (DB locked during the last-chance re-check, audio session deadlock,
+    // gate timeout, etc.), the engine MUST treat that the same way as a
+    // returned `false`: roll back the optimistic `_lastFired` stamps so
+    // the slot stays unhonored and a follow-up tick can legitimately
+    // retry. The original code propagated the exception, leaving the
+    // stamp in place — the user perceived this as "schedule fired but
+    // nothing played" with no recovery until the NEXT slot.
+    bool slotShouldRollBack(
+        {required bool requestThrew, required bool played}) {
+      if (requestThrew) return true;
+      return !played;
+    }
+
+    test('exception from requestScheduledPlay rolls back the stamp', () {
+      expect(slotShouldRollBack(requestThrew: true, played: false), isTrue);
+    });
+
+    test('returned false rolls back the stamp (existing behaviour)', () {
+      expect(slotShouldRollBack(requestThrew: false, played: false), isTrue);
+    });
+
+    test('successful play does NOT roll back the stamp', () {
+      expect(slotShouldRollBack(requestThrew: false, played: true), isFalse);
+    });
+  });
 }

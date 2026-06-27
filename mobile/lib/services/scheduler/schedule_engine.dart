@@ -184,11 +184,27 @@ class ScheduleEngine {
       // completion stamp overwrites this when playback finishes naturally.
       await _lastFired.setCompletion(schedule.id, slot);
 
-      final played = await _coordinator.requestScheduledPlay(
-        schedule.playlistId,
-        scheduleId: schedule.id,
-        shuffle: schedule.shuffleEnabled,
-      );
+      // `requestScheduledPlay` can throw on DB lock / coordinator timeout /
+      // any other unexpected failure. The stamps above were written
+      // optimistically, so we MUST roll them back on EITHER `false` OR a
+      // thrown exception — otherwise the engine would treat the slot as
+      // honored and the user perceives this as "a schedule disappeared".
+      bool played;
+      try {
+        played = await _coordinator.requestScheduledPlay(
+          schedule.playlistId,
+          scheduleId: schedule.id,
+          shuffle: schedule.shuffleEnabled,
+        );
+      } catch (e, st) {
+        played = false;
+        if (kDebugMode) {
+          debugPrint(
+            'ScheduleEngine: requestScheduledPlay for ${schedule.id} threw: '
+            '$e\n$st',
+          );
+        }
+      }
 
       if (!played) {
         // Roll back the stamps so the engine doesn't think this slot was

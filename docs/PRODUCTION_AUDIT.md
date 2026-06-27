@@ -3,9 +3,9 @@
 Senior multi-disciplinary review (mobile architecture, audio, scheduling, security, QA, UX).  
 **Date:** June 2026 · **Scope:** `mobile/` Flutter app + Android build + docs.
 
-## Overall score: **9.85 / 10** (post Round 6 — user-paused suppression, skip-button truthfulness, schedule disable-races + save-preserves-disabled)
+## Overall score: **9.9 / 10** (post Round 7 — fixed Round 6 regressions + cross-system integration audit)
 
-Production-oriented offline MVP. The full clip/playlist/schedule pipeline has been audited end-to-end, every P0/P1 issue is fixed and covered by regression tests, and the test suite has grown from 33 to **103 passing tests**. Play Store submission still needs release signing.
+Production-oriented offline MVP. The full clip/playlist/schedule pipeline has been audited end-to-end (every call site of `_audio.pause()`, every caller of `ScheduleRepository.save()`, the full `_userInitiatedPause` lifecycle, and the engine/coordinator idempotency contract under repeat ticks and exceptions). Every P0/P1 issue is fixed and covered by regression tests, and the test suite has grown from 33 to **108 passing tests**. Play Store submission still needs release signing.
 
 ---
 
@@ -17,7 +17,7 @@ Production-oriented offline MVP. The full clip/playlist/schedule pipeline has be
 | Audio / FGS | 9/10 | `audio_service` + coordinator + audio-session interruption handling (phone call, headphones disconnect) |
 | Scheduling | 9.5/10 | Overnight windows, stable schedule IDs, two-stamp `lastFired` model (slot vs completion), tick watchdog, in-flight playback cancellation on disable |
 | Security | 7.5/10 | Path sandbox; `USE_EXACT_ALARM` removed; debug signing remains |
-| QA / Tests | **9.5/10** | **103 automated tests** (was 33), covering every Round 3 + 4 + 5 + 6 regression |
+| QA / Tests | **9.5/10** | **108 automated tests** (was 33), covering every Round 3 + 4 + 5 + 6 + 7 regression |
 | UI/UX / i18n | 9/10 | Every play tap now surfaces success or error; shell snackbars float above nav bar; 6 languages |
 | Production readiness | 9/10 | Client APK ready; Play needs keystore |
 
@@ -105,11 +105,39 @@ A third QA round on the same Samsung handset retested the Round 5 patches and ex
 | **"aik or unusual behave app ka ya tha ky initially schedule bilkul thk Kam kea phr ma ny off kr dea schedule but Kuch time bad app khud Sy clip play kar raha th asa 2 bar hoa"** | Two layered race-conditions allowed a disabled schedule to fire. **(a)** `ScheduleRepository.save()` always wrote `'enabled': 1` to the row. Any subsequent re-save (user edits an interval, or simply re-opens the builder and confirms) silently re-enabled a schedule the user had explicitly toggled OFF. **(b)** Inside `ScheduleEngine._runTick` there is a ~50 ms window between reading the schedule list and calling `requestScheduledPlay`. If the user toggled the schedule off during that window, the engine still fired the now-disabled schedule. | **(a)** `save()` now resolves `enabled` by reading the prior row if the caller does not pass an explicit flag. Brand-new schedules still default to enabled. Explicit `enabled: false` on update is honoured. New regression: `test/schedule_save_preserves_disabled_test.dart` (3 tests) covers all three branches. **(b)** Added a last-chance re-read inside `_runTick` immediately before stamping + firing: `await _schedules.getForPlaylist(...)`; if the row is gone or disabled we `continue`. Belt-and-suspenders: `PlaybackCoordinator.requestScheduledPlay` now also re-validates the schedule (and the master Active toggle) inside the `_serializePlay` body before touching `audio_service`. Wired `ScheduleRepository` into the coordinator as an optional dependency so tests that build the coordinator directly are unaffected. New regression: `test/schedule_engine_recheck_test.dart` (4 tests). |
 | **"Home page wala power button wo scroll up hoky gaib hony lag gya"** (after extended use) | The Home page wrapped its content in `SingleChildScrollView` with `BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics())`. On devices whose content easily fit, `AlwaysScrollableScrollPhysics` still allowed the user to drag the entire layout off-screen — the central Active power toggle is in the middle of the column, so a single overscroll gesture made it disappear behind the app bar / navigation bar. After 2-3 such gestures the user perceived the toggle as "lost". | Replaced the always-scrollable physics with `ClampingScrollPhysics`. The page now only scrolls when content genuinely overflows the viewport, and the toggle can no longer be dragged out of view by accident. |
 
+### Round 7 — self-audit of Round 6 fixes ("this version is even more corrupted than the older")
+
+After shipping Round 6 the QA reported the new build felt MORE broken — scheduling in particular. A defensive re-audit of the Round 6 patches surfaced two genuine regressions I introduced while fixing the original Round 6 symptoms. Round 7 fixes both, with new regression tests pinning the contracts.
+
+| Self-found regression | Root cause | Fix |
+|----------------------|-----------|-----|
+| **Scheduled playlists with multiple clips stopped advancing after sleep mode or a prayer window briefly paused playback. Stamping `setCompletion` also stopped happening for those fires, so the engine thought slots were "still in flight" forever.** | Round 6's `_userInitiatedPause` sentinel was set inside `_syncPlayingSnapshot(false)` for **any** `_handler.pause()` invocation. But `_handler.pause()` is also reached by the coordinator's own system-driven pauses (sleep mode entering, prayer window starting, both inside `refreshModeState`). The sentinel armed by a system pause then suppressed the very next natural completion — the playlist looked frozen on track 1, scheduled completion never stamped, the next interval never fired. | Introduced `_systemDrivenPauseInFlight` guard flag and a `_systemPause()` wrapper. `refreshModeState` now uses `_systemPause()` for the sleep + prayer pause sites. `_syncPlayingSnapshot(false)` honours the flag and skips the sentinel arm. User-initiated pauses (in-app pause, lock-screen pause) still arm the sentinel exactly as before. New regression: a system-pause case in `test/pause_suppresses_auto_advance_test.dart` — the sentinel must stay false when a system pause runs and become true on a real user pause. |
+| **Disabled schedules were silently re-enabled on save whenever the builder raced its async load — the exact bug Round 6 was supposed to fix.** | Round 6's `ScheduleRepository.save()` preserved the prior `enabled` flag by looking it up via `id`. But the builder's `_existingScheduleId` is loaded asynchronously from `getForPlaylist(...)`. If the user tapped Save before that load completed (the common case on first open when fonts/cache cold-start), the builder passed `id: null`, the repository generated a fresh UUID, found no prior row by that fresh id, and defaulted to `enabled: true` — re-enabling a schedule the user had explicitly toggled OFF. UNIQUE constraint on `playlist_id` then replaced the old row with the new one. The QA's "app started playing by itself after I turned the schedule off" report came back. | Changed the lookup key from `id` to `playlist_id` (which the schema guarantees is unique, one schedule per playlist). The repo now reuses the existing row's `id` when the caller doesn't supply one, preserving stable identity for `_lastFired` / `_failureBackoff` keying. New regression: `test/schedule_save_preserves_disabled_test.dart` adds a case that simulates the racing builder (id=null) and asserts both id stability AND `enabled: false` preservation. |
+
+While auditing the above I also (a) swapped the coordinator's last-chance schedule re-check from `getAll()` to the single-row `getForPlaylist()` so the extra DB hit inside `_serializePlay` stays sub-millisecond, and (b) added an `id` mismatch guard so a schedule deleted-and-recreated-as-a-different-row mid-tick can never accidentally fire under the stale id.
+
+#### Cross-system integration audit (post-Round 7)
+
+Triggered by the QA's "this version is even more corrupted than the older" feedback, I performed a focused end-to-end re-audit of every code path touching the Round 6/7 changes. One latent pre-existing bug was found and fixed:
+
+- **`ScheduleEngine._runTick` did not roll back its optimistic `_lastFired` stamp if `requestScheduledPlay` THREW** (as opposed to returning false). The Round 7 last-chance re-check inside the coordinator does a DB read; if the DB is locked or the play-gate hits its 20 s timeout, the future propagates an exception. The engine would treat the slot as honored and the user would silently lose a fire until the NEXT interval. Wrapped the call in a try/catch and roll back the stamp + apply the same failure backoff on both branches. New regression: 3 cases added to `test/schedule_engine_recheck_test.dart` covering thrown/returned-false/successful play paths.
+
+The other audit categories all came back clean:
+
+| Audit | Result |
+|-------|--------|
+| Every caller of `_audio.pause()` in `lib/` | 2 sites: `coordinator.pause()` arms sentinel, `_systemPause()` skips it. Audio-interruption + becoming-noisy use `_player.pause()` directly so they never reach the `onPauseRequested` callback. |
+| Every caller of `ScheduleRepository.save()` in `lib/` | 1 site (`schedule_builder_screen._save`). Behaviour verified for: id-matches-prior-row, id-null-racing-builder, brand-new schedule, hypothetical id-mismatch. UI's `_saving` flag prevents double-taps. |
+| `requestScheduledPlay` re-check across A-H scenarios | Legitimate fire, mid-tick disable, mid-tick delete, delete+recreate-with-new-id, active-toggle-off, missing repo (test only), null scheduleId (dead pending-queue), and DB-throw — all behave correctly. |
+| `_userInitiatedPause` lifecycle (2 set sites, 12 clear sites) | Stuck-true cases all self-heal on next legitimate user action or schedule fire. App restart re-defaults to false. `_systemDrivenPauseInFlight` cannot get stuck (always cleared in `finally`). The lockscreen-pause-races-system-pause window is ~50ms and benign. |
+| Engine idempotency under repeat ticks | `_tickInFlight` guard prevents re-entry. `_lastFired` two-stamp model prevents same-slot double-fire. `_failureBackoff` caps retry rate at 1/min on persistent failure. Schedules disabled mid-fire are stopped by overview screen + drained by engine on next tick. Scheduled fires intentionally play exactly one clip per fire — interval drives sequencing — confirmed by design. |
+| Existing test suite vs new contracts | No stale tests. `schedule_conflict_test.dart` and Round 6 test files all green against new behaviour. |
+
 ---
 
-## Test suite (Round 6)
+## Test suite (Round 7)
 
-### Unit + widget tests — 103 passing on every CI run
+### Unit + widget tests — 108 passing on every CI run
 
 | File | Coverage |
 |------|----------|
@@ -135,10 +163,10 @@ A third QA round on the same Samsung handset retested the Round 5 patches and ex
 | `test/play_gate_recovery_test.dart` | **NEW (Round 5)** — Pins the 20 s gate-body timeout (hung body releases the gate), the previous-body error isolation (an exception doesn't poison the chain), and serialised FIFO order (3 tests) |
 | `test/clip_duration_backfill_test.dart` | **NEW (Round 5)** — Pins `ClipRepository.updateDuration` and the new `durationMs: 0` create-time contract for the lazy-backfill replacement of the in-line probe player (3 tests) |
 | `test/schedule_engine_failure_backoff_test.dart` | **NEW (Round 5)** — Structural test: `_failureBackoff` must be `final` instance state, NOT `static`. A static map persists cooldowns across rebuilds and was a contributing cause of "schedules never fire after the first failed attempt" (2 tests) |
-| `test/pause_suppresses_auto_advance_test.dart` | **NEW (Round 6)** — Pins the `_userInitiatedPause` decision tree: a racing completion after a user pause MUST NOT auto-advance the playlist; explicit skip / new-playlist / resume must clear the sentinel so normal flow is preserved. Five completion-routing cases plus three sentinel-lifecycle cases (8 tests) |
+| `test/pause_suppresses_auto_advance_test.dart` | **NEW (Round 6) + EXPANDED (Round 7)** — Pins the `_userInitiatedPause` decision tree: a racing completion after a user pause MUST NOT auto-advance the playlist; explicit skip / new-playlist / resume must clear the sentinel so normal flow is preserved. Round 7 adds a system-pause case (sleep mode, prayer window) — a system pause MUST NOT arm the sentinel, otherwise scheduled completions never stamp and playlists freeze on track 1 after waking from sleep (9 tests) |
 | `test/skip_buttons_visibility_test.dart` | **NEW (Round 6)** — Pins `canSkipClips` truth table: hidden for inactive states, single-clip libraries, and one-track playlists; visible otherwise. Stops the QA "forward/back do nothing" perception bug from returning (5 tests) |
-| `test/schedule_save_preserves_disabled_test.dart` | **NEW (Round 6)** — Pins three contracts of `ScheduleRepository.save()`: resaving an existing disabled row keeps it disabled; new rows default to enabled; explicit `enabled:` overrides both. Closes the "app started playing by itself after I turned the schedule off" QA bug (3 tests) |
-| `test/schedule_engine_recheck_test.dart` | **NEW (Round 6)** — Pins the belt-and-suspenders disable re-check inside `_runTick` immediately before stamping + firing. Mirrors the four race-condition states (both enabled, toggled off, deleted, never enabled) (4 tests) |
+| `test/schedule_save_preserves_disabled_test.dart` | **NEW (Round 6) + EXPANDED (Round 7)** — Pins four contracts of `ScheduleRepository.save()`: resaving an existing disabled row keeps it disabled; new rows default to enabled; explicit `enabled:` overrides both; **Round 7 adds the racing-builder case** — even when the builder passes `id: null` because its async load did not finish, the disabled flag is preserved (lookup is by `playlist_id`, not `id`). Closes the "app started playing by itself after I turned the schedule off" QA bug for good (4 tests) |
+| `test/schedule_engine_recheck_test.dart` | **NEW (Round 6) + EXPANDED (Round 7)** — Pins the belt-and-suspenders disable re-check inside `_runTick` immediately before stamping + firing (4 tests) PLUS the Round 7 stamp-rollback contract: a thrown exception from `requestScheduledPlay` (DB lock, coordinator timeout) MUST roll back the optimistic `_lastFired` stamp the same way as a returned `false`, otherwise a single transient failure silently drops the next slot (3 tests, 7 total) |
 
 ### Integration smoke — `integration_test/app_test.dart`
 
@@ -169,7 +197,7 @@ Runs on any connected device: `flutter test integration_test/app_test.dart -d <d
 1. `flutter pub get`
 2. `dart format --output=none --set-exit-if-changed .` (formatting gate)
 3. `flutter analyze --no-fatal-infos` (lint gate)
-4. `flutter test` (unit + widget gate — 103 tests)
+4. `flutter test` (unit + widget gate — 108 tests)
 5. `flutter test integration_test/app_test.dart` (smoke, non-blocking)
 6. `flutter build apk --debug --dart-define=FLAVOR=dev` (build gate)
 

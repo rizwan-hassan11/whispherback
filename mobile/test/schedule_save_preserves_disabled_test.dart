@@ -128,4 +128,46 @@ void main() {
       expect(updated.enabled, isFalse);
     },
   );
+
+  test(
+    'resaving with id=null (race: builder did not finish loading existing id) '
+    'still preserves the disabled flag because the lookup is by playlist_id',
+    () async {
+      // This is the exact race that broke Round 6's first attempt: the
+      // schedule builder's `_existingScheduleId` is loaded asynchronously
+      // from `getForPlaylist(...)`. If the user taps Save before that
+      // load completes, the builder calls `save()` with `id: null`. The
+      // first implementation looked up the prior `enabled` value by
+      // `id`, which generated a fresh UUID, found no prior row, and
+      // defaulted to enabled. The schedule the user had explicitly
+      // toggled OFF was silently re-enabled. Lookup MUST be by
+      // `playlist_id` because the schema has `UNIQUE(playlist_id)`.
+      final playlist = await playlists.create('Race playlist');
+      final start = DateTime(2026, 5, 30, 12, 0);
+      final initial = await schedules.save(
+        playlistId: playlist.id,
+        startTime: start,
+        intervalMinutes: 5,
+      );
+      await schedules.setEnabled(playlist.id, false);
+
+      // Simulate the racing Save with id=null. The repository must find
+      // the existing row by playlist_id and reuse its id + enabled.
+      final resaved = await schedules.save(
+        // id intentionally omitted to model the race.
+        playlistId: playlist.id,
+        startTime: start,
+        intervalMinutes: 5,
+      );
+
+      expect(resaved.id, initial.id,
+          reason: 'Schedule identity must be preserved across the race so '
+              '`_lastFired` / `_failureBackoff` keying in the engine '
+              'stays consistent across edits.');
+      expect(resaved.enabled, isFalse,
+          reason: 'Disabled state must survive an id=null resave too — '
+              'otherwise the QA "schedule turned off but app still plays" '
+              'bug returns through the racing-builder path.');
+    },
+  );
 }

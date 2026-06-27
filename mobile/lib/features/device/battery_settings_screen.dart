@@ -28,6 +28,40 @@ class BatterySettingsScreen extends StatelessWidget {
             'Settings → Apps → Manage apps → WhisperBack',
             'Battery saver → No restrictions',
             'Autostart → Enable',
+            'Other permissions → Display pop-up while running in background',
+          ],
+        ),
+        const _OemGuide(
+          title: 'Vivo / iQOO',
+          steps: [
+            'Settings → Battery → Background power consumption',
+            'Allow WhisperBack high-power background',
+            'Settings → More settings → Permissions → Autostart',
+            'Enable autostart for WhisperBack',
+          ],
+        ),
+        const _OemGuide(
+          title: 'Oppo / Realme (ColorOS)',
+          steps: [
+            'Settings → Battery → Power management → WhisperBack',
+            'Allow background activity + Auto-launch',
+            'Settings → Privacy → Startup manager → enable WhisperBack',
+          ],
+        ),
+        const _OemGuide(
+          title: 'OnePlus (OxygenOS 12+)',
+          steps: [
+            'Settings → Apps → WhisperBack → Battery',
+            'Select "Don\'t optimize"',
+            'Settings → Battery → Battery optimization → WhisperBack → Don\'t optimize',
+          ],
+        ),
+        const _OemGuide(
+          title: 'Infinix / Tecno / Itel (XOS / HiOS)',
+          steps: [
+            'Settings → Battery → Power saving exclusions',
+            'Add WhisperBack to the whitelist',
+            'Phone Master → Auto-launch → enable WhisperBack',
           ],
         ),
         _OemGuide(

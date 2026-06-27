@@ -8,7 +8,6 @@ import '../../data/repositories/playlist_repository.dart';
 import '../../data/repositories/schedule_repository.dart';
 import '../../data/repositories/sleep_repository.dart';
 import '../../domain/entities/audio_clip.dart';
-import '../../domain/entities/playback_schedule.dart';
 import '../../domain/playback/playback_state.dart';
 import '../audio/audio_services.dart';
 import '../audio/clip_path_guard.dart';
@@ -97,6 +96,17 @@ class PlaybackCoordinator {
   /// the player — observed on short 2-5 s clips on Samsung devices, where
   /// the user perceived "pause triggered next clip play".
   bool _userInitiatedPause = false;
+
+  /// Suppresses the `_userInitiatedPause = true` assignment inside
+  /// `_syncPlayingSnapshot(false)` while a SYSTEM pause (sleep mode,
+  /// prayer window, etc.) is going through `_handler.pause()`. Without
+  /// this, sleep / prayer pauses would arm the suppression sentinel and
+  /// the very next natural completion (e.g. of a short clip whose end
+  /// raced the system pause) would be treated as a user pause — leaving
+  /// playlists stuck on track 1 and scheduled fires never stamping
+  /// completion. Set true around the system pause call, reset in
+  /// `finally`.
+  bool _systemDrivenPauseInFlight = false;
 
   /// Schedule id behind the currently running scheduled playback (if any).
   /// Lets us stamp `lastFired = completionTime` so the user-configured
@@ -245,18 +255,36 @@ class PlaybackCoordinator {
   void _syncPlayingSnapshot(bool playing) {
     if (_snapshot.state == AppPlaybackState.inactive) return;
     if (playing) {
-      // Lock-screen / notification "play" tap should also clear the
-      // user-paused sentinel so the next completion event behaves like a
-      // normal end-of-clip and auto-advances when appropriate.
+      // Lock-screen / notification "play" tap should clear the user-paused
+      // sentinel so the next completion event behaves like a normal end-of-
+      // clip and auto-advances when appropriate.
       _userInitiatedPause = false;
-    } else {
-      // System "pause" event mirrors the user's intent — treat it the same
-      // way as an in-app pause so we don't auto-advance on a racing
-      // completion event.
+    } else if (!_systemDrivenPauseInFlight) {
+      // This callback fires for any `_handler.pause()` invocation, which
+      // includes both genuine user pauses (lock-screen button, in-app
+      // pause) AND coordinator-driven system pauses (sleep mode entering,
+      // prayer window starting). Only the user-driven ones should arm the
+      // suppression sentinel — `_systemDrivenPauseInFlight` is the flag we
+      // set around the system-pause call sites to opt out.
       _userInitiatedPause = true;
     }
     if (_snapshot.isPlaying == playing) return;
     _emit(_snapshot.copyWith(isPlaying: playing));
+  }
+
+  /// Wraps a system-driven pause (sleep mode, prayer pause, scheduled
+  /// interrupt) so the `onPauseRequested` callback in `_handler.pause()`
+  /// does NOT arm the `_userInitiatedPause` sentinel. Without this, the
+  /// next natural clip completion after the system pause would be
+  /// swallowed as if the user had paused — collapsing playlist auto-
+  /// advance and stamping no scheduled completion.
+  Future<void> _systemPause() async {
+    _systemDrivenPauseInFlight = true;
+    try {
+      await _audio.pause();
+    } finally {
+      _systemDrivenPauseInFlight = false;
+    }
   }
 
   Future<void> _finalizeClipStopFromNotification() async {
@@ -415,6 +443,17 @@ class PlaybackCoordinator {
   }
 
   Future<void> _onClipCompleted() async {
+    // Race-window mitigation: on slow devices, just_audio's completion
+    // event can land 1-2 frames BEFORE the user's pause tap reaches
+    // `coordinator.pause()`. The sentinel below would still read false
+    // even though the user is mid-pause-gesture. Yield once to the event
+    // loop so any in-flight pause tap has a chance to land + flip the
+    // sentinel BEFORE we read it. This is a single microtask delay
+    // (effectively zero on a healthy device) and is the cheapest known
+    // fix for the QA "pause triggers next clip" reproduction on Samsung
+    // mid-range devices.
+    await Future<void>.delayed(Duration.zero);
+
     // If the user explicitly paused this clip, treat any completion event
     // that lands after the pause-tap as "finished at the paused position"
     // rather than as a natural end-of-clip — otherwise the auto-advance
@@ -607,25 +646,19 @@ class PlaybackCoordinator {
       // and this body running inside the play-gate, the user may have
       // toggled the schedule OFF (or the app-wide Active toggle OFF) —
       // honor that even though the engine already passed its own check.
+      // We deliberately use the cheaper `getForPlaylist` (single-row
+      // query) instead of `getAll` so this extra check inside the play
+      // gate stays sub-millisecond and never throttles legitimate fires.
       if (!await _appState.isActive()) return false;
       final schedRepo = _schedules;
       if (scheduleId != null && schedRepo != null) {
-        final schedules = await schedRepo.getAll();
-        final match = schedules.firstWhere(
-          (s) => s.id == scheduleId,
-          orElse: () => PlaybackSchedule(
-            id: scheduleId,
-            playlistId: playlistId,
-            startTime: DateTime.now(),
-            intervalMinutes: 0,
-            shuffleEnabled: false,
-            alarmEnabled: false,
-            daysMask: 0,
-            enabled: false,
-            playlistName: '',
-          ),
-        );
-        if (!match.enabled || match.daysMask == 0) return false;
+        final fresh = await schedRepo.getForPlaylist(playlistId);
+        // If the row vanished or its id no longer matches, the user has
+        // either deleted the schedule or replaced it — abort. Otherwise
+        // honor the live enabled flag.
+        if (fresh == null || fresh.id != scheduleId || !fresh.enabled) {
+          return false;
+        }
       }
       await _interruptForSchedule();
       _activeScheduleId = scheduleId;
@@ -1042,14 +1075,14 @@ class PlaybackCoordinator {
 
     final sleep = await _sleep.getActive();
     if (_sleep.isSleepActive(sleep)) {
-      await _audio.pause();
+      await _systemPause();
       _emit(_snapshot.copyWith(
           state: AppPlaybackState.sleepPaused, isPlaying: false));
       return;
     }
 
     if (prayer != null) {
-      await _audio.pause();
+      await _systemPause();
       _emit(_snapshot.copyWith(
           state: AppPlaybackState.prayerPaused, isPlaying: false));
       return;
