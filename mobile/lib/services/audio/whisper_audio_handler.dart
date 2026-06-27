@@ -202,59 +202,73 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
 
   Future<void> _startIdleKeepAlive() async {
     if (_playingClip) return;
-    try {
-      await _ensureAudioSession();
-      final session = await AudioSession.instance;
-      await session.setActive(true);
+    // Up to 3 attempts with a short backoff between each. The first
+    // attempt sometimes lands BEFORE the system audio focus grant
+    // completes on cold start (Samsung Exynos firmware in particular),
+    // and `_player.setAudioSource` throws PlatformException("(-1004)
+    // setDataSource failed"). A 250 ms retry succeeds reliably.
+    for (var attempt = 1; attempt <= 3; attempt++) {
+      try {
+        await _ensureAudioSession();
+        final session = await AudioSession.instance;
+        await session.setActive(true);
 
-      final path = await _ensureSilenceFile();
-      final copy = RuntimeCopy.l10n;
-      final item = MediaItem(
-        id: path,
-        title: copy.notificationActiveTitle,
-        album: 'WhisperBack',
-        artist: copy.notificationActiveBodyIdle,
-        artUri: _albumArtUri,
-        displayTitle: copy.notificationActiveTitle,
-        displaySubtitle: copy.notificationActiveBodyIdle,
-        extras: const {'mode': 'keep_alive'},
-      );
-      mediaItem.add(item);
-      queue.add([item]);
+        final path = await _ensureSilenceFile();
+        final copy = RuntimeCopy.l10n;
+        final item = MediaItem(
+          id: path,
+          title: copy.notificationActiveTitle,
+          album: 'WhisperBack',
+          artist: copy.notificationActiveBodyIdle,
+          artUri: _albumArtUri,
+          displayTitle: copy.notificationActiveTitle,
+          displaySubtitle: copy.notificationActiveBodyIdle,
+          extras: const {'mode': 'keep_alive'},
+        );
+        mediaItem.add(item);
+        queue.add([item]);
 
-      await _player.setVolume(0);
-      await _player.setLoopMode(LoopMode.one);
-      await _player.setSpeed(1);
-      await _player.setAudioSource(AudioSource.file(path), preload: true);
+        await _player.setVolume(0);
+        await _player.setLoopMode(LoopMode.one);
+        await _player.setSpeed(1);
+        await _player.setAudioSource(AudioSource.file(path), preload: true);
 
-      playbackState.add(
-        PlaybackState(
-          controls: const [_stopControl],
-          systemActions: const {MediaAction.stop},
-          androidCompactActionIndices: const [0],
-          processingState: AudioProcessingState.ready,
-          playing: true,
-          updatePosition: Duration.zero,
-          bufferedPosition: Duration.zero,
-          speed: 1.0,
-        ),
-      );
+        playbackState.add(
+          PlaybackState(
+            controls: const [_stopControl],
+            systemActions: const {MediaAction.stop},
+            androidCompactActionIndices: const [0],
+            processingState: AudioProcessingState.ready,
+            playing: true,
+            updatePosition: Duration.zero,
+            bufferedPosition: Duration.zero,
+            speed: 1.0,
+          ),
+        );
 
-      await _player.play();
-      _keepAliveRunning = true;
-    } catch (e, st) {
-      _keepAliveRunning = false;
-      // Surface the failure in debug so we know which OEM path is breaking
-      // the silence loop. The flutter persistent notification fallback in
-      // `notification_sync` will take over (it now correctly handles
-      // `!isKeepAliveRunning`) so the user STILL sees a notification
-      // bar — previously the keep-alive failure was silent AND the
-      // fallback was gated behind `shouldUseFlutterActiveNotification`
-      // which required `!isForegroundNotificationActive` — both
-      // unreliable on the same devices.
-      if (kDebugMode) {
-        debugPrint('keep-alive silence loop failed: $e\n$st');
+        await _player.play();
+        _keepAliveRunning = true;
+        return;
+      } catch (e, st) {
+        _keepAliveRunning = false;
+        if (kDebugMode) {
+          debugPrint(
+              'keep-alive attempt $attempt/3 failed: $e\n$st');
+        }
+        if (attempt < 3) {
+          await Future<void>.delayed(Duration(milliseconds: 250 * attempt));
+        }
       }
+    }
+    // All retries exhausted. The Flutter ongoing notification posted by
+    // `notification_sync` is now unconditional and takes over user-
+    // visible status. Schedules still drive playback via the in-process
+    // `Timer.periodic` as long as the engine is alive — which the
+    // posted notification keeps active for long enough on most OEMs
+    // for at least one fire to land.
+    if (kDebugMode) {
+      debugPrint('keep-alive: all retries exhausted — relying on '
+          'flutter ongoing notification fallback.');
     }
   }
 
@@ -446,31 +460,68 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     _playingClip = false;
     _clipTitle = null;
     _playlistMode = false;
-    await _player.stop();
-    mediaItem.add(null);
-    queue.add([]);
 
-    playbackState.add(
-      playbackState.value.copyWith(
-        controls: const [],
-        processingState: AudioProcessingState.idle,
-        playing: false,
-        updatePosition: Duration.zero,
-        bufferedPosition: Duration.zero,
-      ),
-    );
+    // EVERY native bridge call below is independently try/caught.
+    // `_player.stop()`, `mediaItem.add(null)`, `queue.add([])`,
+    // `playbackState.add(...)`, and `super.stop()` can EACH throw a
+    // PlatformException on certain OEM firmwares (especially Samsung
+    // One UI 6 / Vivo Funtouch 14) when the underlying media session
+    // is in a half-torn-down state. The user reported "tapping the
+    // cross icon crashed the app" even after we wrapped every UI
+    // callback — the throw was happening DEEPER inside this method
+    // and propagating up through `coordinator.stop` → the modal's
+    // `_safeCall`, where the global zone handler still couldn't
+    // prevent a UI lockup if the throw came inside a synchronous
+    // event-bus emission. Now nothing here can ever escape.
+    try {
+      await _player.stop();
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint('stopClip: _player.stop failed: $e\n$st');
+      }
+    }
+    try {
+      mediaItem.add(null);
+      queue.add([]);
+    } catch (_) {}
 
-    onClipSessionChanged?.call();
+    try {
+      playbackState.add(
+        playbackState.value.copyWith(
+          controls: const [],
+          processingState: AudioProcessingState.idle,
+          playing: false,
+          updatePosition: Duration.zero,
+          bufferedPosition: Duration.zero,
+        ),
+      );
+    } catch (_) {}
+
+    try {
+      onClipSessionChanged?.call();
+    } catch (_) {}
 
     if (_keepAlive) {
       _standalonePlayback = false;
-      await _startIdleKeepAlive();
+      try {
+        await _startIdleKeepAlive();
+      } catch (e, st) {
+        if (kDebugMode) {
+          debugPrint('stopClip: keep-alive restart failed: $e\n$st');
+        }
+      }
       return;
     }
 
     if (_standalonePlayback) {
       _standalonePlayback = false;
-      await super.stop();
+      try {
+        await super.stop();
+      } catch (e, st) {
+        if (kDebugMode) {
+          debugPrint('stopClip: super.stop failed: $e\n$st');
+        }
+      }
     }
   }
 
@@ -591,18 +642,47 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   @override
   Future<void> stop() async {
     if (_playingClip) {
-      await stopClip();
-      onStopClipRequested?.call();
+      try {
+        await stopClip();
+      } catch (e, st) {
+        if (kDebugMode) {
+          debugPrint('stop: stopClip failed: $e\n$st');
+        }
+      }
+      try {
+        onStopClipRequested?.call();
+      } catch (_) {}
       return;
     }
-    onStopRequested?.call();
-    await super.stop();
+    try {
+      onStopRequested?.call();
+    } catch (_) {}
+    try {
+      await super.stop();
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint('stop: super.stop failed: $e\n$st');
+      }
+    }
   }
 
   @override
   Future<void> skipToNext() async {
-    if (!_playingClip || !_playlistMode) return;
-    await onSkipToNextRequested?.call();
+    if (!_playingClip) return;
+
+    if (_playlistMode) {
+      await onSkipToNextRequested?.call();
+      return;
+    }
+
+    // Single-clip context (library preview or one-track playlist):
+    // restart from the top instead of silently doing nothing — matches
+    // the in-app mini-player + modal behaviour after Round 9 and keeps
+    // the lock-screen "next" button feeling alive.
+    await _player.seek(Duration.zero);
+    if (!_player.playing) {
+      await play();
+    }
   }
 
   @override
@@ -666,25 +746,24 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     final MediaControl playPauseControl =
         reportPlaying ? MediaControl.pause : MediaControl.play;
 
-    final List<MediaControl> controls;
-    List<int> compactIndices;
-
-    if (_playlistMode) {
-      controls = [
-        MediaControl.skipToPrevious,
-        playPauseControl,
-        MediaControl.skipToNext,
-        _stopControl,
-      ];
-      compactIndices = const [0, 1, 2];
-    } else {
-      controls = [
-        MediaControl.skipToPrevious,
-        playPauseControl,
-        _stopControl,
-      ];
-      compactIndices = const [0, 1];
-    }
+    // ALWAYS expose [prev, play/pause, next, stop] so the user sees the
+    // same 4-button layout on the lock screen and in our in-app mini-
+    // player / modal, regardless of whether the source is a single
+    // imported clip or a multi-clip playlist. For a single-clip context,
+    // tapping next/previous restarts the clip from `Duration.zero` (the
+    // coordinator's `_skipPlaylistClip` handles the one-track case),
+    // which feels like a natural "restart" instead of a broken button.
+    //
+    // Previously the non-playlist branch dropped `skipToNext`, which the
+    // QA reported as "the notification only shows pause and previous,
+    // there is no next button". Now consistent across all contexts.
+    final controls = <MediaControl>[
+      MediaControl.skipToPrevious,
+      playPauseControl,
+      MediaControl.skipToNext,
+      _stopControl,
+    ];
+    const compactIndices = [0, 1, 2];
 
     playbackState.add(
       playbackState.value.copyWith(

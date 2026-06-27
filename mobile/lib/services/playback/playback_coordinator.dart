@@ -552,9 +552,11 @@ class PlaybackCoordinator {
       // No playable clips remain (every file is missing/decode-failed). Stop
       // gracefully and tell the user so they don't think audio just died.
       await stop();
-      _errorController.add(const PlaybackErrorEvent(
-        PlaybackErrorReason.decodeFailed,
-      ));
+      if (!_errorController.isClosed) {
+        _errorController.add(const PlaybackErrorEvent(
+          PlaybackErrorReason.decodeFailed,
+        ));
+      }
     }
   }
 
@@ -767,9 +769,51 @@ class PlaybackCoordinator {
   }
 
   Future<void> _activateInBackground() async {
-    await _audio.enterForeground();
-    await refreshModeState();
-    await refreshScheduleNotifications?.call();
+    // CRITICAL ORDER: post the Flutter ongoing notification FIRST so the
+    // user immediately sees "WhisperBack is active" — even if the
+    // audio_service silent keep-alive below fails or takes time to
+    // bind. Previously the order was reversed: we'd attempt to enter
+    // the foreground service (which on Vivo / Infinix sometimes never
+    // commits its own notification) and ONLY THEN refresh the Flutter
+    // status card. On those devices the user saw NO notification at
+    // all between the toggle tap and the first delayed retry.
+    //
+    // Each call is independently try/caught so a single failure can
+    // never block the others.
+    try {
+      await refreshScheduleNotifications?.call();
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint(
+            '_activateInBackground: initial notif refresh failed: $e\n$st');
+      }
+    }
+    try {
+      await _audio.enterForeground();
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint(
+            '_activateInBackground: enterForeground failed: $e\n$st');
+      }
+    }
+    try {
+      await refreshModeState();
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint(
+            '_activateInBackground: refreshModeState failed: $e\n$st');
+      }
+    }
+    // Re-sync notifications AFTER keep-alive so the status card reflects
+    // whichever path actually succeeded.
+    try {
+      await refreshScheduleNotifications?.call();
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint(
+            '_activateInBackground: final notif refresh failed: $e\n$st');
+      }
+    }
   }
 
   Future<bool> playPlaylist(String playlistId, {bool fromSchedule = false}) {
@@ -790,7 +834,7 @@ class PlaybackCoordinator {
         // (sleep/prayer have their own dedicated banners on the home
         // screen and the modal).
         final isActive = await _appState.isActive();
-        if (!isActive) {
+        if (!isActive && !_errorController.isClosed) {
           _errorController.add(const PlaybackErrorEvent(
             PlaybackErrorReason.inactiveToggle,
           ));
@@ -805,7 +849,7 @@ class PlaybackCoordinator {
       // Empty playlist tap from the UI should never look like a silent no-op.
       // Scheduled fires intentionally do NOT surface this — the schedule engine
       // logs it; user-visible toasts during background ticks would be noisy.
-      if (!fromSchedule) {
+      if (!fromSchedule && !_errorController.isClosed) {
         _errorController.add(const PlaybackErrorEvent(
           PlaybackErrorReason.emptyPlaylist,
         ));
@@ -831,7 +875,7 @@ class PlaybackCoordinator {
     _userInitiatedPause = false;
 
     if (!_isPlayablePath(clip.filePath)) {
-      if (!fromSchedule) {
+      if (!fromSchedule && !_errorController.isClosed) {
         _errorController.add(PlaybackErrorEvent(
           PlaybackErrorReason.pathRejected,
           clipTitle: clip.title,
@@ -910,10 +954,12 @@ class PlaybackCoordinator {
       // Path was rejected by ClipPathGuard — most often a stale row whose
       // file was deleted, or a clip recorded by an older app version stored
       // outside the sandbox. Notify the shell so the user gets a toast.
-      _errorController.add(PlaybackErrorEvent(
-        PlaybackErrorReason.pathRejected,
-        clipTitle: clip.title,
-      ));
+      if (!_errorController.isClosed) {
+        _errorController.add(PlaybackErrorEvent(
+          PlaybackErrorReason.pathRejected,
+          clipTitle: clip.title,
+        ));
+      }
       return;
     }
 
@@ -1138,7 +1184,19 @@ class PlaybackCoordinator {
     }
 
     if (wasActive) {
-      unawaited(refreshModeState());
+      // refreshModeState does sleep / prayer / adhan I/O — failures must
+      // never propagate to the original cross-icon tap. Even `unawaited`
+      // doesn't help if the future throws synchronously inside the
+      // first `await`; route through a guarded helper.
+      unawaited(() async {
+        try {
+          await refreshModeState();
+        } catch (e, st) {
+          if (kDebugMode) {
+            debugPrint('stop: refreshModeState failed: $e\n$st');
+          }
+        }
+      }());
     }
     try {
       await refreshScheduleNotifications?.call();

@@ -40,28 +40,29 @@ import 'package:just_audio/just_audio.dart';
     action: MediaAction.stop,
   );
 
-  if (playlistMode) {
-    return (
-      controls: [
-        MediaControl.skipToPrevious,
-        playPause,
-        MediaControl.skipToNext,
-        stop,
-      ],
-      compact: const [0, 1, 2],
-    );
-  }
+  // Single-clip AND playlist both expose [prev, play|pause, next, stop]
+  // (compact = [0, 1, 2]). The previous single-clip layout dropped
+  // `skipToNext` entirely — the QA report "the notification only shows
+  // pause and previous, there is no next button" matched that drop.
+  // Now the lock-screen layout matches the in-app mini-player/modal
+  // and a single-clip context interprets next/prev as "restart from
+  // the top" (handled inside `skipToNext` / `skipToPrevious`).
   return (
-    controls: [MediaControl.skipToPrevious, playPause, stop],
-    compact: const [0, 1],
+    controls: [
+      MediaControl.skipToPrevious,
+      playPause,
+      MediaControl.skipToNext,
+      stop,
+    ],
+    compact: const [0, 1, 2],
   );
 }
 
 void main() {
   group('WhisperAudioHandler controls layout', () {
     test(
-        'single-clip layout always has [prev, play|pause, stop] regardless of '
-        'processing state', () {
+        'single-clip layout ALWAYS has [prev, play|pause, next, stop] — the '
+        'QA report "no next button" is fixed and pinned by this test', () {
       for (final state in [
         ProcessingState.idle,
         ProcessingState.loading,
@@ -77,8 +78,9 @@ void main() {
           );
           expect(
             result.controls.length,
-            3,
-            reason: 'Single-clip controls must always be exactly 3 entries — '
+            4,
+            reason: 'Single-clip controls must be exactly 4 entries '
+                '(prev, play|pause, next, stop) — '
                 'state=$state playing=$playing collapsed to '
                 '${result.controls.length}',
           );
@@ -92,6 +94,12 @@ void main() {
             isIn({MediaAction.play, MediaAction.pause}),
             reason: 'Play/pause must always live at index 1 — got '
                 '${result.controls[1].action}',
+          );
+          expect(
+            result.controls[2].action,
+            MediaAction.skipToNext,
+            reason: 'Next must live at index 2 even for single-clip; '
+                'restart-from-top is the single-clip semantics.',
           );
           expect(
             result.controls.last.action,
@@ -170,7 +178,7 @@ void main() {
             playlistMode: false,
           );
           expect(playlist.compact, const [0, 1, 2]);
-          expect(single.compact, const [0, 1]);
+          expect(single.compact, const [0, 1, 2]);
           // The icon at compact index 1 must always be play/pause — that's
           // the contract users learn after the first time they use the
           // app. Shifting any other icon into that slot is a regression.

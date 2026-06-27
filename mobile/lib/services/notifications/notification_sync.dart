@@ -61,16 +61,29 @@ Future<void> syncWhisperNotifications({
       // Clip playback uses the media notification — hide the status card.
       await service.cancelActiveOngoing();
     } else if (active) {
-      await handler.updateActiveSessionInfo();
-      if (handler.shouldUseFlutterActiveNotification) {
-        await service.showActiveOngoing(
-          scheduleCount: armed,
-          nextUpcoming: nextUpcoming,
-          upcomingSummary: upcomingSummary,
-        );
-      } else {
-        await service.cancelActiveOngoing();
+      // Refresh the silent keep-alive (best-effort — failures must not
+      // block the visible notification below).
+      try {
+        await handler.updateActiveSessionInfo();
+      } catch (e) {
+        if (kDebugMode) {
+          debugPrint('updateActiveSessionInfo failed (handled): $e');
+        }
       }
+      // ALWAYS publish the WhisperBack ongoing card while Active is ON.
+      // Previously gated on `shouldUseFlutterActiveNotification`, which
+      // returned false whenever the audio_service silence keep-alive
+      // appeared to be running. On Samsung One UI 6 / Vivo Funtouch 14 /
+      // Infinix XOS, the silent keep-alive card is suppressed by the OS
+      // even when bound — so users saw NO notification at all, despite
+      // the toggle being on. We now post our own card unconditionally;
+      // if audio_service ALSO posts one, that's two cards (acceptable
+      // and clearly labelled), but the user is never in the dark.
+      await service.showActiveOngoing(
+        scheduleCount: armed,
+        nextUpcoming: nextUpcoming,
+        upcomingSummary: upcomingSummary,
+      );
     } else {
       await service.cancelActiveOngoing();
     }

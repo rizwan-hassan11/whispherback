@@ -3,7 +3,16 @@ import '../../domain/entities/playback_schedule.dart';
 /// Computes when schedules should fire and when the next whisper is due.
 abstract final class ScheduleFireHelper {
   /// Max lateness after a grid slot before we skip to the next interval.
-  static const maxLateness = Duration(seconds: 90);
+  ///
+  /// Previously 90s — too short for "user backgrounds the app, OS pauses
+  /// the engine, user opens the app 2 minutes later, expected schedule
+  /// hasn't fired". The QA report "the schedule page showed next whisper
+  /// is NOW but no audio played" matched this exactly: the UI told the
+  /// truth (slot was due) but `slotToFire` returned null because the
+  /// engine missed the 90s window. 5 minutes gives the engine room to
+  /// recover from a typical foreground/background bounce without
+  /// silently skipping a slot.
+  static const maxLateness = Duration(minutes: 5);
 
   /// Whether [now] falls inside today's start/end window for [schedule].
   static bool isInWindow(PlaybackSchedule schedule, DateTime now) {

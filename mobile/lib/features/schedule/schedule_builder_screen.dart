@@ -102,23 +102,64 @@ class _ScheduleBuilderScreenState extends ConsumerState<ScheduleBuilderScreen> {
     final controller = TextEditingController(text: _intervalMinutes.toString());
     final formKey = GlobalKey<FormState>();
 
+    // Build a SOLID background colour. `theme.surface` was a 10%-alpha
+    // tint over the deep gradient on the main scaffold — fine inside a
+    // glass card, but when an `AlertDialog` paints it ABOVE the dim
+    // barrier you can see straight through to the home screen, which
+    // the QA reported as "the popup is transparent". Use the same
+    // opaque dialog surface the rest of the app uses (the
+    // `audio_service_warning_banner` dialog and others).
+    final dialogBg = theme.isDark ? AppColors.deep2 : Colors.white;
+    final borderColor = theme.glassBorder;
+
     final picked = await showDialog<int>(
       context: context,
+      barrierColor: Colors.black54,
       builder: (ctx) {
         return AlertDialog(
-          backgroundColor: theme.surface,
-          title: Text(l10n.customInterval),
+          backgroundColor: dialogBg,
+          surfaceTintColor: Colors.transparent,
+          elevation: 12,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: BorderSide(color: borderColor, width: 1),
+          ),
+          title: Text(
+            l10n.customInterval,
+            style: TextStyle(
+              color: theme.foreground,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
           content: Form(
             key: formKey,
             child: TextFormField(
               controller: controller,
               autofocus: true,
               keyboardType: TextInputType.number,
+              style: TextStyle(color: theme.foreground),
               decoration: InputDecoration(
                 labelText: l10n.intervalBetweenWhispers,
+                labelStyle: TextStyle(color: theme.muted),
                 helperText: l10n.customIntervalHelp,
-                border: const OutlineInputBorder(),
+                helperStyle: TextStyle(color: theme.muted, fontSize: 11),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: borderColor),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: borderColor),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(
+                    color: AppColors.neon,
+                    width: 1.5,
+                  ),
+                ),
                 suffixText: l10n.minutesUnit,
+                suffixStyle: TextStyle(color: theme.muted),
               ),
               validator: (v) {
                 final n = int.tryParse((v ?? '').trim());
@@ -132,6 +173,7 @@ class _ScheduleBuilderScreenState extends ConsumerState<ScheduleBuilderScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
+              style: TextButton.styleFrom(foregroundColor: theme.muted),
               child: Text(l10n.cancel),
             ),
             FilledButton(
@@ -140,6 +182,13 @@ class _ScheduleBuilderScreenState extends ConsumerState<ScheduleBuilderScreen> {
                 final n = int.parse(controller.text.trim());
                 Navigator.of(ctx).pop(n);
               },
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.neon,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
               child: Text(l10n.confirm),
             ),
           ],

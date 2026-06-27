@@ -1,93 +1,35 @@
 // Regression test for QA report:
 //
-//   "Forward / backward sy kuch nahi hota" — the user perceives the skip
-//   buttons on the Spotify-style mini player as broken.
+//   "I imported one clip and there are no NEXT/PREV buttons" — the user
+//   expects every playback context (single library preview, one-track
+//   playlist, multi-clip playlist, scheduled play) to expose skip
+//   controls in the mini-player and on the lock-screen MediaSession.
 //
-// Root cause: `PlaybackCoordinator.canSkipClips` previously returned true
-// for ANY playing state, including single-clip library previews and
-// one-track playlists. Tapping the skip button on those just restarted
-// the same clip — visually identical to "nothing happened". The fix
-// hides the buttons entirely when there is genuinely nothing to skip
-// to.
+// Earlier behaviour hid the buttons when there was nothing to skip to,
+// but users perceived that as "the controls are broken". We now ALWAYS
+// expose the buttons while playback is in progress — single-clip taps
+// restart from the top (handled in `WhisperAudioHandler.skipToNext` /
+// `skipToPrevious`), which feels alive and matches the lock-screen
+// notification layout pinned in `whisper_audio_handler_controls_test`.
 //
-// This file pins the visibility rule with a pure helper so the
-// production check inside `canSkipClips` can't silently regress.
+// This file pins the new rule so the production check inside
+// `PlaybackCoordinator.canSkipClips` can't silently regress.
 
 import 'package:flutter_test/flutter_test.dart';
 
-bool canSkipClips({
-  required bool inPlaybackState,
-  required String? playlistId,
-  required int libraryQueueLength,
-  required int knownPlaylistClipCount,
-}) {
-  if (!inPlaybackState) return false;
-  if (playlistId == null) return libraryQueueLength > 1;
-  return knownPlaylistClipCount > 1;
+bool canSkipClips({required bool inPlaybackState}) {
+  return inPlaybackState;
 }
 
 void main() {
   group('mini-player / modal skip button visibility', () {
-    test('inactive state ALWAYS hides the buttons', () {
-      expect(
-        canSkipClips(
-          inPlaybackState: false,
-          playlistId: 'whatever',
-          libraryQueueLength: 99,
-          knownPlaylistClipCount: 99,
-        ),
-        isFalse,
-      );
+    test('inactive playback state ALWAYS hides the buttons', () {
+      expect(canSkipClips(inPlaybackState: false), isFalse);
     });
 
-    test('single-clip library preview hides the buttons (the QA bug)', () {
-      expect(
-        canSkipClips(
-          inPlaybackState: true,
-          playlistId: null,
-          libraryQueueLength: 1,
-          knownPlaylistClipCount: 0,
-        ),
-        isFalse,
-        reason: 'Tapping skip on a single-clip preview just restarts the '
-            'same clip — looks identical to a broken button to the user.',
-      );
-    });
-
-    test('multi-clip library queue shows the buttons', () {
-      expect(
-        canSkipClips(
-          inPlaybackState: true,
-          playlistId: null,
-          libraryQueueLength: 3,
-          knownPlaylistClipCount: 0,
-        ),
-        isTrue,
-      );
-    });
-
-    test('one-track playlist hides the buttons', () {
-      expect(
-        canSkipClips(
-          inPlaybackState: true,
-          playlistId: 'p1',
-          libraryQueueLength: 0,
-          knownPlaylistClipCount: 1,
-        ),
-        isFalse,
-      );
-    });
-
-    test('multi-track playlist shows the buttons', () {
-      expect(
-        canSkipClips(
-          inPlaybackState: true,
-          playlistId: 'p1',
-          libraryQueueLength: 0,
-          knownPlaylistClipCount: 5,
-        ),
-        isTrue,
-      );
+    test('any active playback ALWAYS shows the buttons (single or playlist)',
+        () {
+      expect(canSkipClips(inPlaybackState: true), isTrue);
     });
   });
 }

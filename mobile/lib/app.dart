@@ -13,6 +13,7 @@ import 'providers/settings_provider.dart';
 import 'services/notifications/notification_service.dart';
 import 'services/notifications/notification_sync.dart';
 import 'services/platform/android_runtime_permissions.dart';
+import 'services/platform/permission_prompt.dart';
 import 'services/scheduler/schedule_engine.dart';
 import 'services/scheduler/schedule_engine_binding.dart';
 import 'services/scheduler/schedule_last_fired_store.dart';
@@ -64,7 +65,24 @@ class _WhisperBackAppState extends ConsumerState<WhisperBackApp>
 
   Future<void> _initNotifications() async {
     await NotificationService.instance.init();
-    await NotificationService.instance.requestPermissions();
+    // Eager permission requests on cold start so the user is asked
+    // ONCE up front instead of being routed through a manual "Finish
+    // setup" chip. Each call is best-effort: a denial is fine — the
+    // setup chip remains visible so the user can grant later. Order
+    // matters: notification first (so the rest can post status), then
+    // exact alarms (Android 14+ requires user nav to Settings), then
+    // microphone (recording), and finally battery exemption (deep
+    // link to the OEM whitelist). Wrapped in try/catch so a buggy
+    // OEM permission handler can never block the app from rendering.
+    try {
+      await NotificationService.instance.requestPermissions();
+    } catch (_) {}
+    try {
+      await requestAppPermissionKind(AppPermissionKind.microphone);
+    } catch (_) {}
+    try {
+      await requestBatteryExemption();
+    } catch (_) {}
     await ensureAndroidSchedulingPermissions();
     await syncWhisperNotifications(
       appState: ref.read(appStateRepositoryProvider),

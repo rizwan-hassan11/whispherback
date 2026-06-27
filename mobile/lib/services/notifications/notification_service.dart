@@ -165,8 +165,16 @@ class NotificationService {
     String? upcomingSummary,
   }) async {
     await init();
+    // Skip ONLY when an actual clip is playing — the audio_service media
+    // notification carries that case. Previously we also skipped whenever
+    // `shouldUseFlutterActiveNotification` returned false (i.e. the silent
+    // keep-alive card was up), which on many OEMs left the user with the
+    // foreground-service binding alive but NO visible notification: the
+    // audio_service silent card is suppressed on Samsung / Vivo when the
+    // metadata says "WhisperBack is active" with no clip title. We now
+    // ALWAYS render the WhisperBack ongoing card when Active is on and
+    // no clip is playing, so the user has a permanent visual cue.
     if (whisperAudioHandler.isPlayingClip) return;
-    if (!whisperAudioHandler.shouldUseFlutterActiveNotification) return;
     final copy = RuntimeCopy.l10n;
     final body = upcomingSummary ??
         nextUpcoming ??
