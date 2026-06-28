@@ -49,6 +49,7 @@ class WhisperKeepAliveService : Service() {
         private const val ACTION_START = "com.whisperback.START_KEEP_ALIVE"
         private const val ACTION_STOP = "com.whisperback.STOP_KEEP_ALIVE"
         private const val WAKE_LOCK_TAG = "WhisperBack::KeepAliveWakeLock"
+        private const val HEARTBEAT_INTERVAL_MS = 60_000L
 
         fun start(context: Context) {
             val intent = Intent(context, WhisperKeepAliveService::class.java).apply {
@@ -78,6 +79,29 @@ class WhisperKeepAliveService : Service() {
     }
 
     private var wakeLock: PowerManager.WakeLock? = null
+    private var heartbeatHandler: android.os.Handler? = null
+    private val heartbeatRunnable = object : Runnable {
+        override fun run() {
+            // Round 20: every minute, re-acquire the wake lock and
+            // re-post the FG notification. Some OEM battery managers
+            // (Samsung One UI 6, Vivo Funtouch 14, Xiaomi MIUI 14)
+            // silently downgrade the FG status of long-running
+            // services that "look idle". Re-asserting startForeground
+            // forces the OS scheduler to keep us in the "user-visible
+            // foreground" bucket.
+            try {
+                startForegroundCompat()
+            } catch (t: Throwable) {
+                Log.w(TAG, "heartbeat: startForegroundCompat failed", t)
+            }
+            try {
+                acquireWakeLock()
+            } catch (t: Throwable) {
+                Log.w(TAG, "heartbeat: acquireWakeLock failed", t)
+            }
+            heartbeatHandler?.postDelayed(this, HEARTBEAT_INTERVAL_MS)
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -92,6 +116,7 @@ class WhisperKeepAliveService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
+                stopHeartbeat()
                 releaseWakeLock()
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                     stopForeground(STOP_FOREGROUND_REMOVE)
@@ -107,6 +132,7 @@ class WhisperKeepAliveService : Service() {
                 // notification (idempotent) and acquire the wake lock.
                 startForegroundCompat()
                 acquireWakeLock()
+                startHeartbeat()
             }
         }
         // START_STICKY so the OS re-creates the service if it's killed.
@@ -114,8 +140,20 @@ class WhisperKeepAliveService : Service() {
     }
 
     override fun onDestroy() {
+        stopHeartbeat()
         releaseWakeLock()
         super.onDestroy()
+    }
+
+    private fun startHeartbeat() {
+        if (heartbeatHandler != null) return
+        heartbeatHandler = android.os.Handler(mainLooper)
+        heartbeatHandler?.postDelayed(heartbeatRunnable, HEARTBEAT_INTERVAL_MS)
+    }
+
+    private fun stopHeartbeat() {
+        heartbeatHandler?.removeCallbacks(heartbeatRunnable)
+        heartbeatHandler = null
     }
 
     /**

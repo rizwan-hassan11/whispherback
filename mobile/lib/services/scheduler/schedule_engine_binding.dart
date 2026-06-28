@@ -1,4 +1,4 @@
-typedef ScheduleFireCallback = Future<void> Function();
+typedef ScheduleFireCallback = Future<void> Function({bool force});
 
 /// Lets notification callbacks and lifecycle hooks reach the live engine without
 /// Riverpod (required for background notification entry points).
@@ -13,7 +13,10 @@ class ScheduleEngineBinding {
 
   void detach() => _fire = null;
 
-  Future<void> fireNow() async {
-    await _fire?.call();
+  /// [force] bypasses the engine's lateness cap. Use when the user
+  /// manually wakes the engine via an alarm tap so a slot that the OS
+  /// missed by more than [ScheduleFireHelper.maxLateness] still plays.
+  Future<void> fireNow({bool force = false}) async {
+    await _fire?.call(force: force);
   }
 }

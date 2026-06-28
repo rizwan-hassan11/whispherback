@@ -110,7 +110,14 @@ class _WhisperBackAppState extends ConsumerState<WhisperBackApp>
       prayer: ref.read(prayerRepositoryProvider),
     );
     // Cold start / alarm tap — run an immediate scheduling pass.
-    await ScheduleEngineBinding.instance.fireNow();
+    // Round 19: when the app was launched from a scheduled-alarm
+    // notification, ALSO bypass the lateness cap. Without this, a
+    // user who taps the alarm 3-10 minutes after it rang (because
+    // their device was in their pocket) would see the engine
+    // silently skip the slot and feel like nothing happened.
+    final fromAlarm =
+        await NotificationService.instance.launchedFromScheduleAlarm();
+    await ScheduleEngineBinding.instance.fireNow(force: fromAlarm);
 
     // POST_NOTIFICATIONS is asked asynchronously by the OS dialog; the
     // first sync above may have run BEFORE the user tapped "Allow". A

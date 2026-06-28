@@ -11,6 +11,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'app.dart';
 import 'services/audio/whisper_audio_handler.dart';
+import 'services/scheduler/background_alarm_playback.dart';
 
 /// Global crash guard. Wraps the entire app in a zone so any uncaught
 /// exception (sync or async) on a user tap is logged and survived instead
@@ -52,6 +53,18 @@ Future<void> main() async {
       }
       // Allow lazy font fetch with instant system fallback — never block launch.
       GoogleFonts.config.allowRuntimeFetching = true;
+
+      // Round 20: bring up the AndroidAlarmManager background isolate
+      // BEFORE we touch audio_service. This lets the schedule sync layer
+      // register periodic alarms that survive the main Dart isolate
+      // being killed by aggressive OEM battery managers. Best-effort —
+      // a failure here is silent so a missing plugin (iOS, web,
+      // integration test) never blocks launch.
+      try {
+        await initializeBackgroundAlarms();
+      } catch (e, st) {
+        debugPrint('initializeBackgroundAlarms failed: $e\n$st');
+      }
 
       // Initialise the background audio service, but NEVER let it block or crash
       // app launch: on failure/timeout we fall back to a plain handler so the UI

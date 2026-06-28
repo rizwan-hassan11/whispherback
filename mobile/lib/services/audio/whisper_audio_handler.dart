@@ -923,6 +923,73 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     }
   }
 
+  /// Called by audio_service when the user swipes the app away from the
+  /// recent-apps stack. THE DEFAULT base implementation is a no-op, but
+  /// `audio_service` would also tear down the MediaSession a few ms later
+  /// because our silence loop is just `playing: true` on an idle source —
+  /// some OEM heuristics (Vivo, Samsung) misclassify it as "user is done,
+  /// kill the service". We explicitly:
+  ///   1. Keep the keep-alive silence loop running.
+  ///   2. Re-publish `playing: true` so audio_service stays in the
+  ///      foreground (this is what tells the OS "this service is still
+  ///      doing useful work").
+  ///   3. Ping our native [KeepAliveService] to ensure the wake lock is
+  ///      still held, even if the activity-managed call to it during
+  ///      `toggleActive` was reaped along with the activity.
+  ///
+  /// Round 19: the user's exact QA "WHEN I CLOSED THE APP then the
+  /// AUDIO PROCESS WAS KILLED AND COULDN't HEAR ANYTHING" was the
+  /// service quietly demoting itself here. Without this override the
+  /// schedule engine was dead inside 60 s of the user swiping the app.
+  @override
+  Future<void> onTaskRemoved() async {
+    if (_keepAlive && !_playingClip) {
+      try {
+        playbackState.add(
+          playbackState.value.copyWith(
+            processingState: AudioProcessingState.ready,
+            playing: true,
+          ),
+        );
+      } catch (_) {}
+      try {
+        await _startIdleKeepAlive();
+      } catch (e, st) {
+        if (kDebugMode) {
+          debugPrint('onTaskRemoved: keep-alive restart failed: $e\n$st');
+        }
+      }
+    }
+  }
+
+  /// Called when the user swipes the WhisperBack media notification away.
+  /// The base implementation calls `stop()` — but for our keep-alive
+  /// architecture that would prematurely tear down the silence loop and
+  /// let the OS reap the FG service.
+  ///
+  /// Branch on Active:
+  ///   - Active ON: rebuild the silence loop and republish a `playing:
+  ///     true` state so the lock-screen card and the FG binding both
+  ///     come back. The user's intent was almost certainly "remove that
+  ///     notification card", not "stop scheduling".
+  ///   - Active OFF: honor the swipe — call super.onNotificationDeleted
+  ///     so the service tears down cleanly.
+  @override
+  Future<void> onNotificationDeleted() async {
+    if (_keepAlive) {
+      try {
+        await _startIdleKeepAlive();
+      } catch (e, st) {
+        if (kDebugMode) {
+          debugPrint('onNotificationDeleted: keep-alive restart failed: '
+              '$e\n$st');
+        }
+      }
+      return;
+    }
+    await super.onNotificationDeleted();
+  }
+
   @override
   Future<void> skipToNext() async {
     if (!_playingClip) return;

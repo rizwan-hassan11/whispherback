@@ -9,6 +9,7 @@ import 'package:timezone/timezone.dart' as tz;
 
 import '../../domain/entities/playback_schedule.dart';
 import '../audio/whisper_audio_handler.dart';
+import '../scheduler/background_alarm_playback.dart';
 import '../scheduler/schedule_engine_binding.dart';
 import '../scheduler/schedule_fire_helper.dart';
 import '../playback/active_mode_binding.dart';
@@ -179,9 +180,13 @@ class NotificationService {
     // Round 16: "Play now" alarm action — same wakeup behaviour as
     // tapping the notification body; the engine's `fireNow` pass
     // will start the matching schedule.
+    // Round 19: pass `force: true` so a slot the OS missed by more
+    // than the standard lateness cap still fires when the user
+    // explicitly taps the alarm — the user EXPECTS this to play and
+    // would file a bug if the tap silently no-op'd.
     if (response.actionId == 'schedule_play_now' ||
         response.payload == scheduleAlarmPayload) {
-      unawaited(ScheduleEngineBinding.instance.fireNow());
+      unawaited(ScheduleEngineBinding.instance.fireNow(force: true));
     }
   }
 
@@ -352,6 +357,19 @@ class NotificationService {
     _lastSyncedFingerprint = fingerprint;
     _lastSyncedActive = active;
     await _cancelAllScheduleAlarms();
+    // Round 20: ALSO drive the background-isolate playback alarm. When
+    // Active is ON we register a single periodic alarm that wakes a
+    // separate isolate every minute to check if any schedule is due —
+    // this is the path that survives the main Dart isolate being
+    // killed by Vivo / Xiaomi / older Samsung One UI battery managers.
+    // When Active is OFF (or no schedules), we cancel it so the OS
+    // can sleep undisturbed.
+    final anyEnabled = schedules.any((s) => s.enabled);
+    if (active && anyEnabled) {
+      unawaited(ensureBackgroundAlarmRegistered());
+    } else {
+      unawaited(cancelBackgroundAlarm());
+    }
     if (!active) return;
 
     var id = _scheduleBase;

@@ -205,8 +205,13 @@ void main() {
       final src = _readFile('lib/services/scheduler/schedule_engine.dart');
       // Find the _runTick body and confirm it ensures the foreground
       // BEFORE the early-return-on-mid-play branch.
-      final idx = src.indexOf('Future<void> _runTick()');
-      expect(idx, greaterThan(0));
+      // Round 19: signature widened to `_runTick({bool force = false})`
+      // so the alarm-tap path can bypass the lateness cap. Match either
+      // shape so future signature tweaks don't regress this guard.
+      var idx = src.indexOf('Future<void> _runTick({bool force = false})');
+      if (idx < 0) idx = src.indexOf('Future<void> _runTick()');
+      expect(idx, greaterThan(0),
+          reason: '_runTick must exist with either the old or new shape.');
       final body = src.substring(idx, idx + 3500);
       // The heartbeat ensureForeground appears BEFORE the "skip if
       // already scheduledPlaying" early-return so the silence keep-

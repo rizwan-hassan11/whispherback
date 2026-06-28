@@ -142,6 +142,48 @@ class AppLocalizations {
   String get yourSchedules => _s('YOUR SCHEDULES', 'آپ کے شیڈول', 'جداولك',
       'JOUW SCHEMA\'S', 'VOS PLANNINGS', 'LỊCH CỦA BẠN');
 
+  String get upcomingWhispers => _s(
+      'UPCOMING WHISPERS',
+      'آنے والے وِسپرز',
+      'الهمسات القادمة',
+      'AANKOMENDE WHISPERS',
+      'CHUCHOTEMENTS À VENIR',
+      'WHISPER SẮP TỚI');
+
+  String get now => _s('now', 'ابھی', 'الآن', 'nu', 'maintenant', 'ngay bây giờ');
+
+  String inSeconds(int seconds) => _s(
+      'in ${seconds}s',
+      '$seconds سیکنڈ میں',
+      'خلال $seconds ثانية',
+      'over ${seconds}s',
+      'dans ${seconds}s',
+      'sau ${seconds}s');
+
+  String inMinutes(int minutes) => _s(
+      'in ${minutes}m',
+      '$minutes منٹ میں',
+      'خلال $minutes دقيقة',
+      'over ${minutes}m',
+      'dans ${minutes}min',
+      'sau $minutes phút');
+
+  String inHours(int hours) => _s(
+      'in ${hours}h',
+      '$hours گھنٹے میں',
+      'خلال $hours ساعة',
+      'over ${hours}u',
+      'dans ${hours}h',
+      'sau $hours giờ');
+
+  String inDays(int days) => _s(
+      'in ${days}d',
+      '$days دن میں',
+      'خلال $days يوم',
+      'over ${days}d',
+      'dans ${days}j',
+      'sau $days ngày');
+
   // ── Settings ────────────────────────────────────────────────────────────────
   String get settings => _s('Settings', 'ترتیبات', 'الإعدادات', 'Instellingen',
       'Paramètres', 'Cài đặt');

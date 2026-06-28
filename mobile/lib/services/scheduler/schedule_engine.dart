@@ -86,11 +86,42 @@ class ScheduleEngine {
     if (_started) return;
     _timer?.cancel();
     _started = true;
+    // Round 20: on every fresh start (cold launch, isolate revival,
+    // engine rebuild) the engine treats the first ~30 seconds as the
+    // "boot window". During the boot window any past slot inside the
+    // lateness grace window is SKIPPED unless the caller passes
+    // `force: true` (alarm-tap or explicit fire). Without this guard
+    // the user's exact QA — "I opened the app and a clip played 1
+    // minute later even though 7 minutes were left for the next
+    // whisper, must have been an old missed slot" — reproduced every
+    // time the engine restarted near a slot boundary. The grace
+    // window is still honored for genuine recovery from a 30-60s
+    // OS pause WHILE the engine is running, just not for ticks
+    // immediately after start.
+    _bootedAt = DateTime.now();
     unawaited(fireNow());
     _timer = Timer.periodic(const Duration(seconds: 5), (_) {
       _evictStuckTick();
       unawaited(fireNow());
     });
+  }
+
+  /// Wall-clock at which `start()` last ran. Used by [_runTick] to
+  /// suppress lateness-grace firing during the first ~30 s after a
+  /// cold/warm engine start. Null until `start()` runs.
+  DateTime? _bootedAt;
+
+  /// How long after [start] we treat as "boot window" — past slots in
+  /// this window are NOT fired automatically, only on explicit
+  /// `force: true`. Engineering tradeoff between recovering from a
+  /// genuine OS-paused tick (good for grace) vs. surprising the user
+  /// with an old slot the moment they open the app (bad).
+  static const _bootWindow = Duration(seconds: 30);
+
+  bool get _inBootWindow {
+    final boot = _bootedAt;
+    if (boot == null) return false;
+    return DateTime.now().difference(boot) < _bootWindow;
   }
 
   void stop() {
@@ -103,7 +134,13 @@ class ScheduleEngine {
   bool get isRunning => _started;
 
   /// Runs one scheduling pass — safe to call from timers, lifecycle, or alarms.
-  Future<void> fireNow() async {
+  ///
+  /// When [force] is true, the lateness cap is bypassed so a slot that
+  /// the OS missed (process killed in Doze, app swiped away) still fires
+  /// when the user taps the alarm notification. Use force only for
+  /// user-initiated wake-ups; periodic ticks must respect lateness so
+  /// they don't surprise the user with old slots.
+  Future<void> fireNow({bool force = false}) async {
     if (!_started || _tickInFlight) return;
     _tickInFlight = true;
     try {
@@ -113,7 +150,7 @@ class ScheduleEngine {
       // on a `Future.timeout` Timer that would otherwise survive a widget
       // test's container dispose and trigger the "pending timers" assert.
       _stuckSince = DateTime.now();
-      await _runTick();
+      await _runTick(force: force);
     } catch (e, st) {
       if (kDebugMode) {
         debugPrint('ScheduleEngine: tick failed: $e\n$st');
@@ -160,12 +197,23 @@ class ScheduleEngine {
   // `_plugin.show(_ongoingId, …)` text refresh.
   static const _notificationSyncCadence = Duration(seconds: 5);
 
-  Future<void> _runTick() async {
+  Future<void> _runTick({bool force = false}) async {
     if (!await _appState.isActive()) {
       // Even when not Active, periodically poke the notification sync
       // so a recent toggle-OFF cancels the ongoing card promptly.
-      await _maybeSyncNotifications(force: false);
+      await _maybeSyncNotifications(force: _inBootWindow);
       return;
+    }
+
+    // Round 20: ALWAYS force a notification refresh on the very first
+    // tick after `start()`. Without this, the persistent notification
+    // can show stale data from the previous process's last sync (the
+    // user's QA "it's 10:15 but the notification still shows 10:11"
+    // is the engine restarting with an old serialized snapshot still
+    // up on the lock screen). Forcing one sync at boot guarantees the
+    // headline matches the page within the first second.
+    if (_inBootWindow) {
+      await _maybeSyncNotifications(force: true);
     }
 
     // Heartbeat: every tick, while Active, make sure the foreground
@@ -217,8 +265,43 @@ class ScheduleEngine {
       if (backoffUntil != null && now.isBefore(backoffUntil)) continue;
 
       final last = _lastFiredForCurrentCycle(schedule, now);
-      final slot = ScheduleFireHelper.slotToFire(schedule, now, last);
+      final lastSlot = _lastSlotForCurrentCycle(schedule, now);
+      // Round 19: passing BOTH `last` (completion) AND `lastSlot` (grid
+      // start) lets the helper detect whether playback completed cleanly
+      // and skip the bogus `+playlistDuration` projection that was making
+      // the engine wait an extra playlist-length AFTER the user's
+      // expected fire time. The user's exact QA: "schedule shows next at
+      // 10:11 but it's 10:15 and nothing played" — that was the engine
+      // computing `next = 10:05 (completion) + 5min (duration) + 5min
+      // (interval) = 10:15` instead of the correct `10:05 + 5min interval
+      // = 10:10`.
+      final slot = ScheduleFireHelper.slotToFire(
+        schedule,
+        now,
+        last,
+        lastSlot: lastSlot,
+        force: force,
+      );
       if (slot == null) continue;
+
+      // Round 20: during the boot window, suppress past slots that
+      // only fired because of the lateness grace. The user's exact
+      // QA ("I opened the app and a clip played 1 minute later even
+      // though 7 minutes were left for the next whisper, must have
+      // been an old missed slot") was the engine firing a 1-minute-
+      // old slot that the helper allowed because of the 2-minute
+      // grace. After the boot window has elapsed the engine has been
+      // running and the grace serves its real purpose (recovering
+      // from a single dropped tick).
+      if (!force && _inBootWindow && slot.isBefore(now)) {
+        if (kDebugMode) {
+          debugPrint(
+            'ScheduleEngine: suppressing past slot $slot for ${schedule.id} '
+            'inside boot window (force=false) to avoid surprise plays.',
+          );
+        }
+        continue;
+      }
 
       // Skip if another schedule already claimed this exact slot in this
       // cycle. Compare against the GRID slot stamp, not the completion stamp,
@@ -417,6 +500,23 @@ class ScheduleEngine {
     if (completion == null) return null;
     if (!_sameSessionAs(schedule, completion, now)) return null;
     return completion;
+  }
+
+  /// The slot start of the previous fire in the current cycle. Returned
+  /// alongside [_lastFiredForCurrentCycle] so the helper can distinguish
+  /// "playback already completed (lastFired > lastSlot)" from "still
+  /// playing (lastFired == lastSlot, the engine's placeholder)" and
+  /// project the next fire time correctly. Without this, the helper
+  /// always assumes the previous fire is still in flight and adds an
+  /// unnecessary `+playlistDuration` to the next-slot calculation.
+  DateTime? _lastSlotForCurrentCycle(
+    PlaybackSchedule schedule,
+    DateTime now,
+  ) {
+    final slot = _lastFired.slot(schedule.id);
+    if (slot == null) return null;
+    if (!_sameSessionAs(schedule, slot, now)) return null;
+    return slot;
   }
 
   bool _sameSessionAs(

@@ -4,18 +4,26 @@ import '../../domain/entities/playback_schedule.dart';
 abstract final class ScheduleFireHelper {
   /// Max lateness after a grid slot before we skip to the next interval.
   ///
-  /// Round 17: bumped from 5 to 15 minutes. The user reported that
-  /// after the OS killed the process, the FIRST schedule played
-  /// when the alarm fired and the user tapped the notification, but
-  /// SUBSEQUENT scheduled fires never played. Root cause: when the
-  /// user tapped the notification 6-10 minutes after the slot was
-  /// due (because they were busy / their device was in their
-  /// pocket), the engine's cold-start fireNow saw `now -
-  /// scheduledSlot > 5 minutes` and silently skipped the slot —
-  /// the user perceived this as "scheduling is broken". 15 minutes
-  /// gives the user a realistic chance to notice the alarm and
-  /// tap it before we declare the slot dead.
-  static const maxLateness = Duration(minutes: 15);
+  /// Round 19: dropped from 15 minutes back to 2 minutes. The wider
+  /// window introduced in Round 17 caused the user's exact QA report
+  /// "7 minutes remaining for next whisper but after 1 minute the clip
+  /// played automatically — must have been a missed previous slot".
+  /// With a 15-minute window, ANY slot the engine missed in the last
+  /// 15 minutes still fires the moment the user opens the app, which
+  /// from the user's perspective feels like the schedule went off at
+  /// random.
+  ///
+  /// 2 minutes is the sweet spot: long enough to absorb a 30-60 s engine
+  /// stutter (audio_service rebind, brief Doze) without skipping the slot,
+  /// short enough that re-opening the app well after a missed fire
+  /// doesn't cause a "phantom" surprise play.
+  ///
+  /// The QA scenario that originally pushed this to 15 (alarm fires →
+  /// user taps several minutes later → schedule skipped) is now
+  /// addressed by `fireNow()` from the notification action: the engine
+  /// re-evaluates and fires the slot synchronously when the user taps
+  /// the alarm body, regardless of lateness.
+  static const maxLateness = Duration(minutes: 2);
 
   /// Whether [now] falls inside today's start/end window for [schedule].
   static bool isInWindow(PlaybackSchedule schedule, DateTime now) {
@@ -111,6 +119,7 @@ abstract final class ScheduleFireHelper {
     DateTime? lastFired,
     DateTime? lastSlot,
     bool forDisplay = false,
+    bool force = false,
   }) {
     if (!schedule.enabled) return null;
 
@@ -184,7 +193,10 @@ abstract final class ScheduleFireHelper {
         if (dayOffset == 0 && slot.isBefore(now)) {
           // Skip past slots: under display mode, always advance; under
           // engine mode, only skip slots beyond the grace window.
-          if (forDisplay || now.difference(slot) > maxLateness) {
+          // Round 19: when `force` is set, also keep past slots so the
+          // alarm-tap path can recover a slot the OS missed by minutes.
+          if (forDisplay ||
+              (!force && now.difference(slot) > maxLateness)) {
             slot = slot.add(stepDuration);
             continue;
           }
@@ -192,7 +204,9 @@ abstract final class ScheduleFireHelper {
         if (dayOffset > 0 || !slot.isBefore(now)) {
           return slot;
         }
-        if (!forDisplay && now.difference(slot) <= maxLateness) return slot;
+        if (!forDisplay && (force || now.difference(slot) <= maxLateness)) {
+          return slot;
+        }
         slot = slot.add(stepDuration);
       }
     }
@@ -200,21 +214,45 @@ abstract final class ScheduleFireHelper {
   }
 
   /// Grid slot that should fire now, or null if nothing is due.
+  ///
+  /// [lastFired] is the completion timestamp of the previous fire (or the
+  /// slot start if playback never completed). [lastSlot] is the wall-clock
+  /// start of the previous fire — passing it lets `nextSlotAfter` know
+  /// whether the playback completed cleanly (lastFired > lastSlot) or
+  /// whether `lastFired` is still a placeholder (lastFired == lastSlot).
+  /// Without [lastSlot] the helper always falls into the "project end"
+  /// branch and over-counts the gap by `playlistDurationMs` — the user's
+  /// Round 19 QA report ("schedule shows next at 10:11 but it's 10:15 and
+  /// nothing played") was the helper computing `next = completion +
+  /// playlistDuration + interval` when it should have been `next =
+  /// completion + interval`.
+  ///
+  /// When [force] is true, the [maxLateness] cap is ignored. Used by the
+  /// alarm-tap path so a user who taps a scheduled alarm 10 minutes
+  /// late still gets the audio they came for.
   static DateTime? slotToFire(
     PlaybackSchedule schedule,
     DateTime now,
-    DateTime? lastFired,
-  ) {
+    DateTime? lastFired, {
+    DateTime? lastSlot,
+    bool force = false,
+  }) {
     if (!isInWindow(schedule, now)) return null;
 
-    final slot = nextSlotAfter(schedule, now, lastFired: lastFired);
+    final slot = nextSlotAfter(
+      schedule,
+      now,
+      lastFired: lastFired,
+      lastSlot: lastSlot,
+      force: force,
+    );
     if (slot == null) return null;
     if (now.isBefore(slot)) return null;
 
     final end = _endOnDay(schedule, now);
     if (end != null && slot.isAfter(end)) return null;
 
-    if (now.difference(slot) > maxLateness) return null;
+    if (!force && now.difference(slot) > maxLateness) return null;
 
     if (lastFired != null && !slot.isAfter(lastFired)) return null;
 
@@ -279,25 +317,40 @@ abstract final class ScheduleFireHelper {
     return best;
   }
 
-  /// Upcoming grid fires across all schedules (sorted, de-duplicated by time).
+  /// Upcoming grid fires across all schedules (sorted by time).
+  ///
+  /// Step between fires uses [effectiveStepMinutes] = `playlistDuration +
+  /// intervalMinutes`. The previous implementation used `intervalMinutes`
+  /// alone, which made the upcoming list overlap the playlist with the
+  /// silent gap (a 5-min playlist on a 5-min interval predicted next at
+  /// `now+5min` even though the playlist would still be playing).
   static List<({DateTime when, String playlistName})> upcomingEvents(
     List<PlaybackSchedule> schedules,
     DateTime now, {
     DateTime? Function(String scheduleId)? lastFiredFor,
+    DateTime? Function(String scheduleId)? lastSlotFor,
     int limit = 4,
   }) {
     final events = <({DateTime when, String playlistName})>[];
     for (final s in schedules) {
       if (!s.enabled) continue;
       final last = lastFiredFor?.call(s.id);
-      var slot = nextFireTime(s, now, lastFired: last);
+      final lastSlot = lastSlotFor?.call(s.id);
+      var slot = nextFireTime(
+        s,
+        now,
+        lastFired: last,
+        lastSlot: lastSlot,
+        forDisplay: true,
+      );
       var hops = 0;
       while (slot != null && hops < limit * 2) {
         events.add((
           when: slot,
           playlistName: s.playlistName.isEmpty ? 'WhisperBack' : s.playlistName,
         ));
-        slot = slot.add(Duration(minutes: s.intervalMinutes));
+        final step = Duration(minutes: effectiveStepMinutes(s));
+        slot = slot.add(step);
         final end = _endOnDay(s, slot);
         if (end != null && slot.isAfter(end)) break;
         hops++;

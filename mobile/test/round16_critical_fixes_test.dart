@@ -253,9 +253,17 @@ void main() {
         reason: 'The response handler must wake the engine when the '
             'Play now action is tapped.',
       );
+      // Round 19: alarm-tap path now passes `force: true` so the
+      // engine bypasses its lateness cap and fires the slot the
+      // user EXPLICITLY tapped — even if the OS missed it by 5-10
+      // minutes. Accept either shape (force or no-args) so future
+      // tweaks don't regress this guard.
       expect(
         body,
-        contains('ScheduleEngineBinding.instance.fireNow()'),
+        anyOf(
+          contains('ScheduleEngineBinding.instance.fireNow()'),
+          contains('ScheduleEngineBinding.instance.fireNow(force: true)'),
+        ),
         reason: 'The engine binding must be invoked so a fresh '
             'scheduling pass starts.',
       );

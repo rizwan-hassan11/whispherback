@@ -110,19 +110,21 @@ void main() {
 
   group('Round 11 — schedule grace window', () {
     test(
-        'maxLateness is at least 5 minutes so the engine survives a '
+        'maxLateness is at least 1 minute so the engine survives a '
         'BG/FG bounce without silently skipping a slot', () {
-      // Round 17 bumped to 15 minutes (was 5) to cover the "user
-      // tapped the alarm notification 6-10 minutes after it fired"
-      // case which the original 5-minute window was silently dropping.
-      // We assert the floor (>= 5) so future tightening is still
-      // caught while accommodating the Round 17 widening.
+      // Round 19 dropped from 15 min (Round 17) back to 2 min. The wider
+      // window surfaced as the user's QA report "7 minutes remaining
+      // for next whisper but after 1 minute the clip played
+      // automatically — must have been a missed previous schedule".
+      // The "tapped-late alarm" scenario is now handled by the
+      // `force: true` path through `fireNow()` rather than by
+      // widening the universal lateness cap.
       expect(
         ScheduleFireHelper.maxLateness.inMinutes,
-        greaterThanOrEqualTo(5),
+        greaterThanOrEqualTo(1),
         reason: 'QA report "schedule page says NOW but no audio" was the '
             'old 90-second window expiring during a typical OS pause; '
-            'Round 17 widened to 15 minutes for tap-from-alarm.',
+            'we keep at least 1 minute of grace for engine stutters.',
       );
     });
 

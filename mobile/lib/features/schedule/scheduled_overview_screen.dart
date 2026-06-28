@@ -259,6 +259,20 @@ class _ScheduleBodyState extends State<_ScheduleBody> {
     return ScheduleCountdown.untilTime(best, now);
   }
 
+  /// Up to 5 upcoming fires across all schedules, sorted chronologically.
+  /// Round 19: surfaces the table the user asked for so the schedule page
+  /// shows the FULL upcoming queue instead of just the single next slot.
+  List<({DateTime when, String playlistName})> _upcomingFires() {
+    final store = ScheduleLastFiredStore.instance;
+    return ScheduleFireHelper.upcomingEvents(
+      widget.schedules,
+      DateTime.now(),
+      lastFiredFor: (id) => store.completion(id),
+      lastSlotFor: (id) => store.slot(id),
+      limit: 5,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
@@ -297,6 +311,14 @@ class _ScheduleBodyState extends State<_ScheduleBody> {
                     alarms: _alarmCount,
                     nextLabel: _globalNextCountdown(),
                   ),
+                if (_upcomingFires().isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  _UpcomingFiresList(
+                    theme: theme,
+                    timeFmt: timeFmt,
+                    upcoming: _upcomingFires(),
+                  ),
+                ],
                 if (schedules.isNotEmpty) const SizedBox(height: 16),
                 // High-visibility banner: enabled schedules exist but the
                 // master Active toggle is OFF, so the engine is silently
@@ -896,6 +918,178 @@ class _ActiveOffBannerState extends State<_ActiveOffBanner> {
                 backgroundColor: accent,
                 foregroundColor: Colors.white,
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Compact "next 5 fires" table shown above the per-schedule cards.
+/// Round 19: user explicitly asked for a table of upcoming schedules,
+/// not just the single next slot. We compute it from
+/// [ScheduleFireHelper.upcomingEvents] (which already respects
+/// interval-from-end semantics and per-schedule last-fired stamps),
+/// then render compactly so the rest of the page remains scannable.
+class _UpcomingFiresList extends StatelessWidget {
+  const _UpcomingFiresList({
+    required this.theme,
+    required this.timeFmt,
+    required this.upcoming,
+  });
+
+  final WhisperThemeExtension theme;
+  final DateFormat timeFmt;
+  final List<({DateTime when, String playlistName})> upcoming;
+
+  @override
+  Widget build(BuildContext context) {
+    if (upcoming.isEmpty) return const SizedBox.shrink();
+    final l10n = context.l10n;
+    final now = DateTime.now();
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
+      decoration: BoxDecoration(
+        color: theme.isDark
+            ? theme.glass
+            : Colors.white.withValues(alpha: 0.85),
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        border: Border.all(color: theme.glassBorder),
+        boxShadow: theme.isDark
+            ? null
+            : [
+                BoxShadow(
+                  color: AppColors.ink.withValues(alpha: 0.04),
+                  blurRadius: 12,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                AppIcons.schedule,
+                size: 14,
+                color: AppColors.brandLight,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                l10n.upcomingWhispers,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.2,
+                  color: theme.muted,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                l10n.itemsCount(upcoming.length),
+                style: TextStyle(
+                  fontSize: 11,
+                  color: theme.muted.withValues(alpha: 0.7),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          for (var i = 0; i < upcoming.length; i++)
+            _UpcomingFireRow(
+              theme: theme,
+              timeFmt: timeFmt,
+              when: upcoming[i].when,
+              playlistName: upcoming[i].playlistName,
+              relativeFromNow: _relative(upcoming[i].when, now, l10n),
+              isLast: i == upcoming.length - 1,
+            ),
+        ],
+      ),
+    );
+  }
+
+  String _relative(DateTime when, DateTime now, AppLocalizations l10n) {
+    final delta = when.difference(now);
+    if (delta.isNegative) return l10n.now;
+    if (delta.inMinutes < 1) return l10n.inSeconds(delta.inSeconds);
+    if (delta.inMinutes < 60) return l10n.inMinutes(delta.inMinutes);
+    if (delta.inHours < 24) {
+      final hours = delta.inHours;
+      final mins = delta.inMinutes.remainder(60);
+      if (mins == 0) return l10n.inHours(hours);
+      return '${l10n.inHours(hours)} ${l10n.inMinutes(mins)}';
+    }
+    return l10n.inDays(delta.inDays);
+  }
+}
+
+class _UpcomingFireRow extends StatelessWidget {
+  const _UpcomingFireRow({
+    required this.theme,
+    required this.timeFmt,
+    required this.when,
+    required this.playlistName,
+    required this.relativeFromNow,
+    required this.isLast,
+  });
+
+  final WhisperThemeExtension theme;
+  final DateFormat timeFmt;
+  final DateTime when;
+  final String playlistName;
+  final String relativeFromNow;
+  final bool isLast;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: isLast ? 0 : 8),
+      child: Row(
+        children: [
+          Container(
+            width: 50,
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            decoration: BoxDecoration(
+              color: AppColors.brandLight.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              timeFmt.format(when),
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: AppColors.brandLight,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  playlistName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: theme.foreground,
+                  ),
+                ),
+                Text(
+                  relativeFromNow,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: theme.muted,
+                  ),
+                ),
+              ],
             ),
           ),
         ],

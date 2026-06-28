@@ -31,6 +31,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:whisperback/domain/entities/playback_schedule.dart';
 import 'package:whisperback/services/scheduler/schedule_fire_helper.dart';
 
 String _readFile(String relative) {
@@ -39,6 +40,31 @@ String _readFile(String relative) {
     fail('Expected source file does not exist: $relative');
   }
   return f.readAsStringSync();
+}
+
+PlaybackSchedule _buildSchedule({
+  required int startHour,
+  required int startMinute,
+  required int intervalMinutes,
+  int playlistDurationMs = 0,
+  int? endHour,
+  int? endMinute,
+  int daysMask = 127,
+}) {
+  return PlaybackSchedule(
+    id: 'test-${startHour}_$startMinute',
+    playlistId: 'pl-test',
+    playlistName: 'Test playlist',
+    startTime: DateTime(2020, 1, 1, startHour, startMinute),
+    endTime: endHour != null
+        ? DateTime(2020, 1, 1, endHour, endMinute ?? 0)
+        : null,
+    intervalMinutes: intervalMinutes,
+    daysMask: daysMask,
+    enabled: true,
+    alarmEnabled: true,
+    playlistDurationMs: playlistDurationMs,
+  );
 }
 
 void main() {
@@ -102,26 +128,69 @@ void main() {
     });
   });
 
-  group('Round 17-B — grace window covers tap-from-alarm delay', () {
-    test('maxLateness >= 10 minutes so tapped-late alarms still fire', () {
+  group('Round 17-B / Round 19 — grace window + force-fire for taps', () {
+    test('maxLateness is small (≤ 5 min) to prevent phantom plays', () {
+      // Round 19: dropped from 15 min back to 2 min. The wider window
+      // surfaced as the user's QA report "7 minutes remaining for next
+      // whisper but after 1 minute the clip played automatically — must
+      // have been a missed previous schedule". The "tapped-late alarm"
+      // scenario is now covered by the `force: true` path in `fireNow()`
+      // rather than by widening the lateness cap, so a user who taps
+      // the alarm 10 min late still gets the audio they came for
+      // WITHOUT random old slots firing during normal engine ticks.
       expect(
         ScheduleFireHelper.maxLateness.inMinutes,
-        greaterThanOrEqualTo(10),
-        reason: 'When the OS killed the process and the user tapped '
-            'the alarm notification 6-10 minutes after it fired, the '
-            'old 5-minute window made the engine cold-start skip the '
-            'slot — the user reported "the notification appears but '
-            'no audio plays when I open the app".',
+        lessThanOrEqualTo(5),
+        reason: 'A maxLateness > 5 min lets surprise-fires happen when '
+            'the engine wakes up after a Doze pause or a process kill.',
       );
     });
 
-    test('maxLateness <= 30 minutes so we never fire deeply stale slots', () {
+    test('maxLateness >= 1 min to absorb a 30-60s engine stutter', () {
       expect(
         ScheduleFireHelper.maxLateness.inMinutes,
-        lessThanOrEqualTo(30),
-        reason: 'The grace window must remain bounded so we never fire '
-            'a clip the user has long since stopped caring about.',
+        greaterThanOrEqualTo(1),
+        reason: 'Some grace is required so a single dropped tick (the '
+            'audio_service rebind window after a brief Doze pause) does '
+            'not cause the engine to skip the slot entirely.',
       );
+    });
+
+    test('slotToFire respects force: true to bypass lateness cap', () {
+      // Use a synthetic schedule firing at 10:00 with `now = 10:09`.
+      // The schedule has no end-of-day end time and no interval = 5min
+      // would put a fresh slot at 10:05 (still 4 min late, > 2 min cap).
+      // With force, the helper must still return a slot; without force
+      // it must return null.
+      final schedule = _buildSchedule(
+        startHour: 10,
+        startMinute: 0,
+        intervalMinutes: 5,
+        playlistDurationMs: 0,
+      );
+      // 10:00 + step=5 → 10:00, 10:05, 10:10, ... At now=10:09 the most
+      // recent past slot is 10:05 (4 min late). 4 min > 2 min cap → skipped
+      // without force. The 10:10 slot is in the future so it's also not
+      // eligible. Net: null without force, but 10:05 with force.
+      final now = DateTime(2026, 6, 28, 10, 9);
+
+      final lateSkipped =
+          ScheduleFireHelper.slotToFire(schedule, now, null);
+      expect(lateSkipped, isNull,
+          reason: 'Without force, a 4-min-late slot must be skipped '
+              'because the 2-min lateness cap applies.');
+
+      final forced =
+          ScheduleFireHelper.slotToFire(schedule, now, null, force: true);
+      expect(forced, isNotNull,
+          reason: 'With force = true, the engine MUST fire so a user '
+              'who taps a scheduled alarm late still gets the clip.');
+      // The earliest past slot in the current window is fine — the
+      // user's intent on tapping the alarm is "play whatever I missed",
+      // not "skip ahead". `nextSlotAfter(force: true)` returns the
+      // first past slot it encounters, which is 10:00 for this fixture.
+      expect(forced!.isBefore(now), isTrue,
+          reason: 'Force-fire must return a past slot inside the window.');
     });
   });
 
