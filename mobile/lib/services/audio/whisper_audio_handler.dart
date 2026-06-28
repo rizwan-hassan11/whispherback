@@ -49,16 +49,60 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
         speed: 1.0,
       ),
     );
-    _player.playbackEventStream.listen(_broadcastState);
-    _player.durationStream.listen(_onDurationReady);
-    _player.positionStream.listen((_) {
-      if (_playingClip && _player.playing) {
-        _publishClipControls(
-          playing: true,
-          processing: _player.processingState,
-        );
-      }
-    });
+    // Round 17: EVERY player stream MUST have an `onError` handler.
+    // Without it, an uncaught PlatformException from the native player
+    // (Samsung One UI "(-38) MediaPlayerNative", Vivo Funtouch
+    // "MediaCodec error", Xiaomi MIUI focus revocation) propagates up
+    // the stream subscription and crashes the audio_service plugin's
+    // own listeners, which in turn force-closes the activity. The user
+    // reported "rapid pause/resume crashes the app" — the actual
+    // throw was happening in a stream callback that the per-tap
+    // try/catch could never see. All three streams now swallow errors.
+    _player.playbackEventStream.listen(
+      _broadcastState,
+      onError: (Object e, StackTrace st) {
+        if (kDebugMode) {
+          debugPrint('player.playbackEventStream error (swallowed): $e\n$st');
+        }
+      },
+    );
+    _player.durationStream.listen(
+      _onDurationReady,
+      onError: (Object e, StackTrace st) {
+        if (kDebugMode) {
+          debugPrint('player.durationStream error (swallowed): $e\n$st');
+        }
+      },
+    );
+    _player.positionStream.listen(
+      (_) {
+        if (_playingClip && _player.playing) {
+          _publishClipControls(
+            playing: true,
+            processing: _player.processingState,
+          );
+        }
+      },
+      onError: (Object e, StackTrace st) {
+        if (kDebugMode) {
+          debugPrint('player.positionStream error (swallowed): $e\n$st');
+        }
+      },
+    );
+    // Round 17: also subscribe to player state explicitly so we can
+    // catch the FATAL state and reset _playingClip / restart silence
+    // keep-alive without leaving the FG service in a half-dead state.
+    _player.playerStateStream.listen(
+      (state) {
+        // Nothing to do here for normal transitions — `_broadcastState`
+        // covers UI. This subscription exists purely for error catching.
+      },
+      onError: (Object e, StackTrace st) {
+        if (kDebugMode) {
+          debugPrint('player.playerStateStream error (swallowed): $e\n$st');
+        }
+      },
+    );
   }
 
   /// Silent loop while Active + idle — drives the audio_service foreground service.

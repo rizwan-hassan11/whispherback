@@ -261,7 +261,17 @@ class PlaybackCoordinator {
     );
     // Restore the foreground keep-alive after a cold start if Active.
     if (active) await _audio.enterForeground();
-    _playerSub = _audio.playerStateStream.listen(_onPlayerState);
+    _playerSub = _audio.playerStateStream.listen(
+      _onPlayerState,
+      onError: (Object e, StackTrace st) {
+        // Round 17: an uncaught error in the player state stream was the
+        // root cause of "rapid pause/play crashes the app". Silently
+        // swallow so the activity stays alive.
+        if (kDebugMode) {
+          debugPrint('coordinator playerStateStream error (swallowed): $e\n$st');
+        }
+      },
+    );
     startModeMonitoring();
   }
 
@@ -1175,76 +1185,57 @@ class PlaybackCoordinator {
   ///     `stopClip` teardown ran but the player's `_playingClip` flag
   ///     left a stale window. Skipping the teardown entirely sidesteps
   ///     all of that.
-  Future<void> dismissPlayer() async {
-    bool wasActive = false;
-    try {
-      wasActive = await _appState.isActive();
-    } catch (e, st) {
-      if (kDebugMode) {
-        debugPrint('dismissPlayer: isActive lookup failed: $e\n$st');
+  Future<void> dismissPlayer() {
+    // Round 17: serialize through the same pause/resume gate so a rapid
+    // pause → cross → cross → play sequence cannot have overlapping
+    // `_audio.pause()` calls in flight. Previously the dismiss path
+    // bypassed the serializer and the user's "crashes on multiple
+    // pause/resume + cross icon" report traced to native player
+    // state-change races between the gated `pause()`/`resume()` and
+    // the un-gated `dismissPlayer()`.
+    return _serializePauseResume(() async {
+      bool wasActive = false;
+      try {
+        wasActive = await _appState.isActive();
+      } catch (e, st) {
+        if (kDebugMode) {
+          debugPrint('dismissPlayer: isActive lookup failed: $e\n$st');
+        }
       }
-    }
 
-    // Optimistic UI flip FIRST so the user sees the bar disappear instantly.
-    // Transition state to activeIdle / inactive so the mini-player's
-    // `state == manualPlaying || scheduledPlaying` visibility check
-    // hides it; and force `modalVisible: false` to dismiss the modal.
-    // We deliberately keep `playlistName` / `clipTitle` null here so a
-    // future re-play has a clean slate to populate.
-    _emit(PlaybackSnapshot(
-      state:
-          wasActive ? AppPlaybackState.activeIdle : AppPlaybackState.inactive,
-      isPlaying: false,
-      modalVisible: false,
-    ));
+      _emit(PlaybackSnapshot(
+        state:
+            wasActive ? AppPlaybackState.activeIdle : AppPlaybackState.inactive,
+        isPlaying: false,
+        modalVisible: false,
+      ));
 
-    // Now pause the actual player. The clip's position is preserved so a
-    // future tap on the same clip resumes from where the user left off.
-    // Set the sentinel BEFORE the await so any racing completion event
-    // is treated as "paused at end" not "auto-advance".
-    //
-    // We deliberately DO NOT call `_audio.stop()` here — that would
-    // tear down the media session and the foreground service binding,
-    // which on Samsung / Vivo OEMs causes the process to be reaped
-    // shortly after (the QA report "when I close the app, no
-    // notification is shown and the clip just stops"). Pausing keeps
-    // the FG service alive; the media notification stays visible so
-    // the user has lock-screen controls AND so the OS keeps the
-    // process in the protected foreground bucket while Active is on.
-    _userInitiatedPause = true;
-    try {
-      await _audio.pause();
-    } catch (e, st) {
-      if (kDebugMode) {
-        debugPrint('dismissPlayer: _audio.pause failed: $e\n$st');
+      _userInitiatedPause = true;
+      try {
+        await _audio.pause();
+      } catch (e, st) {
+        if (kDebugMode) {
+          debugPrint('dismissPlayer: _audio.pause failed: $e\n$st');
+        }
       }
-    }
 
-    // Round 15: also clear the lock-screen / pull-down media card so the
-    // user's "cross icon" tap removes both the in-app bar AND the
-    // system notification card. Previously the card lingered, which the
-    // user perceived as "I dismissed but it didn't really close".
-    // hideClipMediaNotification is a no-op if no clip is loaded and
-    // never tears down the audio_service binding (the FG service stays
-    // alive on the silence keep-alive).
-    try {
-      await _audio.hideClipMediaNotification();
-    } catch (e, st) {
-      if (kDebugMode) {
-        debugPrint(
-            'dismissPlayer: hideClipMediaNotification failed: $e\n$st');
+      try {
+        await _audio.hideClipMediaNotification();
+      } catch (e, st) {
+        if (kDebugMode) {
+          debugPrint(
+              'dismissPlayer: hideClipMediaNotification failed: $e\n$st');
+        }
       }
-    }
 
-    // Best-effort: refresh the persistent notification so it shows the
-    // post-dismiss "no clip playing" state.
-    try {
-      await refreshScheduleNotifications?.call();
-    } catch (e, st) {
-      if (kDebugMode) {
-        debugPrint('dismissPlayer: notif refresh failed: $e\n$st');
+      try {
+        await refreshScheduleNotifications?.call();
+      } catch (e, st) {
+        if (kDebugMode) {
+          debugPrint('dismissPlayer: notif refresh failed: $e\n$st');
+        }
       }
-    }
+    });
   }
 
   Future<void> resume() {

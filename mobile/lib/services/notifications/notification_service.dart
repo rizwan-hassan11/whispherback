@@ -357,23 +357,36 @@ class NotificationService {
     var id = _scheduleBase;
     final copy = RuntimeCopy.l10n;
     final now = DateTime.now();
-    // Round 16: aggressive caps + per-call event-loop yield so the
-    // save flow NEVER blocks the UI thread long enough to ANR.
-    //   • 3 alarms/schedule (was 12) — these are OS-level wake-ups
-    //     that fire when the engine has been throttled by Doze. The
-    //     engine's 5-second in-process tick is the real source of
-    //     truth; OS alarms only need to cover the "device went to
-    //     deep doze" case, for which 3 next-up alarms is plenty.
-    //   • 20 global cap (was 60) — at ~100ms per binder call worst
-    //     case that's 2 seconds total even when nothing is cached.
-    //   • 12-hour horizon (was 48h) — same reasoning; we only need
-    //     the very next-up alarms.
-    //   • Per-iteration `await Future.delayed(Duration.zero)` so the
-    //     event loop pumps between binder calls and the UI thread
-    //     can paint a frame without being starved.
-    final horizon = now.add(const Duration(hours: 12));
-    const maxAlarmsPerSchedule = 3;
-    const maxAlarmsGlobal = 20;
+    // Round 17: bumped from 3/20 (Round 16) to 50/200 because the
+    // engine's in-process tick CANNOT be relied upon when the OS
+    // kills the process — which on Samsung / Vivo / Xiaomi happens
+    // within minutes of swiping the app away on devices without a
+    // battery-exemption grant. Round 16's 3-alarm cap meant the
+    // user saw the FIRST schedule fire (engine still alive) and
+    // then NOTHING (engine dead, only 3 alarms registered, all
+    // already consumed).
+    //
+    // The earlier ANR concern is addressed by:
+    //   (a) `unawaited(syncWhisperNotifications…)` in the save flow
+    //       so the UI never waits for these binder calls.
+    //   (b) Per-call `await Future.delayed(Duration.zero)` so the
+    //       event loop pumps between every binder call and any UI
+    //       work running in parallel is never starved.
+    //   (c) `_lastSyncedFingerprint` cache so the engine's 5-second
+    //       tick early-returns and never re-registers anything when
+    //       nothing changed.
+    //
+    // 50 alarms-per-schedule × 5-minute interval = 4 hours of
+    // coverage per schedule even if the engine dies the moment the
+    // user closes the app. 200 global cap covers up to 16 active
+    // schedules at full per-schedule budget without any user-visible
+    // lag.
+    //
+    // 7-day horizon so weekly recurrence is naturally covered for
+    // schedules with longer (hourly+) intervals.
+    final horizon = now.add(const Duration(days: 7));
+    const maxAlarmsPerSchedule = 50;
+    const maxAlarmsGlobal = 200;
 
     for (final schedule in schedules) {
       if (!schedule.enabled || !schedule.alarmEnabled) continue;

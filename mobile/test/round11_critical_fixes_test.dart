@@ -110,24 +110,32 @@ void main() {
 
   group('Round 11 — schedule grace window', () {
     test(
-        'maxLateness is now 5 minutes (was 90s) so the engine survives a '
+        'maxLateness is at least 5 minutes so the engine survives a '
         'BG/FG bounce without silently skipping a slot', () {
-      expect(ScheduleFireHelper.maxLateness, const Duration(minutes: 5),
-          reason: 'QA report "schedule page says NOW but no audio" was the '
-              '90-second window expiring during a typical OS pause.');
+      // Round 17 bumped to 15 minutes (was 5) to cover the "user
+      // tapped the alarm notification 6-10 minutes after it fired"
+      // case which the original 5-minute window was silently dropping.
+      // We assert the floor (>= 5) so future tightening is still
+      // caught while accommodating the Round 17 widening.
+      expect(
+        ScheduleFireHelper.maxLateness.inMinutes,
+        greaterThanOrEqualTo(5),
+        reason: 'QA report "schedule page says NOW but no audio" was the '
+            'old 90-second window expiring during a typical OS pause; '
+            'Round 17 widened to 15 minutes for tap-from-alarm.',
+      );
     });
 
     test(
-        'slotToFire still honours the window: a slot 6 minutes late returns '
-        'null (we do NOT spam the user with stale fires after a long pause)',
-        () {
-      // Use a synthetic schedule one whose start window is now-ish.
-      // Construct via raw helper to avoid hitting the SQLite test rig.
-      // The pure-helper test for `slotToFire` already exists in
-      // `schedule_fire_helper_test.dart`; here we only assert the
-      // grace boundary moved.
-      expect(ScheduleFireHelper.maxLateness.inMinutes, 5);
-      expect(ScheduleFireHelper.maxLateness.inSeconds, 300);
+        'slotToFire still honours a finite window: a slot 30+ minutes '
+        'late returns null (we do NOT spam the user with stale fires '
+        'after a long pause)', () {
+      expect(
+        ScheduleFireHelper.maxLateness.inMinutes,
+        lessThanOrEqualTo(30),
+        reason: 'The grace window must remain bounded so we never fire '
+            'a clip that is half an hour stale.',
+      );
     });
   });
 

@@ -42,23 +42,27 @@ String _readFile(String relative) {
 
 void main() {
   group('Round 16-A — schedule save never blocks the UI thread', () {
-    test('syncSchedules cap is 3 per schedule and 20 global', () {
+    test('syncSchedules cap covers many hours of upcoming fires', () {
       final src =
           _readFile('lib/services/notifications/notification_service.dart');
+      // Round 17: bumped from 3/20 (Round 16) to 50/200 because the
+      // engine timer dies when the OS kills the process. We need
+      // many pre-registered OS alarms to cover the dead-process
+      // window. ANR is no longer a concern because the post-save
+      // sync is `unawaited` and yields the event loop after every
+      // binder call (covered by separate tests).
       expect(
         src,
-        contains('maxAlarmsPerSchedule = 3'),
-        reason: 'Round 16 cut from 12 to 3 alarms per schedule so a '
-            'multi-schedule save never makes more than a handful of '
-            'binder calls. The engine\'s in-process tick is the real '
-            'source of truth for routine fires — OS alarms only need '
-            'to cover the deep-doze case.',
+        contains('maxAlarmsPerSchedule = 50'),
+        reason: 'A 50-alarm cap covers ~4 hours of 5-minute interval '
+            'fires per schedule even when the engine is dead.',
       );
       expect(
         src,
-        contains('maxAlarmsGlobal = 20'),
-        reason: 'Global cap of 20 keeps worst-case save time under '
-            '2 seconds even when every binder call lands cold.',
+        contains('maxAlarmsGlobal = 200'),
+        reason: 'Global cap of 200 supports up to 4 active schedules '
+            'at full per-schedule budget while still keeping the '
+            'unawaited binder calls bounded.',
       );
     });
 

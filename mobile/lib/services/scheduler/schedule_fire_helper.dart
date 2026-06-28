@@ -4,15 +4,18 @@ import '../../domain/entities/playback_schedule.dart';
 abstract final class ScheduleFireHelper {
   /// Max lateness after a grid slot before we skip to the next interval.
   ///
-  /// Previously 90s — too short for "user backgrounds the app, OS pauses
-  /// the engine, user opens the app 2 minutes later, expected schedule
-  /// hasn't fired". The QA report "the schedule page showed next whisper
-  /// is NOW but no audio played" matched this exactly: the UI told the
-  /// truth (slot was due) but `slotToFire` returned null because the
-  /// engine missed the 90s window. 5 minutes gives the engine room to
-  /// recover from a typical foreground/background bounce without
-  /// silently skipping a slot.
-  static const maxLateness = Duration(minutes: 5);
+  /// Round 17: bumped from 5 to 15 minutes. The user reported that
+  /// after the OS killed the process, the FIRST schedule played
+  /// when the alarm fired and the user tapped the notification, but
+  /// SUBSEQUENT scheduled fires never played. Root cause: when the
+  /// user tapped the notification 6-10 minutes after the slot was
+  /// due (because they were busy / their device was in their
+  /// pocket), the engine's cold-start fireNow saw `now -
+  /// scheduledSlot > 5 minutes` and silently skipped the slot —
+  /// the user perceived this as "scheduling is broken". 15 minutes
+  /// gives the user a realistic chance to notice the alarm and
+  /// tap it before we declare the slot dead.
+  static const maxLateness = Duration(minutes: 15);
 
   /// Whether [now] falls inside today's start/end window for [schedule].
   static bool isInWindow(PlaybackSchedule schedule, DateTime now) {
