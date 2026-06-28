@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -341,15 +343,27 @@ class _ScheduleBuilderScreenState extends ConsumerState<ScheduleBuilderScreen> {
     ref.invalidate(schedulesProvider);
     ref.invalidate(playlistsProvider);
     ref.invalidate(isAppActiveProvider);
-    try {
-      await syncWhisperNotifications(
-        appState: ref.read(appStateRepositoryProvider),
-        schedules: ref.read(scheduleRepositoryProvider),
-        prayer: ref.read(prayerRepositoryProvider),
-      );
-    } catch (_) {
-      // Already logged by syncWhisperNotifications; swallow here.
-    }
+
+    // Round 16: notification sync runs in the BACKGROUND so the save
+    // button's spinner clears immediately. Previously this awaited
+    // up to 60 native binder calls (each `_scheduleWeekly` is
+    // ~50-200ms on Samsung) — the user saw the save button stuck
+    // spinning for 5-15 seconds and on Vivo / Xiaomi the OS killed
+    // the activity with an ANR. We `unawaited` it so the dialog can
+    // pop instantly; the engine's own 5-second heartbeat will pick
+    // up any failure of the BG sync.
+    final appStateRepo = ref.read(appStateRepositoryProvider);
+    final schedRepo = ref.read(scheduleRepositoryProvider);
+    final prayerRepo = ref.read(prayerRepositoryProvider);
+    unawaited(
+      syncWhisperNotifications(
+        appState: appStateRepo,
+        schedules: schedRepo,
+        prayer: prayerRepo,
+      ).catchError((Object _) {
+        // Already logged by syncWhisperNotifications; ignored here.
+      }),
+    );
 
     if (!mounted) {
       _saving = false;

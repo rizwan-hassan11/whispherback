@@ -236,7 +236,15 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
         mediaItem.add(item);
         queue.add([item]);
 
-        await _player.setVolume(0);
+        // Round 16: volume 0 was making some Samsung / Vivo / Xiaomi
+        // OEM audio policy daemons revoke our audio focus ("you're
+        // not really playing anything"). 0.001 is mathematically
+        // inaudible (-60 dB; below the hardware noise floor) but
+        // counts as real playback for the OEM focus check. Combined
+        // with the longer 10-second silence file (also Round 16),
+        // this keeps the FG service genuinely alive when the user
+        // closes the app.
+        await _player.setVolume(0.001);
         await _player.setLoopMode(LoopMode.one);
         await _player.setSpeed(1);
         await _player.setAudioSource(AudioSource.file(path), preload: true);
@@ -359,6 +367,34 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     await _ensureAudioSession();
     final session = await AudioSession.instance;
     await session.setActive(true);
+
+    // Round 16: ALWAYS publish a playing-true PlaybackState BEFORE
+    // setAudioSource. This forces audio_service's native side to
+    // call `Service.startForeground()` IMMEDIATELY rather than
+    // waiting for the first playerEvent → broadcastState round-trip,
+    // which on Vivo / Xiaomi was sometimes 200-500ms late and let
+    // the OS reap the service first (the QA report "audio cuts off
+    // when I close the app while playing"). With this pre-flight
+    // state push, the service is FG-bound before the activity can
+    // get destroyed.
+    try {
+      playbackState.add(
+        playbackState.value.copyWith(
+          processingState: AudioProcessingState.loading,
+          playing: true,
+          controls: const [MediaControl.pause, _stopControl],
+          systemActions: const {
+            MediaAction.seek,
+            MediaAction.play,
+            MediaAction.pause,
+            MediaAction.stop,
+          },
+          androidCompactActionIndices: const [0],
+        ),
+      );
+    } catch (_) {
+      // Best-effort. The next _player event will re-publish anyway.
+    }
 
     // CRITICAL: if a previous source is still loading (rapid tap or schedule
     // racing with manual play), `setAudioSource` would queue behind it on
@@ -589,7 +625,12 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
       return _silencePath!;
     }
     final dir = await getApplicationSupportDirectory();
-    final file = File(p.join(dir.path, 'whisperback_session_silence.wav'));
+    // Round 16: bumped to v2 so devices that cached the 1-second
+    // version from previous installs pick up the new 10-second one
+    // (and don't keep using the rapid-loop version that some OEMs
+    // misclassify as "not playing").
+    final file =
+        File(p.join(dir.path, 'whisperback_session_silence_v2.wav'));
     if (!file.existsSync()) {
       await file.writeAsBytes(_silentWav());
     }
@@ -597,7 +638,7 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     return file.path;
   }
 
-  Uint8List _silentWav({int seconds = 1, int sampleRate = 44100}) {
+  Uint8List _silentWav({int seconds = 10, int sampleRate = 44100}) {
     const channels = 2;
     final numSamples = seconds * sampleRate;
     final dataSize = numSamples * channels * 2;

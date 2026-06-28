@@ -89,7 +89,16 @@ class NotificationService {
         _statusChannelId,
         'Active status',
         description: 'Shows while WhisperBack is active.',
-        importance: Importance.low,
+        // Round 16: bumped from `low` to `defaultImportance`. The user
+        // reported "notification bar appears and disappears even when
+        // Active is ON". `Importance.low` notifications get auto-
+        // collapsed by Samsung One UI 6 / MIUI / Funtouch and were
+        // disappearing entirely when the activity was destroyed. At
+        // `defaultImportance` the OS keeps the status-bar icon and
+        // notification card visible reliably across all OEMs we
+        // tested. `playSound: false` + `enableVibration: false` keep
+        // the bump silent so the user is never annoyed.
+        importance: Importance.defaultImportance,
         playSound: false,
         enableVibration: false,
       ),
@@ -167,7 +176,11 @@ class NotificationService {
       unawaited(instance.cancelActiveOngoing());
       return;
     }
-    if (response.payload == scheduleAlarmPayload) {
+    // Round 16: "Play now" alarm action — same wakeup behaviour as
+    // tapping the notification body; the engine's `fireNow` pass
+    // will start the matching schedule.
+    if (response.actionId == 'schedule_play_now' ||
+        response.payload == scheduleAlarmPayload) {
       unawaited(ScheduleEngineBinding.instance.fireNow());
     }
   }
@@ -208,8 +221,11 @@ class NotificationService {
         _statusChannelId,
         copy.nowPlaying,
         channelDescription: copy.notificationActiveBodyIdle,
-        importance: Importance.low,
-        priority: Priority.low,
+        // Round 16: matches the channel-level bump. OEMs that ignore
+        // the channel-level setting fall back to this per-notification
+        // value, so we set both to be safe.
+        importance: Importance.defaultImportance,
+        priority: Priority.defaultPriority,
         ongoing: true,
         autoCancel: false,
         showWhen: false,
@@ -341,9 +357,23 @@ class NotificationService {
     var id = _scheduleBase;
     final copy = RuntimeCopy.l10n;
     final now = DateTime.now();
-    final horizon = now.add(const Duration(hours: 48));
-    const maxAlarmsPerSchedule = 12;
-    const maxAlarmsGlobal = 60;
+    // Round 16: aggressive caps + per-call event-loop yield so the
+    // save flow NEVER blocks the UI thread long enough to ANR.
+    //   • 3 alarms/schedule (was 12) — these are OS-level wake-ups
+    //     that fire when the engine has been throttled by Doze. The
+    //     engine's 5-second in-process tick is the real source of
+    //     truth; OS alarms only need to cover the "device went to
+    //     deep doze" case, for which 3 next-up alarms is plenty.
+    //   • 20 global cap (was 60) — at ~100ms per binder call worst
+    //     case that's 2 seconds total even when nothing is cached.
+    //   • 12-hour horizon (was 48h) — same reasoning; we only need
+    //     the very next-up alarms.
+    //   • Per-iteration `await Future.delayed(Duration.zero)` so the
+    //     event loop pumps between binder calls and the UI thread
+    //     can paint a frame without being starved.
+    final horizon = now.add(const Duration(hours: 12));
+    const maxAlarmsPerSchedule = 3;
+    const maxAlarmsGlobal = 20;
 
     for (final schedule in schedules) {
       if (!schedule.enabled || !schedule.alarmEnabled) continue;
@@ -352,10 +382,6 @@ class NotificationService {
         if (perScheduleCount >= maxAlarmsPerSchedule) break;
         if (id >= _scheduleBase + maxAlarmsGlobal) return;
         final when = _nextWeekdayTime(slot.weekday, slot.hour, slot.minute);
-        // Skip slots beyond the 48-hour horizon. Without this, every
-        // weekly recurrence (even 6 days away) gets scheduled now,
-        // saturating the per-schedule budget on the far future before
-        // the next-up slots in the current hour get a chance.
         if (when.isAfter(tz.TZDateTime.from(horizon, when.location))) {
           continue;
         }
@@ -369,18 +395,18 @@ class NotificationService {
             payload: scheduleAlarmPayload,
           );
         } catch (e) {
-          // A single failed alarm registration (revoked permission,
-          // OEM scheduling quota hit, OS busy) MUST NOT abort the
-          // whole loop. The in-process engine still ticks and the
-          // remaining alarms still get registered. Pre-Round 14 a
-          // throw here propagated up to the save handler and
-          // surfaced as a "save crashed" toast.
           if (kDebugMode) {
             debugPrint('syncSchedules: zonedSchedule failed for $when: $e');
           }
         }
         id++;
         perScheduleCount++;
+        // Yield to the event loop after EVERY binder call so the
+        // UI thread gets a chance to paint frames between scheduling
+        // calls. Without this, a save with 20 alarms still serialised
+        // all 20 calls in one microtask burst and the user saw the
+        // save button stuck.
+        await Future<void>.delayed(Duration.zero);
       }
     }
   }
@@ -392,7 +418,14 @@ class NotificationService {
     required String body,
     String? payload,
   }) async {
-    const details = NotificationDetails(
+    // Round 16: added a clear "Play now" action so the user has a one-
+    // tap path to launch the app from the alarm notification — even
+    // when the OS killed the process between the alarm being set and
+    // the alarm firing. `showsUserInterface: true` ensures the tap
+    // launches the activity (which auto-revives the Dart isolate and
+    // resumes the engine, which then fires the scheduled clip).
+    final copy = RuntimeCopy.l10n;
+    final details = NotificationDetails(
       android: AndroidNotificationDetails(
         _alarmChannelId,
         'Scheduled whispers',
@@ -402,9 +435,17 @@ class NotificationService {
         category: AndroidNotificationCategory.alarm,
         fullScreenIntent: true,
         icon: 'ic_notification',
-        color: Color(0xFF2E8BFF),
+        color: const Color(0xFF2E8BFF),
+        actions: [
+          AndroidNotificationAction(
+            'schedule_play_now',
+            copy.play,
+            showsUserInterface: true,
+            cancelNotification: true,
+          ),
+        ],
       ),
-      iOS: DarwinNotificationDetails(
+      iOS: const DarwinNotificationDetails(
         interruptionLevel: InterruptionLevel.timeSensitive,
       ),
     );
