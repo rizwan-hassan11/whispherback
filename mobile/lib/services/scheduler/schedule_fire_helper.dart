@@ -79,10 +79,35 @@ abstract final class ScheduleFireHelper {
   }
 
   /// Next grid slot after [lastFired], or [startToday] if never fired today.
+  /// Returns the next slot at or after [now]. If [forDisplay] is true, the
+  /// function will NEVER return a past slot even if it's within the
+  /// `maxLateness` grace window — it always advances to the strictly-
+  /// future grid line.
+  ///
+  /// Background: the engine uses the lateness grace ("a slot that's 2
+  /// minutes in the past is still firable") to avoid skipping fires when
+  /// the device was throttled. But that same path is wrong for display:
+  /// the user sees the notification headline "Next at 1:18" when it's
+  /// actually 1:20 already, and that's misleading. The schedule overview
+  /// screen and notification headline both pass `forDisplay: true` so
+  /// the timestamp shown is always in the future. `slotToFire` /
+  /// `shouldFireNow` continue to use the grace window (forDisplay: false,
+  /// the default) so engine firing logic is unchanged.
+  ///
+  /// [lastSlot] is the wall-clock start of the previous fire. [lastFired]
+  /// is the actual completion (or null if not completed yet). When both
+  /// are provided, the helper picks the larger of `lastFired` and
+  /// `lastSlot + playlistDuration` as the projected end and computes
+  /// `next = projectedEnd + interval`. When only [lastFired] is
+  /// provided, the projection falls back to `lastFired + duration +
+  /// interval` (best-effort; matches the engine's "still firing"
+  /// expectation).
   static DateTime? nextSlotAfter(
     PlaybackSchedule schedule,
     DateTime now, {
     DateTime? lastFired,
+    DateTime? lastSlot,
+    bool forDisplay = false,
   }) {
     if (!schedule.enabled) return null;
 
@@ -94,25 +119,62 @@ abstract final class ScheduleFireHelper {
       final end = _endOnDay(schedule, day);
 
       var slot = start;
-      if (lastFired != null) {
+      // Pick the more authoritative reference for "end of previous fire".
+      final referenceFired = lastFired ?? lastSlot;
+      if (referenceFired != null) {
         final lastDay = DateTime(
-          lastFired.year,
-          lastFired.month,
-          lastFired.day,
+          referenceFired.year,
+          referenceFired.month,
+          referenceFired.day,
         );
         final onSameDay = lastDay.year == day.year &&
             lastDay.month == day.month &&
             lastDay.day == day.day;
-        if (onSameDay && !lastFired.isBefore(start)) {
-          slot = lastFired.add(Duration(minutes: schedule.intervalMinutes));
+        if (onSameDay && !referenceFired.isBefore(start)) {
+          // Interval-from-end semantics: the user's expectation is
+          // "wait `intervalMinutes` AFTER the previous playlist
+          // finishes, not after it starts".
+          //
+          // Two cases:
+          //   1. Previous fire completed cleanly. `lastFired` is the
+          //      actual completion time, which is approximately
+          //      `lastSlot + playlistDuration` (possibly slightly
+          //      later due to load/OS jitter). We use `lastFired` as
+          //      the projected end directly.
+          //   2. Previous fire still in flight. `lastFired` equals
+          //      `lastSlot` (the engine writes that placeholder at
+          //      fire start). We need to project: end ≈ slot + duration.
+          //
+          // Detection rule:
+          //   - If `lastFired != null` AND `lastFired > (lastSlot ?? 0)`
+          //     by at least a few seconds, treat case 1.
+          //   - Else (lastFired == lastSlot, or only lastSlot given),
+          //     treat case 2 — project end.
+          DateTime projectedEnd;
+          const placeholderTolerance = Duration(seconds: 5);
+          if (lastFired != null &&
+              lastSlot != null &&
+              lastFired.difference(lastSlot) > placeholderTolerance) {
+            // Case 1: real completion known.
+            projectedEnd = lastFired;
+          } else {
+            // Case 2: still playing or only the slot stamp exists.
+            final base = referenceFired;
+            projectedEnd = base.add(
+              Duration(milliseconds: schedule.playlistDurationMs),
+            );
+          }
+          slot = projectedEnd
+              .add(Duration(minutes: schedule.intervalMinutes));
         }
       }
 
       while (true) {
         if (end != null && slot.isAfter(end)) break;
         if (dayOffset == 0 && slot.isBefore(now)) {
-          // Skip slots we missed by too much — jump to next grid line.
-          if (now.difference(slot) > maxLateness) {
+          // Skip past slots: under display mode, always advance; under
+          // engine mode, only skip slots beyond the grace window.
+          if (forDisplay || now.difference(slot) > maxLateness) {
             slot = slot.add(Duration(minutes: schedule.intervalMinutes));
             continue;
           }
@@ -120,7 +182,7 @@ abstract final class ScheduleFireHelper {
         if (dayOffset > 0 || !slot.isBefore(now)) {
           return slot;
         }
-        if (now.difference(slot) <= maxLateness) return slot;
+        if (!forDisplay && now.difference(slot) <= maxLateness) return slot;
         slot = slot.add(Duration(minutes: schedule.intervalMinutes));
       }
     }
@@ -168,20 +230,37 @@ abstract final class ScheduleFireHelper {
     PlaybackSchedule schedule,
     DateTime now, {
     DateTime? lastFired,
+    DateTime? lastSlot,
+    bool forDisplay = false,
   }) =>
-      nextSlotAfter(schedule, now, lastFired: lastFired);
+      nextSlotAfter(
+        schedule,
+        now,
+        lastFired: lastFired,
+        lastSlot: lastSlot,
+        forDisplay: forDisplay,
+      );
 
   /// Earliest upcoming fire across all schedules.
   static ({DateTime when, PlaybackSchedule schedule})? nextUpcoming(
     List<PlaybackSchedule> schedules,
     DateTime now, {
     DateTime? Function(String scheduleId)? lastFiredFor,
+    DateTime? Function(String scheduleId)? lastSlotFor,
+    bool forDisplay = false,
   }) {
     ({DateTime when, PlaybackSchedule schedule})? best;
     for (final s in schedules) {
       if (!s.enabled) continue;
       final last = lastFiredFor?.call(s.id);
-      final when = nextFireTime(s, now, lastFired: last);
+      final slot = lastSlotFor?.call(s.id);
+      final when = nextFireTime(
+        s,
+        now,
+        lastFired: last,
+        lastSlot: slot,
+        forDisplay: forDisplay,
+      );
       if (when == null) continue;
       if (best == null || when.isBefore(best.when)) {
         best = (when: when, schedule: s);

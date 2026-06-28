@@ -34,41 +34,63 @@ Future<void> syncWhisperNotifications({
     final handler = whisperAudioHandler;
     final playingClip = handler.isPlayingClip;
 
-    // Per-schedule next fire time, using interval-from-end math
-    // (`lastFired.completion + intervalMinutes`). We deliberately compute
-    // ONE upcoming event per schedule here — never N successive slots
-    // — because the user's interval semantics are "wait `intervalMinutes`
-    // after the previous clip FINISHES", not "fire every `intervalMinutes`
-    // on a clock grid". The latter is what `upcomingEvents` did before
-    // and it produced the QA-reported "3-minute interval shown in
-    // notification even though the playlist is 5 minutes long" bug:
-    // the clock-grid pre-computation ignored playlist duration entirely
-    // because we don't have a reliable per-clip duration estimate at
-    // notification time. Now we only commit to the SINGLE next slot
-    // (which the engine will replace after each fire completes).
+    // Build a rolling list of upcoming fires across all schedules. For
+    // each schedule we walk forward `kMaxUpcomingPerSchedule` steps so a
+    // single under-used schedule doesn't crowd out the next-most-likely
+    // events. We collect across schedules, sort, then take the top
+    // `kMaxUpcomingNotification` (5 — user explicitly requested at
+    // least 5 upcoming entries in the notification summary).
+    //
+    // Critically, we pass `forDisplay: true` so the helper never
+    // surfaces a slot that's already in the past — the QA report
+    // "notification shows next will be in 1:18 when it's 1:20" was
+    // because the helper's lateness grace window let a 2-minute-old
+    // slot through.
+    const kMaxUpcomingPerSchedule = 4;
+    const kMaxUpcomingNotification = 5;
     final upcoming = <({DateTime when, String playlistName})>[];
     for (final s in enabled) {
-      final last = lastFired.get(s.id);
-      final nextWhen = ScheduleFireHelper.nextFireTime(s, now, lastFired: last);
-      if (nextWhen == null) continue;
-      upcoming.add((
-        when: nextWhen,
-        playlistName: s.playlistName.isEmpty ? 'WhisperBack' : s.playlistName,
-      ));
+      final lastSlot = lastFired.slot(s.id);
+      final lastCompletion = lastFired.completion(s.id);
+      var cursorSlot = lastSlot;
+      var cursorFired = lastCompletion;
+      for (var step = 0; step < kMaxUpcomingPerSchedule; step++) {
+        final nextWhen = ScheduleFireHelper.nextFireTime(
+          s,
+          now,
+          lastFired: cursorFired,
+          lastSlot: cursorSlot,
+          forDisplay: true,
+        );
+        if (nextWhen == null) break;
+        if (!nextWhen.isAfter(now)) break;
+        upcoming.add((
+          when: nextWhen,
+          playlistName:
+              s.playlistName.isEmpty ? 'WhisperBack' : s.playlistName,
+        ));
+        // Advance the cursor for the NEXT iteration. We pretend this
+        // event has just completed (slot = nextWhen, completion =
+        // nextWhen + playlistDuration) so the next iteration projects
+        // the slot AFTER it.
+        cursorSlot = nextWhen;
+        cursorFired =
+            nextWhen.add(Duration(milliseconds: s.playlistDurationMs));
+      }
     }
     upcoming.sort((a, b) => a.when.compareTo(b.when));
+    final topUpcoming = upcoming.take(kMaxUpcomingNotification).toList();
 
     String? nextUpcoming;
     String? upcomingSummary;
     final copy = RuntimeCopy.l10n;
-    if (upcoming.isNotEmpty) {
+    if (topUpcoming.isNotEmpty) {
       nextUpcoming = copy.notificationNextUpcoming(
-        upcoming.first.playlistName,
-        _formatTime(upcoming.first.when),
+        topUpcoming.first.playlistName,
+        _formatTime(topUpcoming.first.when),
       );
-      if (upcoming.length > 1) {
-        upcomingSummary = upcoming
-            .take(4)
+      if (topUpcoming.length > 1) {
+        upcomingSummary = topUpcoming
             .map((e) => '• ${_formatTime(e.when)} — ${e.playlistName}')
             .join('\n');
       }

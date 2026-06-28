@@ -1096,31 +1096,39 @@ class PlaybackCoordinator {
   }
 
   /// Pauses the current clip AND hides the mini-player + modal — but does
-  /// NOT tear down the audio_service foreground service. This is what the
-  /// cross icon on the mini-player / modal calls. Distinct from [stop],
-  /// which kills the whole playback session and is reserved for the
-  /// "stop everything, return to activeIdle" semantics.
+  /// NOT stop the underlying audio_service session. This is what the
+  /// cross icon on the mini-player / modal calls.
   ///
-  /// Why this exists: calling `coordinator.stop()` from a cross-icon tap
-  /// goes through `audio_service.stop()` → `super.stop()` → Android FG
-  /// service teardown. On several OEMs (Samsung One UI 6, Vivo Funtouch
-  /// 14, Xiaomi MIUI), that teardown also kills the host Activity if the
-  /// FG-service binding was the only strong reference. The user's exact
-  /// QA report — "tapping the cross icon CRASHES the app instead of
-  /// pausing and hiding the bar" — was this OEM activity-kill. Dismiss
-  /// avoids the entire `super.stop()` path: it just pauses the player
-  /// and transitions the snapshot to `activeIdle` (if Active is on) so
-  /// the mini-player + modal both hide via their existing visibility
-  /// checks. The clip can be restarted with `playClip(...)` or via the
-  /// next schedule fire.
+  /// User contract (from the QA report verbatim): "the cross icon should
+  /// PAUSE the clip and then hide the spotify-styled bar. When any clip
+  /// is clicked again or replayed/resumed, the bar should become visible
+  /// again. The cross only hides — it does not delete the playback
+  /// session."
+  ///
+  /// Implementation:
+  ///   1. Pause the native player (`_audio.pause()`) — the clip's
+  ///      position is preserved. This is the same code path as the
+  ///      mini-player's pause button.
+  ///   2. Emit a snapshot with the SAME clip metadata but `state:
+  ///      activeIdle` (or `inactive` if not Active) so both the mini-
+  ///      player visibility check (`state == manualPlaying ||
+  ///      scheduledPlaying`) and the modal's `modalVisible` check
+  ///      both transition to "hidden".
+  ///   3. Do NOT call `_audio.stop()`, `super.stop()`, or any teardown.
+  ///      The next `playClip` / `playPlaylist` / schedule fire re-emits
+  ///      `manualPlaying` / `scheduledPlaying` and the mini-player re-
+  ///      appears automatically.
+  ///
+  /// Why we no longer call `_audio.stop()` from this path:
+  ///   * `_audio.stop()` resolves to `_handler.stopClip()` which clears
+  ///     the lock-screen media notification. The user reported that
+  ///     after dismissing, tapping a clip again left the player hidden
+  ///     and only re-appeared when they tapped Pause on the (now-stale)
+  ///     lock-screen card. The state machine was confused because the
+  ///     `stopClip` teardown ran but the player's `_playingClip` flag
+  ///     left a stale window. Skipping the teardown entirely sidesteps
+  ///     all of that.
   Future<void> dismissPlayer() async {
-    _userInitiatedPause = true;
-    _playlistClipIndex = null;
-    _libraryQueue = const [];
-    _libraryIndex = -1;
-    _activeScheduleId = null;
-    _activeScheduleShuffle = null;
-
     bool wasActive = false;
     try {
       wasActive = await _appState.isActive();
@@ -1130,10 +1138,12 @@ class PlaybackCoordinator {
       }
     }
 
-    // Optimistic UI flip: hide both surfaces by transitioning OUT of any
-    // playing state. The mini-player hides when state != manualPlaying
-    // && state != scheduledPlaying; the modal hides on `modalVisible:
-    // false`. Both happen here in a single emission.
+    // Optimistic UI flip FIRST so the user sees the bar disappear instantly.
+    // Transition state to activeIdle / inactive so the mini-player's
+    // `state == manualPlaying || scheduledPlaying` visibility check
+    // hides it; and force `modalVisible: false` to dismiss the modal.
+    // We deliberately keep `playlistName` / `clipTitle` null here so a
+    // future re-play has a clean slate to populate.
     _emit(PlaybackSnapshot(
       state:
           wasActive ? AppPlaybackState.activeIdle : AppPlaybackState.inactive,
@@ -1141,21 +1151,30 @@ class PlaybackCoordinator {
       modalVisible: false,
     ));
 
-    // Stop the clip session via the handler (clears the lock-screen
-    // notification, transitions back to keep-alive silence when Active
-    // is on). This deliberately does NOT call audio_service's top-level
-    // `stop()` — that's the path that tears down the FG service and
-    // kills the activity on OEMs. `_audio.stop()` here resolves to
-    // `_handler.stopClip()` which is hardened to skip `super.stop()`.
+    // Now pause the actual player. The clip's position is preserved so a
+    // future tap on the same clip resumes from where the user left off.
+    // Set the sentinel BEFORE the await so any racing completion event
+    // is treated as "paused at end" not "auto-advance".
+    //
+    // We deliberately DO NOT call `_audio.stop()` here — that would
+    // tear down the media session and the foreground service binding,
+    // which on Samsung / Vivo OEMs causes the process to be reaped
+    // shortly after (the QA report "when I close the app, no
+    // notification is shown and the clip just stops"). Pausing keeps
+    // the FG service alive; the media notification stays visible so
+    // the user has lock-screen controls AND so the OS keeps the
+    // process in the protected foreground bucket while Active is on.
+    _userInitiatedPause = true;
     try {
-      await _audio.stop();
+      await _audio.pause();
     } catch (e, st) {
       if (kDebugMode) {
-        debugPrint('dismissPlayer: _audio.stop failed: $e\n$st');
+        debugPrint('dismissPlayer: _audio.pause failed: $e\n$st');
       }
     }
-    // Best-effort refresh of the active ongoing notification so it
-    // immediately reflects the new "no clip playing" state.
+
+    // Best-effort: refresh the persistent notification so it shows the
+    // post-dismiss "no clip playing" state.
     try {
       await refreshScheduleNotifications?.call();
     } catch (e, st) {

@@ -280,6 +280,21 @@ class NotificationService {
 
   /// Re-arms all scheduled-alarm notifications from the current schedules.
   /// Call after any schedule change or when the toggle turns ON.
+  ///
+  /// CRITICAL throttling: we only register the **next 12 slots per schedule
+  /// across the next 48 hours** — never the entire weekly grid. Previous
+  /// versions scheduled every interval-grid slot for every enabled
+  /// schedule, capped at 400 globally. That cap was reached easily by a
+  /// 3-minute interval (480 slots per day × 7 days = 3360 candidates),
+  /// and each `zonedSchedule` is a synchronous Android binder call
+  /// (~50 ms). Scheduling 400 alarms serially took 20+ seconds — long
+  /// enough for the OS to kill the activity with an ANR, which is what
+  /// the QA report "app crashed on schedule save" was caused by. The
+  /// in-process engine re-fires every 5 seconds, so the OS alarm is
+  /// only needed as a **wake-up trigger** when the engine has been
+  /// throttled by Doze. 12 next-up alarms per schedule (typically a
+  /// few hours of coverage at 3-minute intervals) is more than enough
+  /// for that role.
   Future<void> syncSchedules(
     List<PlaybackSchedule> schedules, {
     required bool active,
@@ -290,20 +305,47 @@ class NotificationService {
 
     var id = _scheduleBase;
     final copy = RuntimeCopy.l10n;
+    final now = DateTime.now();
+    final horizon = now.add(const Duration(hours: 48));
+    const maxAlarmsPerSchedule = 12;
+    const maxAlarmsGlobal = 60;
+
     for (final schedule in schedules) {
       if (!schedule.enabled || !schedule.alarmEnabled) continue;
+      var perScheduleCount = 0;
       for (final slot in ScheduleFireHelper.intervalAlarmSlots(schedule)) {
-        if (id >= _scheduleBase + 400) return;
+        if (perScheduleCount >= maxAlarmsPerSchedule) break;
+        if (id >= _scheduleBase + maxAlarmsGlobal) return;
         final when = _nextWeekdayTime(slot.weekday, slot.hour, slot.minute);
+        // Skip slots beyond the 48-hour horizon. Without this, every
+        // weekly recurrence (even 6 days away) gets scheduled now,
+        // saturating the per-schedule budget on the far future before
+        // the next-up slots in the current hour get a chance.
+        if (when.isAfter(tz.TZDateTime.from(horizon, when.location))) {
+          continue;
+        }
         final name = slot.label.isEmpty ? 'WhisperBack' : slot.label;
-        await _scheduleWeekly(
-          id: id,
-          when: when,
-          title: 'WhisperBack',
-          body: copy.notificationScheduledReady(name),
-          payload: scheduleAlarmPayload,
-        );
+        try {
+          await _scheduleWeekly(
+            id: id,
+            when: when,
+            title: 'WhisperBack',
+            body: copy.notificationScheduledReady(name),
+            payload: scheduleAlarmPayload,
+          );
+        } catch (e) {
+          // A single failed alarm registration (revoked permission,
+          // OEM scheduling quota hit, OS busy) MUST NOT abort the
+          // whole loop. The in-process engine still ticks and the
+          // remaining alarms still get registered. Pre-Round 14 a
+          // throw here propagated up to the save handler and
+          // surfaced as a "save crashed" toast.
+          if (kDebugMode) {
+            debugPrint('syncSchedules: zonedSchedule failed for $when: $e');
+          }
+        }
         id++;
+        perScheduleCount++;
       }
     }
   }

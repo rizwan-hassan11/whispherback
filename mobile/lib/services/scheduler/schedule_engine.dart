@@ -160,6 +160,22 @@ class ScheduleEngine {
       return;
     }
 
+    // Heartbeat: every tick, while Active, make sure the foreground
+    // service silence keep-alive is still bound. Without this, after
+    // the user swipes the activity away the Android OS can reap the
+    // FG service quietly on Samsung / Vivo / Xiaomi — the user's
+    // exact QA report ("when I close the app it stops playing,
+    // notification disappears"). `enterForeground` is idempotent and
+    // returns immediately if a clip is already playing.
+    try {
+      await _coordinator.ensureForegroundForSchedule();
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint(
+            'ScheduleEngine: heartbeat ensureForeground failed: $e\n$st');
+      }
+    }
+
     if (_coordinator.snapshot.state == AppPlaybackState.scheduledPlaying &&
         _coordinator.snapshot.isPlaying) {
       // Mid-playback the lock-screen media notification is authoritative;

@@ -12,6 +12,7 @@ class PlaybackSchedule extends Equatable {
     this.daysMask = 127,
     this.enabled = true,
     this.playlistName = '',
+    this.playlistDurationMs = 0,
   });
 
   final String id;
@@ -26,6 +27,15 @@ class PlaybackSchedule extends Equatable {
   final int daysMask;
   final bool enabled;
   final String playlistName;
+
+  /// Total duration of all clips in the schedule's playlist, in
+  /// milliseconds. Used so the "next fire" math can correctly account
+  /// for the time the playlist actually takes to play. Populated by
+  /// `ScheduleRepository` at load time from the SUM of `clips.duration_ms`
+  /// joined on `playlist_clips`. Defaults to 0 if no clips are known
+  /// yet, which gracefully degrades to the old "interval from start"
+  /// behaviour.
+  final int playlistDurationMs;
 
   static const weekdayLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
@@ -57,6 +67,7 @@ class PlaybackSchedule extends Equatable {
     bool? alarmEnabled,
     int? daysMask,
     bool? enabled,
+    int? playlistDurationMs,
   }) {
     return PlaybackSchedule(
       id: id,
@@ -69,6 +80,7 @@ class PlaybackSchedule extends Equatable {
       daysMask: daysMask ?? this.daysMask,
       enabled: enabled ?? this.enabled,
       playlistName: playlistName,
+      playlistDurationMs: playlistDurationMs ?? this.playlistDurationMs,
     );
   }
 
@@ -84,5 +96,6 @@ class PlaybackSchedule extends Equatable {
         daysMask,
         enabled,
         playlistName,
+        playlistDurationMs,
       ];
 }

@@ -27,8 +27,20 @@ class ScheduleRepository {
 
   Future<List<PlaybackSchedule>> getAll() async {
     final db = await _db.database;
+    // Include `playlist_duration_ms` so the schedule entity carries enough
+    // info for `nextFireTime` to do interval-from-end math
+    // (`completion + playlist_duration + interval`). The LEFT JOIN
+    // returns 0 when the playlist has no clips, which falls back to the
+    // old "interval from start" behaviour without crashing.
     final rows = await db.rawQuery('''
-      SELECT s.*, p.name AS playlist_name
+      SELECT s.*,
+        p.name AS playlist_name,
+        COALESCE((
+          SELECT SUM(c.duration_ms)
+          FROM playlist_clips pc
+          INNER JOIN clips c ON c.id = pc.clip_id
+          WHERE pc.playlist_id = s.playlist_id
+        ), 0) AS playlist_duration_ms
       FROM schedules s
       INNER JOIN playlists p ON p.id = s.playlist_id
       ORDER BY s.start_time ASC
@@ -40,7 +52,14 @@ class ScheduleRepository {
     final db = await _db.database;
     final rows = await db.rawQuery(
       '''
-      SELECT s.*, p.name AS playlist_name
+      SELECT s.*,
+        p.name AS playlist_name,
+        COALESCE((
+          SELECT SUM(c.duration_ms)
+          FROM playlist_clips pc
+          INNER JOIN clips c ON c.id = pc.clip_id
+          WHERE pc.playlist_id = s.playlist_id
+        ), 0) AS playlist_duration_ms
       FROM schedules s
       INNER JOIN playlists p ON p.id = s.playlist_id
       WHERE s.playlist_id = ?
@@ -141,7 +160,14 @@ class ScheduleRepository {
 
     final rows = await db.rawQuery(
       '''
-      SELECT s.*, p.name AS playlist_name
+      SELECT s.*,
+        p.name AS playlist_name,
+        COALESCE((
+          SELECT SUM(c.duration_ms)
+          FROM playlist_clips pc
+          INNER JOIN clips c ON c.id = pc.clip_id
+          WHERE pc.playlist_id = s.playlist_id
+        ), 0) AS playlist_duration_ms
       FROM schedules s
       INNER JOIN playlists p ON p.id = s.playlist_id
       WHERE s.id = ?
@@ -232,6 +258,12 @@ class ScheduleRepository {
 
   PlaybackSchedule _fromRow(Map<String, Object?> row) {
     final endRaw = row['end_time'] as String?;
+    // `playlist_duration_ms` can come back as either int (sqflite Android)
+    // or num (sqflite_common) depending on platform; coerce to int.
+    final rawDuration = row['playlist_duration_ms'];
+    final durationMs = rawDuration is int
+        ? rawDuration
+        : (rawDuration is num ? rawDuration.toInt() : 0);
     return PlaybackSchedule(
       id: row['id']! as String,
       playlistId: row['playlist_id']! as String,
@@ -243,6 +275,7 @@ class ScheduleRepository {
       daysMask: row['days_mask'] as int? ?? 127,
       enabled: (row['enabled'] as int) == 1,
       playlistName: row['playlist_name']! as String,
+      playlistDurationMs: durationMs,
     );
   }
 }

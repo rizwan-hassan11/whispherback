@@ -173,13 +173,10 @@ void main() {
 
   group('Round 12-C — notification interval respects playlist duration', () {
     test(
-        'notification_sync.dart computes ONE upcoming slot per schedule via '
+        'notification_sync.dart computes upcoming slots per schedule via '
         '`nextFireTime`, not a clock-grid of N successive slots', () {
       final src =
           _readFile('lib/services/notifications/notification_sync.dart');
-      // The old code called ScheduleFireHelper.upcomingEvents and that
-      // method clock-grids slots ignoring playlist duration. We must
-      // no longer use it.
       expect(
         src,
         isNot(contains('ScheduleFireHelper.upcomingEvents(')),
@@ -191,16 +188,29 @@ void main() {
       );
       expect(
         src,
-        contains('ScheduleFireHelper.nextFireTime(s, now, lastFired: last)'),
+        contains('ScheduleFireHelper.nextFireTime('),
         reason: 'notification_sync must call nextFireTime so the '
             'completion-stamped interval-from-end semantics apply.',
       );
+      // Round 14 split lastFired into slot + completion so the helper
+      // can do real interval-from-end math. Both must be passed.
       expect(
         src,
-        contains('lastFired.get(s.id)'),
-        reason: 'Each schedule\'s last completion stamp must be passed '
-            'to nextFireTime so the engine computes completion + '
-            'interval, NOT slot-grid + interval.',
+        contains('lastFired.slot('),
+        reason: 'sync must read the slot stamp so still-firing rounds '
+            'project end correctly.',
+      );
+      expect(
+        src,
+        contains('lastFired.completion('),
+        reason: 'sync must read the completion stamp so the next slot '
+            'is interval-from-end.',
+      );
+      expect(
+        src,
+        contains('forDisplay: true'),
+        reason: 'sync must request display-only mode so past slots in '
+            'the engine grace window never leak into the notification.',
       );
     });
   });

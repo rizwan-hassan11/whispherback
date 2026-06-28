@@ -223,11 +223,18 @@ class _ScheduleBodyState extends State<_ScheduleBody> {
   String _countdownFor(PlaybackSchedule schedule, AppLocalizations l10n) {
     if (!schedule.enabled) return l10n.paused;
     final now = DateTime.now();
-    final last = ScheduleLastFiredStore.instance.get(schedule.id);
+    final store = ScheduleLastFiredStore.instance;
+    // forDisplay: true ensures we never show a past time as the "next"
+    // countdown — the engine's lateness grace window made that surface
+    // through previously and the user reported "schedule page says next
+    // in 1:18 but it's already 1:20". Passing both slot + completion
+    // lets the helper do real interval-from-end math.
     final next = ScheduleFireHelper.nextFireTime(
       schedule,
       now,
-      lastFired: last,
+      lastFired: store.completion(schedule.id),
+      lastSlot: store.slot(schedule.id),
+      forDisplay: true,
     );
     return ScheduleCountdown.untilTime(next, now);
   }
@@ -236,12 +243,20 @@ class _ScheduleBodyState extends State<_ScheduleBody> {
     final now = DateTime.now();
     final enabled =
         widget.schedules.where((s) => s.enabled).toList(growable: false);
-    final next = ScheduleFireHelper.nextUpcoming(
-      enabled,
-      now,
-      lastFiredFor: ScheduleLastFiredStore.instance.get,
-    );
-    return ScheduleCountdown.untilTime(next?.when, now);
+    final store = ScheduleLastFiredStore.instance;
+    DateTime? best;
+    for (final s in enabled) {
+      final when = ScheduleFireHelper.nextFireTime(
+        s,
+        now,
+        lastFired: store.completion(s.id),
+        lastSlot: store.slot(s.id),
+        forDisplay: true,
+      );
+      if (when == null) continue;
+      if (best == null || when.isBefore(best)) best = when;
+    }
+    return ScheduleCountdown.untilTime(best, now);
   }
 
   @override

@@ -523,7 +523,12 @@ class _NextWhisperCardState extends ConsumerState<_NextWhisperCard> {
     final next = ScheduleFireHelper.nextUpcoming(
       enabled,
       now,
-      lastFiredFor: ScheduleLastFiredStore.instance.get,
+      lastFiredFor: ScheduleLastFiredStore.instance.completion,
+      lastSlotFor: ScheduleLastFiredStore.instance.slot,
+      // Home page surfaces this as "next at HH:mm" — never let a past
+      // slot leak through even if the engine would still fire it
+      // within its grace window.
+      forDisplay: true,
     );
 
     final subtitle = next == null
