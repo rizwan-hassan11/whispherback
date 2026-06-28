@@ -9,7 +9,6 @@ import 'package:timezone/timezone.dart' as tz;
 
 import '../../domain/entities/playback_schedule.dart';
 import '../audio/whisper_audio_handler.dart';
-import '../scheduler/background_alarm_playback.dart';
 import '../scheduler/schedule_engine_binding.dart';
 import '../scheduler/schedule_fire_helper.dart';
 import '../playback/active_mode_binding.dart';
@@ -357,19 +356,13 @@ class NotificationService {
     _lastSyncedFingerprint = fingerprint;
     _lastSyncedActive = active;
     await _cancelAllScheduleAlarms();
-    // Round 20: ALSO drive the background-isolate playback alarm. When
-    // Active is ON we register a single periodic alarm that wakes a
-    // separate isolate every minute to check if any schedule is due —
-    // this is the path that survives the main Dart isolate being
-    // killed by Vivo / Xiaomi / older Samsung One UI battery managers.
-    // When Active is OFF (or no schedules), we cancel it so the OS
-    // can sleep undisturbed.
-    final anyEnabled = schedules.any((s) => s.enabled);
-    if (active && anyEnabled) {
-      unawaited(ensureBackgroundAlarmRegistered());
-    } else {
-      unawaited(cancelBackgroundAlarm());
-    }
+    // Round 21: the native `WhisperAlarmScheduler` owns the
+    // setAlarmClock table for true scheduled audio. We DO NOT call
+    // it here because we don't have the playlist repository in this
+    // layer; `notification_sync.dart` invokes it after computing
+    // the schedule snapshot. The `flutter_local_notifications`
+    // alarms below remain as the *visible* schedule-reminder card
+    // and as a soft fallback if the OS rejects an exact alarm.
     if (!active) return;
 
     var id = _scheduleBase;

@@ -15,8 +15,18 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
     <!-- Scheduled alarm notifications (fire when app is closed) -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
+    <!-- Android 14+ allows USE_EXACT_ALARM without runtime grant if the
+         app's *primary* purpose is alarms/calendars. WhisperBack is a
+         scheduled-audio app — `setAlarmClock` IS the primary mechanism —
+         so this is permissible per Play policy. -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <!-- Android 14+: deliver BOOT_COMPLETED BEFORE the user unlocks the
+         device, so the user's morning whisper is already armed when they
+         pick up the phone. Pair with WhisperBootReceiver's
+         LOCKED_BOOT_COMPLETED intent filter. -->
+    <uses-permission android:name="android.permission.RECEIVE_LOCKED_BOOT_COMPLETED"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
@@ -109,26 +119,38 @@
             android:name="com.dexterous.flutterlocalnotifications.ActionBroadcastReceiver"
             android:exported="false" />
 
-        <!-- android_alarm_manager_plus: registers the alarm broadcast
-             receiver + the background isolate service. We use this for
-             TRUE background scheduled audio playback that survives the
-             Dart main isolate being killed by aggressive OEM battery
-             managers (Vivo/Xiaomi/Samsung One UI). The fired callback
-             starts its own foreground service and plays the clip
-             without requiring the user to tap the notification. -->
+        <!-- Round 21: native WhisperBack alarm-clock scheduler. Replaces
+             the deleted android_alarm_manager_plus background-isolate
+             path with a Kotlin alarm-clock model: exact
+             `setAlarmClock` PendingIntents land in
+             WhisperAlarmReceiver which immediately starts the typed
+             WhisperPlaybackService (foregroundServiceType
+             ="mediaPlayback") and plays the clip via MediaPlayer.
+             This is the only architecture allowed to start a
+             foreground service from the background on Android 12+
+             (alarm-clock alarms are Doze-exempt). -->
+        <receiver
+            android:name=".alarms.WhisperAlarmReceiver"
+            android:enabled="true"
+            android:exported="false"/>
         <service
-            android:name="dev.fluttercommunity.plus.androidalarmmanager.AlarmService"
-            android:permission="android.permission.BIND_JOB_SERVICE"
-            android:exported="false"/>
+            android:name=".alarms.WhisperPlaybackService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback"
+            android:stopWithTask="false"/>
+        <!-- Round 21: re-arm alarms after reboot / app update so the
+             user's schedule survives a device restart without them
+             having to open the app. -->
         <receiver
-            android:name="dev.fluttercommunity.plus.androidalarmmanager.AlarmBroadcastReceiver"
-            android:exported="false"/>
-        <receiver
-            android:name="dev.fluttercommunity.plus.androidalarmmanager.RebootBroadcastReceiver"
-            android:enabled="false"
-            android:exported="false">
+            android:name=".alarms.WhisperBootReceiver"
+            android:enabled="true"
+            android:exported="true">
             <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED"></action>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+                <action android:name="android.intent.action.QUICKBOOT_POWERON"/>
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED"/>
             </intent-filter>
         </receiver>
     </application>

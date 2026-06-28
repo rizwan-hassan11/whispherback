@@ -25,12 +25,17 @@ dependencies:
   record: ^5.2.0
   permission_handler: ^11.3.1
   flutter_local_notifications: ^18.0.1
-  # Round 20: 4.0.8 is the last release before the Kotlin 2.2 / AGP
-  # 8.12.1 bump. Our project is on AGP 8.11.1 (matching the rest of
-  # the plugin tree) so this version is the safe choice. The 5.x
-  # line is also Kotlin DSL only, which our Groovy build files
-  # would need migrating to.
-  android_alarm_manager_plus: ^4.0.8
+  # Round 21: `android_alarm_manager_plus` was REMOVED. Its
+  # background-isolate model could not produce audio reliably on
+  # Android 14+ (mediaPlayback FG service required for audio focus
+  # when the screen is off) and its periodic alarms are INEXACT
+  # (Doze-throttled). We now drive scheduled playback through a
+  # native Kotlin path: `WhisperAlarmScheduler` registers exact
+  # `setAlarmClock` alarms; `WhisperAlarmReceiver` starts a typed
+  # `WhisperPlaybackService` (foregroundServiceType="mediaPlayback")
+  # which plays the clip via MediaPlayer. This is the alarm-clock
+  # model — the only architecture that satisfies "audio plays at
+  # the right time even when the app is closed on aggressive OEMs".
   timezone: ^0.10.0
   flutter_timezone: ^4.1.0
   uuid: ^4.5.1

@@ -33,6 +33,15 @@ class _WhisperBackAppState extends ConsumerState<WhisperBackApp>
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await ScheduleLastFiredStore.ensureLoaded();
+      // Round 21: register the PlaylistRepository globally so the
+      // notification-sync layer can hand it to `NativeAlarmsBridge`
+      // without every call site having to thread it through. The
+      // bridge needs the playlist's first playable clip path so the
+      // native `WhisperPlaybackService` can play it when the alarm
+      // fires (even if the app is fully killed).
+      registerPlaylistRepositoryForBridge(
+        ref.read(playlistRepositoryProvider),
+      );
       // Eagerly create the engine (starts its timer in the provider).
       ref.read(scheduleEngineProvider);
       await _initNotifications();

@@ -1,14 +1,26 @@
 import 'package:flutter/foundation.dart';
 
 import '../../data/repositories/app_state_repository.dart';
+import '../../data/repositories/playlist_repository.dart';
 import '../../data/repositories/prayer_repository.dart';
 import '../../data/repositories/schedule_repository.dart';
 import '../audio/whisper_audio_handler.dart';
 import '../prayer/prayer_notification_scheduler.dart';
+import '../scheduler/native_alarms_bridge.dart';
 import '../scheduler/schedule_fire_helper.dart';
 import '../scheduler/schedule_last_fired_store.dart';
 import '../../l10n/runtime_copy.dart';
 import 'notification_service.dart';
+
+/// Round 21 — global PlaylistRepository handle used by `syncWhisperNotifications`
+/// when the caller didn't pass one explicitly. The app's bootstrap path
+/// registers it once before the first sync; resetting to null in tests is
+/// fine (the bridge silently no-ops when playlists is null).
+PlaylistRepository? _playlistsForBridge;
+
+void registerPlaylistRepositoryForBridge(PlaylistRepository? repo) {
+  _playlistsForBridge = repo;
+}
 
 /// • **Idle + Active** → flutter status notification (schedule summary)
 /// • **Clip playing** → [audio_service] Spotify-style media notification only
@@ -19,6 +31,7 @@ import 'notification_service.dart';
 Future<void> syncWhisperNotifications({
   required AppStateRepository appState,
   required ScheduleRepository schedules,
+  PlaylistRepository? playlists,
   PrayerRepository? prayer,
 }) async {
   try {
@@ -96,10 +109,7 @@ Future<void> syncWhisperNotifications({
       }
     }
 
-    if (playingClip) {
-      // Clip playback uses the media notification — hide the status card.
-      await service.cancelActiveOngoing();
-    } else if (active) {
+    if (active) {
       // Refresh the silent keep-alive (best-effort — failures must not
       // block the visible notification below).
       try {
@@ -109,25 +119,52 @@ Future<void> syncWhisperNotifications({
           debugPrint('updateActiveSessionInfo failed (handled): $e');
         }
       }
-      // ALWAYS publish the WhisperBack ongoing card while Active is ON.
-      // Previously gated on `shouldUseFlutterActiveNotification`, which
-      // returned false whenever the audio_service silence keep-alive
-      // appeared to be running. On Samsung One UI 6 / Vivo Funtouch 14 /
-      // Infinix XOS, the silent keep-alive card is suppressed by the OS
-      // even when bound — so users saw NO notification at all, despite
-      // the toggle being on. We now post our own card unconditionally;
-      // if audio_service ALSO posts one, that's two cards (acceptable
-      // and clearly labelled), but the user is never in the dark.
+      // Round 21: ALWAYS publish the WhisperBack ongoing schedule card
+      // while Active is ON — INCLUDING while a clip is playing in the
+      // mini-player. Previously we cancelled this card the moment a
+      // clip started, which is why the user reported "the notification
+      // bar with the schedules becomes hidden sometimes when the app is
+      // opened or clips is playing or when mini-player is working".
+      // The audio_service media-controls notification and our schedule
+      // card are independent (different IDs, different channels) so
+      // both can — and now do — coexist exactly like a music player
+      // alongside an alarm clock.
       await service.showActiveOngoing(
         scheduleCount: armed,
         nextUpcoming: nextUpcoming,
         upcomingSummary: upcomingSummary,
       );
+      if (playingClip && kDebugMode) {
+        debugPrint('syncWhisperNotifications: keeping active card up '
+            'alongside the now-playing media controls');
+      }
     } else {
       await service.cancelActiveOngoing();
     }
 
     await service.syncSchedules(all, active: active);
+
+    // Round 21: drive the native alarm-clock scheduler. This is the
+    // path that actually plays scheduled audio when the app is closed
+    // (the previous Round-20 Dart background isolate couldn't acquire
+    // audio focus from a non-FG context on Android 14+, hence the
+    // user's "notification shows the slot but nothing plays"). When
+    // Active is OFF — or no playlists are provided — we cancel any
+    // outstanding alarms so the device can stay in Doze undisturbed.
+    final resolvedPlaylists = playlists ?? _playlistsForBridge;
+    if (resolvedPlaylists != null) {
+      try {
+        await NativeAlarmsBridge.instance.applySnapshot(
+          schedules: all,
+          playlists: resolvedPlaylists,
+          active: active,
+        );
+      } catch (e, st) {
+        if (kDebugMode) {
+          debugPrint('NativeAlarmsBridge.applySnapshot failed: $e\n$st');
+        }
+      }
+    }
 
     if (prayer != null) {
       final prayerScheduler = PrayerNotificationScheduler(
@@ -156,5 +193,10 @@ String _formatTime(DateTime when) {
 Future<void> refreshWhisperNotifications({
   required AppStateRepository appState,
   required ScheduleRepository schedules,
+  PlaylistRepository? playlists,
 }) =>
-    syncWhisperNotifications(appState: appState, schedules: schedules);
+    syncWhisperNotifications(
+      appState: appState,
+      schedules: schedules,
+      playlists: playlists,
+    );
