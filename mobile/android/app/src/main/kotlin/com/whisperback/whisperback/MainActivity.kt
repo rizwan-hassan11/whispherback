@@ -168,33 +168,34 @@ class MainActivity : AudioServiceActivity() {
         // clip", "user pressed Pause in the notification shade") into
         // Flutter. This is what makes the mini-player light up the moment
         // the scheduled clip starts.
-        WhisperPlaybackService.stateListener = { state, clipPath, clipTitle, playlistName, scheduleId ->
-            try {
-                val ch = alarmChannel ?: return@stateListener
-                // MUST hop to the main thread — invokeMethod is not safe
-                // off-thread. Posting via Handler ensures we don't
-                // crash if the listener fires from MediaPlayer's
-                // worker thread.
-                android.os.Handler(android.os.Looper.getMainLooper()).post {
-                    try {
-                        ch.invokeMethod(
-                            "onScheduledPlaybackState",
-                            mapOf(
-                                "state" to state,
-                                "clipPath" to clipPath,
-                                "clipTitle" to clipTitle,
-                                "playlistName" to playlistName,
-                                "scheduleId" to scheduleId,
-                            ),
-                        )
-                    } catch (_: Throwable) {
-                        // Channel might be torn down mid-callback.
+        WhisperPlaybackService.stateListener =
+            lambda@{ state, clipPath, clipTitle, playlistName, scheduleId ->
+                try {
+                    val ch = alarmChannel ?: return@lambda
+                    // MUST hop to the main thread — invokeMethod is not safe
+                    // off-thread. Posting via Handler ensures we don't
+                    // crash if the listener fires from MediaPlayer's
+                    // worker thread.
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        try {
+                            ch.invokeMethod(
+                                "onScheduledPlaybackState",
+                                mapOf(
+                                    "state" to state,
+                                    "clipPath" to clipPath,
+                                    "clipTitle" to clipTitle,
+                                    "playlistName" to playlistName,
+                                    "scheduleId" to scheduleId,
+                                ),
+                            )
+                        } catch (_: Throwable) {
+                            // Channel might be torn down mid-callback.
+                        }
                     }
+                } catch (_: Throwable) {
+                    // Defensive — never let a state callback crash playback.
                 }
-            } catch (_: Throwable) {
-                // Defensive — never let a state callback crash playback.
             }
-        }
     }
 
     private fun sendCommandToService(action: String) {
