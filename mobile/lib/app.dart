@@ -14,6 +14,7 @@ import 'services/notifications/notification_service.dart';
 import 'services/notifications/notification_sync.dart';
 import 'services/platform/android_runtime_permissions.dart';
 import 'services/platform/permission_prompt.dart';
+import 'services/scheduler/native_alarms_bridge.dart';
 import 'services/scheduler/schedule_engine.dart';
 import 'services/scheduler/schedule_engine_binding.dart';
 import 'services/scheduler/schedule_last_fired_store.dart';
@@ -58,6 +59,11 @@ class _WhisperBackAppState extends ConsumerState<WhisperBackApp>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       ScheduleEngineBinding.instance.fireNow();
+      // Round 22 — when the user opens the app, ask the native
+      // playback service whether a scheduled clip is mid-flight so the
+      // mini-player lights up immediately (rather than waiting for the
+      // next state transition).
+      unawaited(NativeAlarmsBridge.instance.fetchPlaybackState());
       // Re-request permissions if the user changed them in Settings.
       unawaited(_refreshPermissionsAndSync());
     }

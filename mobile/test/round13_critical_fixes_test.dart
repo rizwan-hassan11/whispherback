@@ -100,7 +100,14 @@ void main() {
       final dismissIdx = src.indexOf('Future<void> dismissPlayer()');
       expect(dismissIdx, greaterThan(0),
           reason: 'dismissPlayer method is missing from the coordinator.');
-      final body = src.substring(dismissIdx, dismissIdx + 3500);
+      // Round 22 — bumped from 3500 chars to 6000 because the body
+      // grew to include the native-scheduled-playback bypass branch.
+      // The substring assertions still hold; we just need a wider
+      // window because `_audio.pause()` is now further down.
+      final body = src.substring(
+        dismissIdx,
+        (dismissIdx + 6000).clamp(0, src.length),
+      );
       // Round 18 contract: branch on wasActive so the FG service stays
       // alive in Active mode (clip→silence atomic handoff via stop()
       // when keep-alive is set) and the process is fully released in

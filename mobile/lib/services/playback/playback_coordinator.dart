@@ -16,6 +16,7 @@ import '../platform/keep_alive_service.dart';
 import '../prayer/adhan_player.dart';
 import '../prayer/prayer_service.dart';
 import '../playback/active_mode_binding.dart';
+import '../scheduler/native_alarms_bridge.dart';
 import '../shuffle/shuffle_engine.dart';
 
 enum ActiveToggleResult { success }
@@ -83,11 +84,19 @@ class PlaybackCoordinator {
   final _shuffleEngines = <String, ShuffleEngine>{};
 
   StreamSubscription<PlayerState>? _playerSub;
+  StreamSubscription<NativePlaybackSnapshot>? _nativePlaybackSub;
   Timer? _modeCheckTimer;
   String? _pendingScheduledPlaylistId;
   String? _pendingScheduledScheduleId;
   int? _playlistClipIndex;
   String? _lastAdhanWindowKey;
+
+  /// True while the visible mini-player snapshot is owned by the native
+  /// scheduled-playback service (Round 22). When true, `pause()` /
+  /// `resume()` / `dismissPlayer()` route through [NativeAlarmsBridge]
+  /// instead of `_audio` (just_audio), because that's the player actually
+  /// emitting sound.
+  bool _nativeScheduledActive = false;
 
   /// True once the user has explicitly tapped pause on the current clip.
   /// Cleared when they explicitly resume, when a new clip starts, or when
@@ -280,7 +289,72 @@ class PlaybackCoordinator {
         }
       },
     );
+    // Round 22 — listen for native scheduled-playback transitions so the
+    // mini-player lights up when an alarm-fired clip starts, flips the
+    // play/pause icon when the user uses the notification shade, and
+    // disappears when playback ends.
+    _nativePlaybackSub = NativeAlarmsBridge.instance.stateStream.listen(
+      _onNativePlaybackState,
+      onError: (Object e, StackTrace st) {
+        if (kDebugMode) {
+          debugPrint('coordinator native state stream error (swallowed): $e\n$st');
+        }
+      },
+    );
+    // Cold-start poll: if a scheduled clip is mid-flight (the user opened
+    // the app while it was playing), pull the snapshot now so we don't
+    // have to wait for the next transition event.
+    unawaited(NativeAlarmsBridge.instance.fetchPlaybackState());
     startModeMonitoring();
+  }
+
+  /// Mirrors a native-playback transition into the UI snapshot so the
+  /// mini-player and modal reflect what the OS-level service is actually
+  /// playing. We use the existing `scheduledPlaying` state so all the
+  /// downstream consumers (mini-player visibility, modal show button,
+  /// snapshot tests) treat this as a "real" scheduled play even though
+  /// the audio bytes are flowing through Kotlin instead of just_audio.
+  void _onNativePlaybackState(NativePlaybackSnapshot native) {
+    try {
+      if (native.isPlaying) {
+        _nativeScheduledActive = true;
+        _emit(_snapshot.copyWith(
+          state: AppPlaybackState.scheduledPlaying,
+          isPlaying: true,
+          playlistName: native.playlistName ?? _snapshot.playlistName,
+          clipTitle: native.clipTitle ?? _snapshot.clipTitle,
+        ));
+        return;
+      }
+      if (native.isPaused) {
+        _nativeScheduledActive = true;
+        _emit(_snapshot.copyWith(
+          state: AppPlaybackState.scheduledPlaying,
+          isPlaying: false,
+          playlistName: native.playlistName ?? _snapshot.playlistName,
+          clipTitle: native.clipTitle ?? _snapshot.clipTitle,
+        ));
+        return;
+      }
+      // Idle — clear the snapshot only if we'd previously promoted it.
+      if (_nativeScheduledActive) {
+        _nativeScheduledActive = false;
+        // Don't blow away the snapshot if the Dart side has since started
+        // its own clip (e.g. user tapped Play); we only roll back our own
+        // scheduledPlaying frame.
+        if (_snapshot.state == AppPlaybackState.scheduledPlaying) {
+          _emit(_snapshot.copyWith(
+            state: AppPlaybackState.activeIdle,
+            isPlaying: false,
+            modalVisible: false,
+          ));
+        }
+      }
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint('coordinator _onNativePlaybackState failed: $e\n$st');
+      }
+    }
   }
 
   void _syncPlayingSnapshot(bool playing) {
@@ -1162,6 +1236,20 @@ class PlaybackCoordinator {
       // effect immediately even if the native player call is slow /
       // throws.
       _emit(_snapshot.copyWith(isPlaying: false));
+      // Round 22 — when a scheduled clip is being played by the native
+      // FG service (not just_audio), `_audio.pause()` is a no-op. Route
+      // the pause request through the native bridge so the actual
+      // audio actually stops.
+      if (_nativeScheduledActive) {
+        try {
+          await NativeAlarmsBridge.instance.pauseNative();
+        } catch (e, st) {
+          if (kDebugMode) {
+            debugPrint('pause: native pause failed: $e\n$st');
+          }
+        }
+        return;
+      }
       try {
         await _audio.pause();
       } catch (e, st) {
@@ -1253,6 +1341,26 @@ class PlaybackCoordinator {
 
       _userInitiatedPause = true;
 
+      // Round 22 — if the native scheduled-playback service is the
+      // active source, stop IT first. Otherwise the audio keeps going
+      // while the mini-player UI claims it stopped, which was one of
+      // the user's reported symptoms ("it does not stop even though I
+      // open the app and click the pause/resume in notification bar").
+      if (_nativeScheduledActive) {
+        _nativeScheduledActive = false;
+        try {
+          await NativeAlarmsBridge.instance.stopNative();
+        } catch (e, st) {
+          if (kDebugMode) {
+            debugPrint('dismissPlayer: native stop failed: $e\n$st');
+          }
+        }
+        try {
+          await refreshScheduleNotifications?.call();
+        } catch (_) {}
+        return;
+      }
+
       if (wasActive) {
         // Active mode: hand off to silence keep-alive. We stop the
         // clip player (so audio actually ceases) BUT we do not drop
@@ -1308,6 +1416,22 @@ class PlaybackCoordinator {
       // were in it.
       final previous = _snapshot;
       _emit(_snapshot.copyWith(isPlaying: true));
+
+      // Round 22 — when the visible scheduledPlaying snapshot is owned by
+      // the native FG service, the resume tap must go back to native so
+      // the MediaPlayer actually resumes. just_audio's resume would be a
+      // no-op (nothing was queued in it).
+      if (_nativeScheduledActive) {
+        try {
+          await NativeAlarmsBridge.instance.resumeNative();
+        } catch (e, st) {
+          if (kDebugMode) {
+            debugPrint('resume: native resume failed: $e\n$st');
+          }
+          _emit(previous);
+        }
+        return;
+      }
 
       try {
         // Library clip preview does not require the master toggle.
@@ -1381,6 +1505,20 @@ class PlaybackCoordinator {
       isPlaying: false,
       modalVisible: false,
     ));
+
+    // Round 22 — if native scheduled playback is the active source,
+    // tear it down too. Otherwise the alarm-clock FG service keeps
+    // emitting audio after stop().
+    if (_nativeScheduledActive) {
+      _nativeScheduledActive = false;
+      try {
+        await NativeAlarmsBridge.instance.stopNative();
+      } catch (e, st) {
+        if (kDebugMode) {
+          debugPrint('stop: native stop failed: $e\n$st');
+        }
+      }
+    }
 
     // CRITICAL: each external call is independently try/caught so a
     // failure in one path never aborts the stop sequence. The user
@@ -1545,6 +1683,7 @@ class PlaybackCoordinator {
   void dispose() {
     _modeCheckTimer?.cancel();
     _playerSub?.cancel();
+    _nativePlaybackSub?.cancel();
     _snapshotController.close();
     _errorController.close();
   }

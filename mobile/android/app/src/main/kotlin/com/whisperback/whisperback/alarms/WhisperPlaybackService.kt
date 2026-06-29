@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
@@ -17,60 +18,90 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
+import androidx.core.app.NotificationCompat
+import androidx.media.app.NotificationCompat.MediaStyle
 import com.whisperback.whisperback.MainActivity
-import com.whisperback.whisperback.R
 import java.io.File
 
 /**
- * Round 21 — typed `mediaPlayback` foreground service that owns the
+ * Round 21/22 — typed `mediaPlayback` foreground service that owns the
  * scheduled-audio MediaPlayer.
  *
- * Why this exists (vs Round 20's Dart background isolate):
- *   • Android 14+ rejects audio playback from a background-only context
- *     (no foreground service → no audio focus → silence). Our prior
- *     `just_audio` background-isolate path met all of those criteria,
- *     hence "notification shows the slot but nothing plays".
- *   • A typed `mediaPlayback` FG service is the standard
- *     Android way to play audio while the app is closed. The user-visible
- *     foreground notification it posts also keeps the OS from killing it
- *     mid-clip.
- *   • The service is started by `WhisperAlarmReceiver` which the OS
- *     delivers via `setAlarmClock` PendingIntents — Doze-exempt, with a
- *     temporary background-FG-start whitelist that lasts long enough for
- *     us to call `startForeground()`.
- *
- * Lifecycle:
- *   1. Receiver hands us a clip path via intent extra.
- *   2. We call `startForeground()` with a media notification.
- *   3. We acquire AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK + a partial wake lock.
- *   4. We play the file via MediaPlayer.
- *   5. On completion/error, we release everything and call `stopSelf()`.
- *
- * Concurrency: only ONE clip plays at a time. A second alarm firing while
- * a clip is mid-flight will replace the queued player (we stop+release the
- * old one first).
+ * Round 22 changes (responding to user QA):
+ *   • Audio attributes flipped from USAGE_ALARM → USAGE_MEDIA /
+ *     CONTENT_TYPE_MUSIC + STREAM_MUSIC. The user's QA report
+ *     "schedule plays at full volume although I set my volume low" was
+ *     the OS routing alarm-class audio through the alarm volume stream,
+ *     which on every Android device defaults to 100 % and ignores the
+ *     media slider. Scheduled clips are music, not alarms — they must
+ *     follow the media volume the user already trusts.
+ *   • Honors a user-set playback volume from SharedPreferences
+ *     (`playback_volume`, 0.0–1.0) which the Dart side writes whenever
+ *     the in-app volume slider moves, or 1.0 by default.
+ *   • Posts a MediaStyle notification with PAUSE / RESUME / STOP actions
+ *     so the user can control playback right from the notification
+ *     shade — exactly what they expected from "tapping pause/resume in
+ *     notification bar".
+ *   • Mirrors playback state (PLAYING / PAUSED / STOPPED) +
+ *     current-clip metadata into SharedPreferences so the Dart side can
+ *     pick it up on app launch / resume and show the mini-player even
+ *     for a scheduled clip that started while the app was closed.
+ *   • New actions: ACTION_PAUSE / ACTION_RESUME / ACTION_STOP_NOW
+ *     handled by the same service singleton, so Dart can call
+ *     `pauseNative()` / `resumeNative()` / `stopNative()` over the
+ *     platform channel and they reach this MediaPlayer immediately.
  */
 class WhisperPlaybackService : Service() {
     companion object {
         private const val TAG = "WhisperPlayback"
         const val ACTION_PLAY_CLIP = "com.whisperback.alarms.PLAY_CLIP"
+        const val ACTION_PAUSE = "com.whisperback.alarms.PAUSE"
+        const val ACTION_RESUME = "com.whisperback.alarms.RESUME"
+        const val ACTION_STOP_NOW = "com.whisperback.alarms.STOP_NOW"
         const val EXTRA_CLIP_PATH = "clip_path"
         const val EXTRA_CLIP_TITLE = "clip_title"
         const val EXTRA_PLAYLIST_NAME = "playlist_name"
         const val EXTRA_SCHEDULE_ID = "schedule_id"
 
-        private const val NOTIFICATION_ID = 0xBA77 // distinct from id=1 (active card) and audio_service ids
+        // Distinct from notification_service.dart's _ongoingId (1), the
+        // keep-alive service id (0x57424B), and audio_service's IDs.
+        private const val NOTIFICATION_ID = 0xBA77
         private const val CHANNEL_ID = "whisperback_scheduled_playback"
         private const val CHANNEL_NAME = "WhisperBack scheduled playback"
         private const val WAKE_LOCK_TAG = "WhisperBack:scheduledPlayback"
         // Hard cap so a corrupt clip can never lock the FG service open.
         private const val MAX_PLAYBACK_MS = 10 * 60 * 1000L
+
+        // Round 22 — single global state pref so the Dart side can poll
+        // it on app launch/resume.
+        const val STATE_PREFS = "whisperback.alarms.playback_state"
+        const val KEY_STATE = "state" // "idle" | "playing" | "paused"
+        const val KEY_CURRENT_PATH = "clip_path"
+        const val KEY_CURRENT_TITLE = "clip_title"
+        const val KEY_CURRENT_PLAYLIST = "playlist_name"
+        const val KEY_CURRENT_SCHEDULE_ID = "schedule_id"
+        const val KEY_VOLUME = "playback_volume" // float 0.0–1.0
+
+        const val STATE_IDLE = "idle"
+        const val STATE_PLAYING = "playing"
+        const val STATE_PAUSED = "paused"
+
+        // Optional Dart listener — set by the Flutter side via
+        // MainActivity so notification-button presses surface in the
+        // coordinator's pause/play snapshot. Null when the app process
+        // isn't running, which is fine: state is also mirrored in prefs.
+        @Volatile var stateListener: ((state: String, clipPath: String?, clipTitle: String?, playlistName: String?, scheduleId: String?) -> Unit)? = null
     }
 
     private var mediaPlayer: MediaPlayer? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var audioFocusRequest: AudioFocusRequest? = null
     private var audioManager: AudioManager? = null
+
+    private var currentClipPath: String? = null
+    private var currentClipTitle: String = "WhisperBack"
+    private var currentPlaylistName: String = "Scheduled whisper"
+    private var currentScheduleId: String? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -88,39 +119,30 @@ class WhisperPlaybackService : Service() {
         try {
             // Promote to foreground IMMEDIATELY — must happen within 10 s of
             // startForegroundService() or Android raises
-            // ForegroundServiceDidNotStartInTimeException and the system
-            // kills us.
+            // ForegroundServiceDidNotStartInTimeException and kills us.
+            val title = intent?.getStringExtra(EXTRA_CLIP_TITLE) ?: currentClipTitle
+            val playlist = intent?.getStringExtra(EXTRA_PLAYLIST_NAME) ?: currentPlaylistName
+            val isCurrentlyPlaying = mediaPlayer?.isPlaying == true
             val notification = buildNotification(
-                title = intent?.getStringExtra(EXTRA_CLIP_TITLE) ?: "WhisperBack",
-                playlistName = intent?.getStringExtra(EXTRA_PLAYLIST_NAME) ?: "Scheduled whisper",
+                title = title,
+                playlistName = playlist,
+                isPlaying = isCurrentlyPlaying,
             )
             startInForeground(notification)
 
-            if (intent?.action != ACTION_PLAY_CLIP) {
-                Log.w(TAG, "unknown action ${intent?.action}; stopping")
-                stopSelfSafely()
-                return START_NOT_STICKY
+            when (intent?.action) {
+                ACTION_PLAY_CLIP -> handlePlayCommand(intent)
+                ACTION_PAUSE -> handlePauseCommand()
+                ACTION_RESUME -> handleResumeCommand()
+                ACTION_STOP_NOW -> {
+                    Log.i(TAG, "stop requested via notification/Dart")
+                    stopSelfSafely()
+                }
+                else -> {
+                    Log.w(TAG, "unknown action ${intent?.action}; stopping")
+                    stopSelfSafely()
+                }
             }
-
-            val clipPath = intent.getStringExtra(EXTRA_CLIP_PATH)
-            if (clipPath.isNullOrBlank() || !File(clipPath).exists()) {
-                Log.w(TAG, "missing clip path; stopping")
-                stopSelfSafely()
-                return START_NOT_STICKY
-            }
-
-            // Round 21 defense-in-depth: even if a stale alarm survived
-            // a cancel-all race, refuse to play when the user has Active
-            // OFF. The Dart side mirrors `is_active` into SharedPreferences
-            // every time it changes so we can read it without booting
-            // Flutter.
-            if (!isActiveByPrefs()) {
-                Log.w(TAG, "Active=OFF in prefs; skipping playback")
-                stopSelfSafely()
-                return START_NOT_STICKY
-            }
-
-            playClip(clipPath)
         } catch (t: Throwable) {
             Log.e(TAG, "onStartCommand failed", t)
             stopSelfSafely()
@@ -128,12 +150,91 @@ class WhisperPlaybackService : Service() {
         return START_NOT_STICKY
     }
 
+    private fun handlePlayCommand(intent: Intent) {
+        val clipPath = intent.getStringExtra(EXTRA_CLIP_PATH)
+        if (clipPath.isNullOrBlank() || !File(clipPath).exists()) {
+            Log.w(TAG, "missing clip path; stopping")
+            stopSelfSafely()
+            return
+        }
+
+        // Round 21 defense-in-depth: refuse to play when Active=OFF.
+        if (!isActiveByPrefs()) {
+            Log.w(TAG, "Active=OFF in prefs; skipping playback")
+            stopSelfSafely()
+            return
+        }
+
+        currentClipPath = clipPath
+        currentClipTitle = intent.getStringExtra(EXTRA_CLIP_TITLE) ?: "WhisperBack"
+        currentPlaylistName = intent.getStringExtra(EXTRA_PLAYLIST_NAME) ?: "Scheduled whisper"
+        currentScheduleId = intent.getStringExtra(EXTRA_SCHEDULE_ID)
+        playClip(clipPath)
+    }
+
+    private fun handlePauseCommand() {
+        try {
+            val player = mediaPlayer ?: return run {
+                Log.w(TAG, "pause requested with no active player")
+            }
+            if (!player.isPlaying) {
+                Log.i(TAG, "pause requested but player not playing")
+                return
+            }
+            player.pause()
+            writeState(STATE_PAUSED)
+            // Re-post notification with PLAY action visible instead of PAUSE.
+            try {
+                val notification = buildNotification(
+                    title = currentClipTitle,
+                    playlistName = currentPlaylistName,
+                    isPlaying = false,
+                )
+                val mgr =
+                    getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                mgr?.notify(NOTIFICATION_ID, notification)
+            } catch (t: Throwable) {
+                Log.e(TAG, "pause notify failed", t)
+            }
+            notifyListener(STATE_PAUSED)
+        } catch (t: Throwable) {
+            Log.e(TAG, "handlePauseCommand failed", t)
+        }
+    }
+
+    private fun handleResumeCommand() {
+        try {
+            val player = mediaPlayer ?: return run {
+                Log.w(TAG, "resume requested with no active player")
+            }
+            if (player.isPlaying) {
+                Log.i(TAG, "resume requested but player already playing")
+                return
+            }
+            player.start()
+            writeState(STATE_PLAYING)
+            try {
+                val notification = buildNotification(
+                    title = currentClipTitle,
+                    playlistName = currentPlaylistName,
+                    isPlaying = true,
+                )
+                val mgr =
+                    getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                mgr?.notify(NOTIFICATION_ID, notification)
+            } catch (t: Throwable) {
+                Log.e(TAG, "resume notify failed", t)
+            }
+            notifyListener(STATE_PLAYING)
+        } catch (t: Throwable) {
+            Log.e(TAG, "handleResumeCommand failed", t)
+        }
+    }
+
     private fun isActiveByPrefs(): Boolean {
         return try {
             // Default to TRUE so a fresh install (no prefs yet) doesn't
-            // suppress a freshly-fired alarm. The Dart side overwrites this
-            // every toggle so the FALSE path only kicks in after the user
-            // has explicitly turned Active OFF.
+            // suppress a freshly-fired alarm.
             getSharedPreferences("whisperback.alarms.snapshot", Context.MODE_PRIVATE)
                 .getBoolean("is_active", true)
         } catch (t: Throwable) {
@@ -154,9 +255,6 @@ class WhisperPlaybackService : Service() {
                 startForeground(NOTIFICATION_ID, notification)
             }
         } catch (t: Throwable) {
-            // Q+ allow this to throw if the FG-start grant has expired.
-            // Fall back to the untyped form — Android logs a warning but
-            // still keeps us alive on most OEMs.
             Log.e(TAG, "startForeground with type failed, retrying without", t)
             try {
                 startForeground(NOTIFICATION_ID, notification)
@@ -176,16 +274,38 @@ class WhisperPlaybackService : Service() {
 
         val player = MediaPlayer()
         try {
+            // Round 22 — USAGE_MEDIA + CONTENT_TYPE_MUSIC + STREAM_MUSIC.
+            // The user reported "schedule plays at full volume although
+            // I set my volume low" — alarm-class audio bypasses the
+            // media volume slider and uses the alarm stream (typically
+            // 100 %). Whispers are music, not an alarm sound, so they
+            // must follow the user's media volume just like any other
+            // playback.
             player.setAudioAttributes(
                 AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ALARM)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
                     .build(),
             )
             player.setDataSource(this, Uri.fromFile(File(clipPath)))
             player.setOnPreparedListener { mp ->
                 try {
+                    // Apply user volume on every prepare; defaults to 1.0
+                    // so existing installs see no behaviour change.
+                    val vol = readUserVolume()
+                    mp.setVolume(vol, vol)
                     mp.start()
+                    writeState(STATE_PLAYING)
+                    notifyListener(STATE_PLAYING)
+                    // Re-post with isPlaying=true so PAUSE action is visible.
+                    val notification = buildNotification(
+                        title = currentClipTitle,
+                        playlistName = currentPlaylistName,
+                        isPlaying = true,
+                    )
+                    val mgr = getSystemService(Context.NOTIFICATION_SERVICE)
+                        as? NotificationManager
+                    mgr?.notify(NOTIFICATION_ID, notification)
                 } catch (t: Throwable) {
                     Log.e(TAG, "MediaPlayer.start failed", t)
                     stopSelfSafely()
@@ -203,9 +323,7 @@ class WhisperPlaybackService : Service() {
             player.prepareAsync()
             mediaPlayer = player
 
-            // Safety timeout: if the clip somehow runs past 10 minutes we
-            // tear ourselves down (the user can't possibly want a 10-minute
-            // unattended whisper).
+            // Safety timeout: tear down if a corrupt clip runs >10 minutes.
             android.os.Handler(mainLooper).postDelayed(
                 {
                     try {
@@ -224,13 +342,58 @@ class WhisperPlaybackService : Service() {
         }
     }
 
+    private fun readUserVolume(): Float {
+        return try {
+            val v = getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)
+                .getFloat(KEY_VOLUME, 1.0f)
+            v.coerceIn(0f, 1f)
+        } catch (t: Throwable) {
+            1.0f
+        }
+    }
+
+    private fun writeState(state: String) {
+        try {
+            val editor = getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE).edit()
+                .putString(KEY_STATE, state)
+            if (state == STATE_IDLE) {
+                editor.remove(KEY_CURRENT_PATH)
+                    .remove(KEY_CURRENT_TITLE)
+                    .remove(KEY_CURRENT_PLAYLIST)
+                    .remove(KEY_CURRENT_SCHEDULE_ID)
+            } else {
+                editor.putString(KEY_CURRENT_PATH, currentClipPath ?: "")
+                    .putString(KEY_CURRENT_TITLE, currentClipTitle)
+                    .putString(KEY_CURRENT_PLAYLIST, currentPlaylistName)
+                    .putString(KEY_CURRENT_SCHEDULE_ID, currentScheduleId ?: "")
+            }
+            editor.apply()
+        } catch (t: Throwable) {
+            Log.e(TAG, "writeState failed", t)
+        }
+    }
+
+    private fun notifyListener(state: String) {
+        try {
+            stateListener?.invoke(
+                state,
+                currentClipPath,
+                currentClipTitle,
+                currentPlaylistName,
+                currentScheduleId,
+            )
+        } catch (t: Throwable) {
+            Log.e(TAG, "notifyListener failed (handled)", t)
+        }
+    }
+
     private fun requestAudioFocus(): Boolean {
         val mgr = audioManager ?: return false
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val attrs = AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ALARM)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
                     .build()
                 val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
                     .setAudioAttributes(attrs)
@@ -243,7 +406,7 @@ class WhisperPlaybackService : Service() {
                 @Suppress("DEPRECATION")
                 mgr.requestAudioFocus(
                     null,
-                    AudioManager.STREAM_ALARM,
+                    AudioManager.STREAM_MUSIC,
                     AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK,
                 ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
             }
@@ -308,6 +471,10 @@ class WhisperPlaybackService : Service() {
             releasePlayer()
             abandonAudioFocus()
             releaseWakeLock()
+            writeState(STATE_IDLE)
+            notifyListener(STATE_IDLE)
+            currentClipPath = null
+            currentScheduleId = null
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 stopForeground(STOP_FOREGROUND_REMOVE)
             } else {
@@ -325,6 +492,8 @@ class WhisperPlaybackService : Service() {
             releasePlayer()
             abandonAudioFocus()
             releaseWakeLock()
+            writeState(STATE_IDLE)
+            notifyListener(STATE_IDLE)
         } finally {
             super.onDestroy()
         }
@@ -351,7 +520,11 @@ class WhisperPlaybackService : Service() {
         }
     }
 
-    private fun buildNotification(title: String, playlistName: String): Notification {
+    private fun buildNotification(
+        title: String,
+        playlistName: String,
+        isPlaying: Boolean,
+    ): Notification {
         val openIntent = PendingIntent.getActivity(
             this,
             0,
@@ -360,14 +533,11 @@ class WhisperPlaybackService : Service() {
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+        val pausePI = servicePendingIntent(ACTION_PAUSE, 101)
+        val resumePI = servicePendingIntent(ACTION_RESUME, 102)
+        val stopPI = servicePendingIntent(ACTION_STOP_NOW, 103)
         val smallIcon = resolveSmallIcon()
-        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, CHANNEL_ID)
-        } else {
-            @Suppress("DEPRECATION")
-            Notification.Builder(this)
-        }
-        return builder
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText("Playing $playlistName")
             .setSmallIcon(smallIcon)
@@ -375,12 +545,53 @@ class WhisperPlaybackService : Service() {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setShowWhen(false)
-            .setCategory(Notification.CATEGORY_TRANSPORT)
-            .build()
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setDeleteIntent(stopPI)
+        if (isPlaying) {
+            builder.addAction(
+                NotificationCompat.Action(
+                    android.R.drawable.ic_media_pause,
+                    "Pause",
+                    pausePI,
+                ),
+            )
+        } else {
+            builder.addAction(
+                NotificationCompat.Action(
+                    android.R.drawable.ic_media_play,
+                    "Resume",
+                    resumePI,
+                ),
+            )
+        }
+        builder.addAction(
+            NotificationCompat.Action(
+                android.R.drawable.ic_menu_close_clear_cancel,
+                "Stop",
+                stopPI,
+            ),
+        )
+        builder.setStyle(
+            MediaStyle().setShowActionsInCompactView(0, 1),
+        )
+        return builder.build()
+    }
+
+    private fun servicePendingIntent(action: String, requestId: Int): PendingIntent {
+        val intent = Intent(this, WhisperPlaybackService::class.java).apply {
+            this.action = action
+        }
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            PendingIntent.getForegroundService(this, requestId, intent, flags)
+        } else {
+            PendingIntent.getService(this, requestId, intent, flags)
+        }
     }
 
     private fun resolveSmallIcon(): Int {
-        // Prefer dedicated notification asset; fall back to mipmap launcher.
         val res = resources
         val pkg = packageName
         val ids = listOf(

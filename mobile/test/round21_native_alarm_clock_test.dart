@@ -134,15 +134,32 @@ void main() {
               'Toggling Active OFF must cancel every pending alarm so the device can stay in Doze.');
     });
 
-    test('WhisperPlaybackService uses mediaPlayback FG type + alarm-clock audio attrs', () {
+    test('WhisperPlaybackService uses mediaPlayback FG type + media (NOT alarm) audio attrs', () {
       final src = _read(
           'android/app/src/main/kotlin/com/whisperback/whisperback/alarms/WhisperPlaybackService.kt');
       expect(src, contains('FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK'),
           reason:
               'The service MUST promote to FG with the mediaPlayback type for Android 14+ audio focus.');
-      expect(src, contains('USAGE_ALARM'),
+      // Round 22 — flipped from USAGE_ALARM → USAGE_MEDIA so scheduled
+      // clips follow the user's MEDIA volume (which they actually
+      // control via hardware buttons), not the rarely-touched ALARM
+      // stream which defaults to 100 %. QA report: "schedule plays at
+      // full volume although I set my volume low" was exactly this.
+      expect(src, contains('USAGE_MEDIA'),
           reason:
-              'Alarm-clock semantics: AudioAttributes.usage=alarm so the OS treats this like a clock alarm, not a media player.');
+              'Scheduled clips are music, not an alarm tone — they must route through STREAM_MUSIC so the user\'s media volume controls them.');
+      expect(src, contains('CONTENT_TYPE_MUSIC'),
+          reason: 'Content type must match the usage for correct OS audio routing.');
+      // Only treat NON-comment lines as a violation — the docstring keeps
+      // the migration note so future devs know why we flipped away
+      // from USAGE_ALARM.
+      final codeLines = src
+          .split('\n')
+          .where((l) => !l.trim().startsWith('//') && !l.trim().startsWith('*'))
+          .join('\n');
+      expect(codeLines.contains('USAGE_ALARM'), isFalse,
+          reason:
+              'USAGE_ALARM bypasses the media volume slider; it must NOT appear in any executable code in the scheduled-playback path.');
       expect(src, contains('requestAudioFocus'),
           reason:
               'Without audio focus, the OS silently denies playback in the background.');

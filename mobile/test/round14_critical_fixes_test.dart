@@ -52,7 +52,10 @@ void main() {
       final idx = src.indexOf('Future<void> dismissPlayer()');
       expect(idx, greaterThan(0),
           reason: 'dismissPlayer must remain on the coordinator API.');
-      final body = src.substring(idx, idx + 3500);
+      // Round 22 — bumped window from 3500 to 6000 because the body
+      // grew to include the native-scheduled-playback bypass branch.
+      final body =
+          src.substring(idx, (idx + 6000).clamp(0, src.length));
       // Round 18 contract: the dismiss path now branches.
       //   Active mode → stop the clip player (which transitions
       //     atomically into the silence keep-alive so the FG service

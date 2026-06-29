@@ -57,4 +57,11 @@ flutter {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    // Round 22 — needed for androidx.media.app.NotificationCompat.MediaStyle
+    // used by WhisperPlaybackService so the user can pause/resume/stop a
+    // scheduled clip directly from the notification shade. audio_service
+    // already pulls this transitively but pinning here is safer against
+    // future plugin upgrades that swap to androidx.media3 (no MediaStyle
+    // back-compat).
+    implementation("androidx.media:media:1.7.0")
 }
