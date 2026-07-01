@@ -50,7 +50,16 @@ class WhisperAlarmScheduler private constructor(private val appContext: Context)
         // Base request-id offset — keeps us clear of any other PendingIntent
         // request-id space the app uses.
         private const val REQUEST_ID_BASE = 0x7E_00_00_00.toInt()
-        private const val MAX_ALARMS = 192
+        // Round 23 — bumped from 192 to 400 so a 5-minute-interval
+        // schedule can pre-register a full 33 hours of alarms while
+        // still leaving headroom (Android's per-app cap is 500) for
+        // `flutter_local_notifications` and prayer alarms. The QA
+        // report "later schedules stopped working" was the tail of
+        // the alarm table drying up: after the first ~4 hours of
+        // fires (48 per-schedule cap × ~5-min interval) the table
+        // was empty and no more clips would play until the user
+        // re-opened the app.
+        private const val MAX_ALARMS = 400
 
         @Volatile private var instance: WhisperAlarmScheduler? = null
 

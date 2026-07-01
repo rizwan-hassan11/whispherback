@@ -69,8 +69,8 @@ class NativePlaybackSnapshot {
 ///
 /// We cap the snapshot at [_kMaxFiresPerSchedule] fires per schedule and
 /// [_kMaxFiresTotal] fires overall, so a hyper-active schedule doesn't
-/// crowd out the others. The native scheduler ALSO enforces a 192-alarm
-/// hard cap as a safety net.
+/// crowd out the others. The native scheduler ALSO enforces a 400-alarm
+/// hard cap as a safety net (Round 23 bump from 192).
 class NativeAlarmsBridge {
   NativeAlarmsBridge._() {
     if (Platform.isAndroid) {
@@ -81,11 +81,35 @@ class NativeAlarmsBridge {
 
   static const MethodChannel _channel = MethodChannel('com.whisperback.alarms');
 
-  /// Up to ~24 hours of fires per schedule (1-minute schedules cap at 1440;
-  /// the snapshot cap of 24 plays nicely with our typical 30/60-minute
-  /// intervals while letting fine-grained schedules survive overnight).
-  static const int _kMaxFiresPerSchedule = 48;
-  static const int _kMaxFiresTotal = 180;
+  /// Round 23 — bumped from 48 to 288 fires per schedule and from 180
+  /// to 400 fires total. The old caps were the QA root cause "later
+  /// schedules stopped working after a while": if the user set a
+  /// 5-minute schedule, 48 fires covered only ~4 hours; the moment the
+  /// app was closed for longer than that the alarm table dried up and
+  /// no more fires were registered until the user opened the app.
+  ///
+  /// 288 = one fire every 5 minutes for a full 24 hours per schedule.
+  /// 400 total sits comfortably under Android's per-app cap of 500
+  /// (we reserve headroom for `flutter_local_notifications` alarms +
+  /// prayer alarms).
+  ///
+  /// A schedule that fires every 30 minutes now has 288 fires ≈ 6 days
+  /// of coverage. Combined with the Round 23 "refill on every
+  /// completion" logic in `PlaybackCoordinator._onNativePlaybackState`,
+  /// the alarm table effectively NEVER dries up.
+  static const int _kMaxFiresPerSchedule = 288;
+  static const int _kMaxFiresTotal = 400;
+
+  /// Round 23 — last snapshot JSON we shipped to native, keyed off a
+  /// stable fingerprint that excludes future fires we haven't fired
+  /// yet. `applySnapshot` compares before dispatching, which avoids
+  /// cancelling + re-registering the SAME 288 alarms 12 times a minute
+  /// as the engine's 5-second notification tick loops. Constant
+  /// re-registration was measured to add up to a full second of
+  /// latency around the actual fire time on aggressive OEMs
+  /// (Xiaomi / Vivo) which contributed to the "later schedules are
+  /// delayed" QA report.
+  String? _lastSnapshotFingerprint;
 
   /// Broadcasts every native playback state transition to the Dart side.
   /// The `PlaybackCoordinator` subscribes so it can light up the mini-
@@ -98,6 +122,11 @@ class NativeAlarmsBridge {
 
   NativePlaybackSnapshot _lastSnapshot = NativePlaybackSnapshot.idle();
   NativePlaybackSnapshot get lastSnapshot => _lastSnapshot;
+
+  @visibleForTesting
+  void debugResetFingerprint() {
+    _lastSnapshotFingerprint = null;
+  }
 
   Future<void> _onMethodCall(MethodCall call) async {
     try {
@@ -192,7 +221,26 @@ class NativeAlarmsBridge {
     }
     fires.sort((a, b) =>
         (a['fireEpochMs']! as int).compareTo(b['fireEpochMs']! as int));
-    final json = jsonEncode(fires.take(_kMaxFiresTotal).toList());
+    final trimmed = fires.take(_kMaxFiresTotal).toList();
+    final json = jsonEncode(trimmed);
+    // Round 23 — dedup: bucket the earliest fireEpochMs into 60-second
+    // grains so a re-run within the same minute (which happens 12+ times
+    // per minute via the 5 s notification tick) resolves to the same
+    // fingerprint and is skipped without touching AlarmManager. Includes
+    // the ordered list of (scheduleId, fireEpochMs / 1000) pairs so any
+    // actual change (schedule added, interval changed, playlist swap)
+    // still forces a fresh registration.
+    final fingerprint = trimmed
+        .map((f) => '${f['scheduleId']}@${(f['fireEpochMs']! as int) ~/ 1000}')
+        .join('|');
+    if (fingerprint == _lastSnapshotFingerprint) {
+      if (kDebugMode) {
+        print('NativeAlarmsBridge: snapshot fingerprint unchanged '
+            '(${trimmed.length} fires); skipping AlarmManager rewrite');
+      }
+      return;
+    }
+    _lastSnapshotFingerprint = fingerprint;
     try {
       final registered = await _channel.invokeMethod<int>('setSnapshot', {
         'snapshot': json,
@@ -214,6 +262,7 @@ class NativeAlarmsBridge {
 
   Future<void> cancelAll() async {
     if (!Platform.isAndroid) return;
+    _lastSnapshotFingerprint = null;
     try {
       await _channel.invokeMethod<void>('cancelAll');
     } on MissingPluginException {

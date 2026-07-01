@@ -17,6 +17,7 @@ import '../prayer/adhan_player.dart';
 import '../prayer/prayer_service.dart';
 import '../playback/active_mode_binding.dart';
 import '../scheduler/native_alarms_bridge.dart';
+import '../scheduler/schedule_last_fired_store.dart';
 import '../shuffle/shuffle_engine.dart';
 
 enum ActiveToggleResult { success }
@@ -308,16 +309,56 @@ class PlaybackCoordinator {
     startModeMonitoring();
   }
 
+  /// Wall-clock at which the current native scheduled clip started
+  /// playing. Used on native-completion (state=idle) to stamp
+  /// `ScheduleLastFiredStore.setCompletion` so the Dart engine's next
+  /// tick — and the notification-card projection — advance to the
+  /// slot AFTER the one native just handled instead of firing it again.
+  DateTime? _nativeSlotStartedAt;
+
+  /// Schedule id native is currently playing. Cached so the idle
+  /// transition can stamp the completion into the right store bucket.
+  String? _nativeActiveScheduleId;
+
   /// Mirrors a native-playback transition into the UI snapshot so the
   /// mini-player and modal reflect what the OS-level service is actually
   /// playing. We use the existing `scheduledPlaying` state so all the
   /// downstream consumers (mini-player visibility, modal show button,
   /// snapshot tests) treat this as a "real" scheduled play even though
   /// the audio bytes are flowing through Kotlin instead of just_audio.
+  ///
+  /// Round 23 addition — this is ALSO the single choke point where a
+  /// native fire gets mirrored into `ScheduleLastFiredStore` so the
+  /// Dart engine's `_runTick` will NOT re-fire the same slot from
+  /// `just_audio`. Without this, the user's QA "the first schedule
+  /// works good but later ones are delayed / stopped working" was:
+  ///   1. Native alarm fires slot 10:00, plays via MediaPlayer.
+  ///   2. Dart engine ticks at 10:00, sees `lastFired.slot(id) = null`
+  ///      (nothing stamped it), fires the SAME slot via just_audio.
+  ///   3. Two audio streams contend for focus — MediaPlayer usually
+  ///      wins the ducking race but the just_audio path can also mark
+  ///      the whole coordinator as "playing scheduled" which changes
+  ///      the visible UI mid-play and re-triggers snapshot refresh.
+  ///   4. Because the snapshot was rebuilt mid-play, later alarms
+  ///      registered in the same rebuild get cancelled + re-registered
+  ///      with drifted times — which the user perceives as "the second
+  ///      schedule was late" and eventually the tail dries up.
+  ///
+  /// The fix here has three parts. On `state=playing` we stamp the slot
+  /// start immediately; on `state=idle` (natural completion / stop) we
+  /// stamp the real completion time AND trigger a snapshot refresh so
+  /// the tail always has ~half a day of fires queued.
   void _onNativePlaybackState(NativePlaybackSnapshot native) {
     try {
       if (native.isPlaying) {
         _nativeScheduledActive = true;
+        // Round 23 — stamp `lastFired` the moment native starts a slot.
+        // The Dart engine reads this store on its next tick and skips
+        // any slot with a fresh stamp, so the double-fire race is closed.
+        final startedAt = DateTime.now();
+        _nativeSlotStartedAt = startedAt;
+        _nativeActiveScheduleId = native.scheduleId;
+        _stampNativeFireStart(native.scheduleId, startedAt);
         _emit(_snapshot.copyWith(
           state: AppPlaybackState.scheduledPlaying,
           isPlaying: true,
@@ -339,6 +380,16 @@ class PlaybackCoordinator {
       // Idle — clear the snapshot only if we'd previously promoted it.
       if (_nativeScheduledActive) {
         _nativeScheduledActive = false;
+        // Round 23 — stamp actual completion so `next = completion +
+        // interval` computes correctly, then rebuild the alarm table so
+        // the tail stays populated. Without the refresh, if the user
+        // has 96 fires registered and the app runs in the background
+        // for weeks, the tail dries up around fire #96.
+        final endedAt = DateTime.now();
+        final scheduleId = _nativeActiveScheduleId;
+        _nativeActiveScheduleId = null;
+        _nativeSlotStartedAt = null;
+        _stampNativeFireCompletion(scheduleId, endedAt);
         // Don't blow away the snapshot if the Dart side has since started
         // its own clip (e.g. user tapped Play); we only roll back our own
         // scheduledPlaying frame.
@@ -349,12 +400,60 @@ class PlaybackCoordinator {
             modalVisible: false,
           ));
         }
+        // Fire-and-forget refresh so the alarm table gets a fresh tail
+        // computed from the just-stamped completion. Any failure is
+        // logged inside `refreshScheduleNotifications`.
+        unawaited(() async {
+          try {
+            await refreshScheduleNotifications?.call();
+          } catch (e, st) {
+            if (kDebugMode) {
+              debugPrint('coordinator refresh after native fire failed: $e\n$st');
+            }
+          }
+        }());
       }
     } catch (e, st) {
       if (kDebugMode) {
         debugPrint('coordinator _onNativePlaybackState failed: $e\n$st');
       }
     }
+  }
+
+  void _stampNativeFireStart(String? scheduleId, DateTime when) {
+    if (scheduleId == null || scheduleId.isEmpty) return;
+    // Fire-and-forget; the store's `ensureLoaded` guarantees the pref
+    // instance is cached before any first call in production. Wrapped
+    // in a microtask so an early callback fired before the store has
+    // been initialised (unit tests, cold-start race) doesn't throw
+    // through the state listener.
+    unawaited(() async {
+      try {
+        final store = await ScheduleLastFiredStore.ensureLoaded();
+        await store.setSlot(scheduleId, when);
+        // Mirror slot into completion so the Dart engine's projection
+        // math treats the slot as "in flight until playback finishes".
+        await store.setCompletion(scheduleId, when);
+      } catch (e, st) {
+        if (kDebugMode) {
+          debugPrint('coordinator _stampNativeFireStart failed: $e\n$st');
+        }
+      }
+    }());
+  }
+
+  void _stampNativeFireCompletion(String? scheduleId, DateTime when) {
+    if (scheduleId == null || scheduleId.isEmpty) return;
+    unawaited(() async {
+      try {
+        final store = await ScheduleLastFiredStore.ensureLoaded();
+        await store.setCompletion(scheduleId, when);
+      } catch (e, st) {
+        if (kDebugMode) {
+          debugPrint('coordinator _stampNativeFireCompletion failed: $e\n$st');
+        }
+      }
+    }());
   }
 
   void _syncPlayingSnapshot(bool playing) {

@@ -3,6 +3,7 @@ package com.whisperback.whisperback.alarms
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.os.Build
 import android.util.Log
 
@@ -32,6 +33,45 @@ class WhisperAlarmReceiver : BroadcastReceiver() {
         const val EXTRA_CLIP_TITLE = "clip_title"
         const val EXTRA_PLAYLIST_NAME = "playlist_name"
         const val EXTRA_SLOT_EPOCH_MS = "slot_epoch_ms"
+
+        // Round 23 — de-duplication window. On some OEMs (Vivo, Realme)
+        // the OS occasionally delivers the same alarm PendingIntent twice
+        // within a few seconds (usually when the device wakes from Doze
+        // and the alarm has been queued during a maintenance window).
+        // Without dedup, the QA report "clip plays twice back-to-back on
+        // some Android 12 phones" reproduced. 60 s is safely below the
+        // shortest supported interval (1 minute) so we never dedup two
+        // genuine successive slots.
+        private const val DEDUP_WINDOW_MS = 60_000L
+        private const val DEDUP_PREFS = "whisperback.alarms.dedup"
+        private const val DEDUP_KEY_PREFIX = "last_fire_"
+    }
+
+    private fun dedupPrefs(context: Context): SharedPreferences =
+        context.applicationContext.getSharedPreferences(DEDUP_PREFS, Context.MODE_PRIVATE)
+
+    private fun isDuplicateFire(
+        context: Context,
+        scheduleId: String,
+        slotEpochMs: Long,
+    ): Boolean {
+        if (slotEpochMs <= 0L) return false
+        return try {
+            val prefs = dedupPrefs(context)
+            val key = "$DEDUP_KEY_PREFIX$scheduleId"
+            val lastSlot = prefs.getLong(key, 0L)
+            val delta = Math.abs(slotEpochMs - lastSlot)
+            if (delta in 0..DEDUP_WINDOW_MS && lastSlot != 0L) {
+                Log.w(TAG, "duplicate fire for $scheduleId slot=$slotEpochMs (last=$lastSlot dt=$delta ms)")
+                true
+            } else {
+                prefs.edit().putLong(key, slotEpochMs).apply()
+                false
+            }
+        } catch (t: Throwable) {
+            Log.e(TAG, "dedup check failed (allowing fire)", t)
+            false
+        }
     }
 
     override fun onReceive(context: Context, intent: Intent?) {
@@ -53,6 +93,15 @@ class WhisperAlarmReceiver : BroadcastReceiver() {
 
             if (clipPath.isNullOrBlank()) {
                 Log.w(TAG, "no clip path supplied; dropping alarm")
+                return
+            }
+
+            // Round 23 — refuse a duplicate delivery of the same slot
+            // within a 60 s window. On some OEMs the OS re-delivers a
+            // queued alarm when the device leaves Doze, which without
+            // this guard reproduced the QA report "clip plays twice
+            // back to back".
+            if (!scheduleId.isNullOrBlank() && isDuplicateFire(context, scheduleId, slotEpochMs)) {
                 return
             }
 

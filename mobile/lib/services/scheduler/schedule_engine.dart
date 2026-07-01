@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -25,10 +26,30 @@ class ScheduleEngine {
     required PlaybackCoordinator coordinator,
     required ScheduleLastFiredStore lastFiredStore,
     this.onNotificationsSync,
+    bool? delegateFiringToNative,
   })  : _appState = appStateRepository,
         _schedules = scheduleRepository,
         _coordinator = coordinator,
-        _lastFired = lastFiredStore {
+        _lastFired = lastFiredStore,
+        // Round 23 — on Android the native `WhisperAlarmScheduler` +
+        // `WhisperPlaybackService` pair owns actual audio firing.
+        // Letting the Dart engine ALSO call `requestScheduledPlay`
+        // for the same slot creates two competing audio streams and
+        // a race that trashes the alarm-table rebuild mid-fire (the
+        // QA report "later schedules delayed / stopped working"
+        // reproduced on every device that let the two paths race).
+        //
+        // The Dart engine still runs on Android — it drives
+        // notification refresh, keep-alive heartbeats, and the
+        // failure/backoff bookkeeping — but the firing branch of
+        // `_runTick` is short-circuited so ONLY native alarms play
+        // scheduled clips.
+        //
+        // Tests and non-Android hosts continue to fire from Dart
+        // (they cover the full firing pipeline; the platform-guard
+        // wouldn't be reachable there anyway).
+        _delegateFiringToNative = delegateFiringToNative ??
+            (!kIsWeb && Platform.isAndroid) {
     // Whenever a scheduled clip finishes naturally, stamp `completion` with the
     // actual completion timestamp so the next slot is computed as
     // `completionTime + intervalMinutes`. Without this, the next fire would
@@ -46,11 +67,21 @@ class ScheduleEngine {
   final PlaybackCoordinator _coordinator;
   final ScheduleLastFiredStore _lastFired;
   final ScheduleNotificationSync? onNotificationsSync;
+  final bool _delegateFiringToNative;
   Timer? _timer;
   StreamSubscription<PlaybackErrorEvent>? _errorSubscription;
 
   bool _started = false;
   bool _tickInFlight = false;
+
+  /// Whether this engine defers actual scheduled-clip playback to the
+  /// native alarm scheduler (Android). When true, the tick body still
+  /// runs — refreshing notifications, evicting stuck ticks, honoring
+  /// active schedule bookkeeping — but never calls
+  /// `coordinator.requestScheduledPlay`. Native alarms are the
+  /// single source of truth. Exposed for tests.
+  @visibleForTesting
+  bool get delegateFiringToNative => _delegateFiringToNative;
 
   /// Watchdog: if a tick body hangs longer than this, force `_tickInFlight`
   /// back to false so we don't lock all future scheduling. 30s is generous
@@ -254,6 +285,15 @@ class ScheduleEngine {
     final activeId = _coordinator.activeScheduleId;
     if (activeId != null && !all.any((s) => s.id == activeId && s.enabled)) {
       await _coordinator.stop();
+    }
+
+    // Round 23 — on Android the native alarm scheduler owns actual
+    // fires. Skip the Dart-side firing loop entirely so the two paths
+    // can't compete for audio focus mid-slot (that race was the
+    // root cause of "later schedules are delayed and eventually stop").
+    // The notification / heartbeat / backoff paths above still run.
+    if (_delegateFiringToNative) {
+      return;
     }
 
     for (final schedule in all) {
