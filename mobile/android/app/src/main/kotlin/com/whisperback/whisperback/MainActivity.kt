@@ -16,6 +16,12 @@ class MainActivity : AudioServiceActivity() {
     companion object {
         private const val KEEP_ALIVE_CHANNEL = "com.whisperback.keep_alive"
         private const val ALARM_CHANNEL = "com.whisperback.alarms"
+        // Round 24 — native duration probe used by ClipRepository.
+        // `just_audio`'s Dart-side probe binds the file to the shared
+        // AudioSession which either drops audio focus (silent play) or
+        // returns null on Samsung / Vivo OEMs. MediaMetadataRetriever
+        // reads the container header directly with no MediaSession.
+        private const val CLIP_METADATA_CHANNEL = "com.whisperback.clip_metadata"
     }
 
     private var alarmChannel: MethodChannel? = null
@@ -196,6 +202,32 @@ class MainActivity : AudioServiceActivity() {
                     // Defensive — never let a state callback crash playback.
                 }
             }
+
+        // Round 24 — native clip-duration probe. See ClipMetadataProbe.kt
+        // for the "why not just_audio" rationale. Called by the Dart
+        // side's `ClipRepository.backfillDuration` as its primary path;
+        // falls back to `just_audio` only if this channel is missing.
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            CLIP_METADATA_CHANNEL,
+        ).setMethodCallHandler { call, result ->
+            try {
+                when (call.method) {
+                    "readDurationMs" -> {
+                        val path = when (val raw = call.arguments) {
+                            is String -> raw
+                            is Map<*, *> -> (raw["filePath"] as? String) ?: ""
+                            else -> ""
+                        }
+                        val duration = ClipMetadataProbe.readDurationMs(applicationContext, path)
+                        result.success(duration)
+                    }
+                    else -> result.notImplemented()
+                }
+            } catch (t: Throwable) {
+                result.error("clip_metadata_error", t.message, null)
+            }
+        }
     }
 
     private fun sendCommandToService(action: String) {

@@ -47,6 +47,14 @@ class WhisperAlarmScheduler private constructor(private val appContext: Context)
         private const val TAG = "WhisperAlarmSched"
         private const val PREFS = "whisperback.alarms"
         private const val KEY_REQ_IDS = "registered_request_ids"
+        // Round 24 — persist the full projected snapshot so the receiver
+        // can re-arm the tail on every fire without needing Dart alive.
+        // The prior Round-23 model relied on the coordinator refreshing
+        // after each fire — if the app was killed between fires, the
+        // tail eventually dried up. Storing the snapshot here lets
+        // `WhisperAlarmReceiver.refillIfNeeded()` re-project the same
+        // fires (minus already-past ones) with zero Dart involvement.
+        const val KEY_SNAPSHOT_JSON = "snapshot_json_v2"
         // Base request-id offset — keeps us clear of any other PendingIntent
         // request-id space the app uses.
         private const val REQUEST_ID_BASE = 0x7E_00_00_00.toInt()
@@ -60,6 +68,12 @@ class WhisperAlarmScheduler private constructor(private val appContext: Context)
         // was empty and no more clips would play until the user
         // re-opened the app.
         private const val MAX_ALARMS = 400
+        // Round 24 — refill threshold. When the receiver processes a
+        // fire and detects `remaining < REFILL_THRESHOLD`, it re-runs
+        // `setSnapshot` from the persisted JSON with past-times
+        // filtered out. This keeps the alarm table topped up
+        // indefinitely even if Flutter has been killed by the OEM.
+        const val REFILL_THRESHOLD = 8
 
         @Volatile private var instance: WhisperAlarmScheduler? = null
 
@@ -92,25 +106,15 @@ class WhisperAlarmScheduler private constructor(private val appContext: Context)
     /**
      * Atomically replace the registered alarm table with `snapshotJson`.
      * Safe to call from the main thread.
+     *
+     * Round 24 — persists the snapshot JSON so the receiver can
+     * re-project the tail on every fire without needing Dart alive.
      */
     fun setSnapshot(snapshotJson: String): Int {
         return try {
             cancelAllInternal()
-            val fires = parseFires(snapshotJson)
-            val now = System.currentTimeMillis()
-            var registered = 0
-            val ids = mutableListOf<Int>()
-            for (fire in fires) {
-                if (registered >= MAX_ALARMS) break
-                if (fire.fireEpochMs <= now) continue
-                val requestId = REQUEST_ID_BASE + registered
-                val ok = registerOne(requestId, fire)
-                if (ok) {
-                    ids.add(requestId)
-                    registered++
-                }
-            }
-            prefs.edit().putString(KEY_REQ_IDS, JSONArray(ids).toString()).apply()
+            prefs.edit().putString(KEY_SNAPSHOT_JSON, snapshotJson).apply()
+            val registered = registerFromJson(snapshotJson)
             Log.i(TAG, "snapshot applied: registered=$registered fires")
             registered
         } catch (t: Throwable) {
@@ -119,11 +123,182 @@ class WhisperAlarmScheduler private constructor(private val appContext: Context)
         }
     }
 
+    /**
+     * Round 24 — count of alarms currently pending.
+     *
+     * NOTE: this counts REGISTERED ids, not truly-pending ids. After a
+     * fire is delivered and consumed by the OS, the id remains in
+     * `KEY_REQ_IDS` until the next `setSnapshot`. Use [futurePendingCount]
+     * for a time-accurate pending count.
+     */
+    fun pendingCount(): Int {
+        return try {
+            val raw = prefs.getString(KEY_REQ_IDS, null) ?: return 0
+            JSONArray(raw).length()
+        } catch (t: Throwable) {
+            Log.e(TAG, "pendingCount failed", t)
+            0
+        }
+    }
+
+    /**
+     * Round 24 — time-accurate count of alarms still in the future.
+     * Uses the persisted snapshot JSON to filter by `fireEpochMs > now`.
+     * This is what the receiver uses to decide whether to refill.
+     */
+    fun futurePendingCount(): Int {
+        return try {
+            val json = prefs.getString(KEY_SNAPSHOT_JSON, null) ?: return 0
+            val fires = parseFires(json)
+            val now = System.currentTimeMillis()
+            fires.count { it.fireEpochMs > now }
+        } catch (t: Throwable) {
+            Log.e(TAG, "futurePendingCount failed", t)
+            0
+        }
+    }
+
+    /**
+     * Round 24 — receiver-triggered refill.
+     *
+     * Called from `WhisperAlarmReceiver` on every fire. If the tail has
+     * dried up (< [REFILL_THRESHOLD] future fires remaining in the
+     * persisted snapshot), we EXTEND the snapshot by projecting more
+     * fires forward. Since the receiver can't invoke the Dart
+     * projection, we use a native fallback: the last fire in the
+     * snapshot plus a fixed interval. It's approximate but keeps the
+     * chain alive until Flutter next runs and produces a real
+     * projection.
+     *
+     * This method is called on every alarm fire and MUST be cheap on
+     * the common path (returns 0 immediately if there's nothing to do).
+     */
+    fun refillIfNeeded(): Int {
+        return try {
+            val remaining = futurePendingCount()
+            if (remaining >= REFILL_THRESHOLD) {
+                return 0
+            }
+            val json = prefs.getString(KEY_SNAPSHOT_JSON, null)
+            if (json.isNullOrBlank()) {
+                Log.w(TAG, "refillIfNeeded: no snapshot to replay (remaining=$remaining)")
+                return 0
+            }
+            // Extend the persisted snapshot by extrapolating from the
+            // last known fire (per schedule) using the observed inter-
+            // fire delta. This is best-effort — Flutter will overwrite
+            // it with a real projection next time it's alive — but it
+            // keeps the alarm chain firing indefinitely when the app
+            // has been reaped by the OEM.
+            val extended = extendSnapshot(json, targetSize = MAX_ALARMS / 2) ?: json
+            prefs.edit().putString(KEY_SNAPSHOT_JSON, extended).apply()
+            val registered = registerFromJson(extended)
+            Log.i(TAG, "refill applied: registered=$registered (was $remaining, extended=${extended !== json})")
+            registered
+        } catch (t: Throwable) {
+            Log.e(TAG, "refillIfNeeded failed", t)
+            0
+        }
+    }
+
+    /**
+     * Round 24 — best-effort native extension of a snapshot when Dart
+     * isn't around to project new fires. Groups fires by scheduleId,
+     * observes the median inter-fire delta, and appends synthetic
+     * fires forward until each schedule has at least [targetSize]
+     * future entries.
+     *
+     * Returns the extended JSON, or null if extension wasn't possible
+     * (e.g. we only have one fire per schedule, so no delta to
+     * observe).
+     */
+    private fun extendSnapshot(json: String, targetSize: Int): String? {
+        return try {
+            val fires = parseFires(json).toMutableList()
+            if (fires.isEmpty()) return null
+            val now = System.currentTimeMillis()
+
+            // Group by scheduleId, compute the median inter-fire delta.
+            val grouped = fires.groupBy { it.scheduleId }
+            val extras = mutableListOf<Fire>()
+            for ((scheduleId, list) in grouped) {
+                if (list.size < 2) continue
+                val sorted = list.sortedBy { it.fireEpochMs }
+                val deltas = mutableListOf<Long>()
+                for (i in 1 until sorted.size) {
+                    deltas.add(sorted[i].fireEpochMs - sorted[i - 1].fireEpochMs)
+                }
+                val medianDelta = deltas.sorted()[deltas.size / 2]
+                if (medianDelta <= 0L) continue
+                val last = sorted.last()
+                val futureCount = list.count { it.fireEpochMs > now }
+                var next = last.fireEpochMs + medianDelta
+                var added = 0
+                while (futureCount + added < targetSize) {
+                    if (added > MAX_ALARMS) break
+                    extras.add(
+                        Fire(
+                            scheduleId = scheduleId,
+                            clipPath = last.clipPath,
+                            clipTitle = last.clipTitle,
+                            playlistName = last.playlistName,
+                            fireEpochMs = next,
+                        )
+                    )
+                    added++
+                    next += medianDelta
+                }
+                Log.d(TAG, "extendSnapshot: scheduleId=$scheduleId added=$added medianDelta=${medianDelta}ms")
+            }
+            if (extras.isEmpty()) return null
+            fires.addAll(extras)
+            // Rebuild JSON in fireEpoch order.
+            fires.sortBy { it.fireEpochMs }
+            val arr = JSONArray()
+            for (f in fires) {
+                val obj = JSONObject()
+                    .put("scheduleId", f.scheduleId)
+                    .put("clipPath", f.clipPath)
+                    .put("clipTitle", f.clipTitle)
+                    .put("playlistName", f.playlistName)
+                    .put("fireEpochMs", f.fireEpochMs)
+                arr.put(obj)
+            }
+            arr.toString()
+        } catch (t: Throwable) {
+            Log.e(TAG, "extendSnapshot failed", t)
+            null
+        }
+    }
+
+    private fun registerFromJson(json: String): Int {
+        cancelAllInternal()
+        val fires = parseFires(json)
+        val now = System.currentTimeMillis()
+        var registered = 0
+        val ids = mutableListOf<Int>()
+        for (fire in fires) {
+            if (registered >= MAX_ALARMS) break
+            if (fire.fireEpochMs <= now) continue
+            val requestId = REQUEST_ID_BASE + registered
+            val ok = registerOne(requestId, fire)
+            if (ok) {
+                ids.add(requestId)
+                registered++
+            }
+        }
+        prefs.edit().putString(KEY_REQ_IDS, JSONArray(ids).toString()).apply()
+        return registered
+    }
+
     /** Cancel every alarm we currently track. */
     fun cancelAll() {
         try {
             cancelAllInternal()
-            prefs.edit().remove(KEY_REQ_IDS).apply()
+            prefs.edit()
+                .remove(KEY_REQ_IDS)
+                .remove(KEY_SNAPSHOT_JSON)
+                .apply()
         } catch (t: Throwable) {
             Log.e(TAG, "cancelAll failed", t)
         }

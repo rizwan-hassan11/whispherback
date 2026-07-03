@@ -360,6 +360,12 @@ class _ScheduleBuilderScreenState extends ConsumerState<ScheduleBuilderScreen> {
         appState: appStateRepo,
         schedules: schedRepo,
         prayer: prayerRepo,
+        // Round 24 — user just saved a schedule (create OR edit). The
+        // structural fingerprint MIGHT hash to the same value if only
+        // cosmetic fields changed, but we can't be sure — force the
+        // alarm table to be rebuilt so the user's change is guaranteed
+        // to be reflected in the pending alarms.
+        forceAlarmRebuild: true,
       ).catchError((Object _) {
         // Already logged by syncWhisperNotifications; ignored here.
       }),
@@ -438,6 +444,9 @@ class _ScheduleBuilderScreenState extends ConsumerState<ScheduleBuilderScreen> {
       appState: ref.read(appStateRepositoryProvider),
       schedules: ref.read(scheduleRepositoryProvider),
       prayer: ref.read(prayerRepositoryProvider),
+      // Round 24 — force full alarm rebuild after delete so any pending
+      // alarms for the removed schedule are cancelled.
+      forceAlarmRebuild: true,
     );
     if (mounted) {
       final l10n = context.l10n;

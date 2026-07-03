@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/playback/playback_state.dart';
+import '../data/repositories/clip_repository.dart';
 import '../services/audio/audio_services.dart';
 import '../services/audio/whisper_audio_handler.dart';
 import '../services/notifications/notification_sync.dart';
@@ -36,11 +37,12 @@ final playbackCoordinatorProvider = Provider<PlaybackCoordinator>((ref) {
     playbackService: ref.watch(audioPlaybackServiceProvider),
     scheduleRepository: ref.watch(scheduleRepositoryProvider),
   );
-  coordinator.refreshScheduleNotifications = () async {
+  coordinator.refreshScheduleNotifications = ({bool forceAlarmRebuild = false}) async {
     await syncWhisperNotifications(
       appState: ref.read(appStateRepositoryProvider),
       schedules: ref.read(scheduleRepositoryProvider),
       prayer: ref.read(prayerRepositoryProvider),
+      forceAlarmRebuild: forceAlarmRebuild,
     );
   };
   ref.onDispose(coordinator.dispose);
@@ -63,6 +65,19 @@ final playlistsProvider = FutureProvider((ref) {
 
 final clipsProvider = FutureProvider((ref) {
   ref.keepAlive();
+  // Round 24 — auto-invalidate whenever the native duration probe finishes
+  // backfilling a clip so the tile re-renders with the real length instead
+  // of the placeholder 0:00. Without this, the user sees "0:00" until they
+  // manually pull to refresh — the user's QA "clip card only shows 0:00
+  // instead of the actual length" was this exact missing wiring.
+  final sub = ClipRepository.onDurationBackfilled.listen((_) {
+    // Debounce not required: backfills fire once per new clip and
+    // there's at most one active recording/import at a time. If we
+    // ever bulk-import, riverpod naturally coalesces repeated
+    // invalidations within a frame.
+    ref.invalidateSelf();
+  });
+  ref.onDispose(sub.cancel);
   return ref.watch(clipRepositoryProvider).getAll();
 });
 

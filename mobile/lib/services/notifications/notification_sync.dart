@@ -33,6 +33,7 @@ Future<void> syncWhisperNotifications({
   required ScheduleRepository schedules,
   PlaylistRepository? playlists,
   PrayerRepository? prayer,
+  bool forceAlarmRebuild = false,
 }) async {
   try {
     final service = NotificationService.instance;
@@ -158,6 +159,14 @@ Future<void> syncWhisperNotifications({
           schedules: all,
           playlists: resolvedPlaylists,
           active: active,
+          // Round 24 — schedule-editor CRUD paths pass forceAlarmRebuild
+          // = true so the structural fingerprint is bypassed and the
+          // alarm table is guaranteed fresh even in the unlikely case
+          // that the fingerprint collides (e.g. a rename that keeps
+          // the same days / interval / duration produces the same
+          // key). The default false path lets the fingerprint short-
+          // circuit repeated calls from the 5-second notification tick.
+          forceRebuild: forceAlarmRebuild,
         );
       } catch (e, st) {
         if (kDebugMode) {

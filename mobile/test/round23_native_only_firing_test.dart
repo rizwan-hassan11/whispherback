@@ -115,22 +115,29 @@ void main() {
     });
 
     test(
-        'NativeAlarmsBridge.applySnapshot uses a fingerprint dedup so the '
+        'NativeAlarmsBridge.applySnapshot uses a STRUCTURAL fingerprint dedup so the '
         '5-second notification tick does not cancel + re-register 400 alarms '
-        '12 times a minute', () {
+        '12 times a minute (Round 24 replaces the fire-time fingerprint that '
+        'drifted on every fire)',
+        () {
       final src = _read('lib/services/scheduler/native_alarms_bridge.dart');
-      expect(src, contains('_lastSnapshotFingerprint'),
+      expect(src, contains('_lastStructuralFingerprint'),
           reason:
-              'Fingerprint state must be tracked so a re-run within the same second is a no-op.');
-      expect(src, contains('fingerprint == _lastSnapshotFingerprint'),
+              'Round 24 renamed the fingerprint state so it is clearly '
+              'STRUCTURAL (schedules + clips + active) instead of derived '
+              'from projected fire times, which drifted on every fire '
+              'and defeated the dedup.');
+      expect(
+          src, contains('structuralFingerprint == _lastStructuralFingerprint'),
           reason:
-              'The equality check gates the AlarmManager round-trip; without it the fingerprint is dead code.');
+              'The equality check must gate the AlarmManager round-trip; '
+              'without it the fingerprint is dead code.');
       // Fingerprint must invalidate on cancelAll, otherwise the next
       // applySnapshot after a cancellation would incorrectly no-op.
       final cancelIdx = src.indexOf('Future<void> cancelAll()');
       expect(cancelIdx, greaterThanOrEqualTo(0));
       final cancelBody = src.substring(cancelIdx, cancelIdx + 500);
-      expect(cancelBody, contains('_lastSnapshotFingerprint = null'),
+      expect(cancelBody, contains('_lastStructuralFingerprint = null'),
           reason:
               'Cancelling all alarms must invalidate the fingerprint so the next applySnapshot re-registers correctly instead of skipping.');
     });
@@ -152,14 +159,21 @@ void main() {
       expect(src, contains('store.setSlot(scheduleId, when)'),
           reason:
               'Slot must be stamped so the dedup check in `_slotTakenByOtherSchedule` sees the native fire.');
+      // Round 24 — completion is stamped ONLY in `_stampNativeFireCompletion`
+      // (fired on IDLE), never in `_stampNativeFireStart`. The old Round-23
+      // code mirrored completion=slot on start which collapsed the
+      // projection's case-1 (real end known) into case-2 (placeholder end
+      // = slot+duration), causing the upcoming-events widget and the
+      // `applySnapshot` projection to double-add the playlist duration.
       expect(src, contains('store.setCompletion(scheduleId, when)'),
           reason:
-              'Completion must be stamped so the next slot is computed from the actual completion time.');
+              'Completion must be stamped in `_stampNativeFireCompletion` so the next slot is computed from the actual completion time.');
     });
 
     test(
         'PlaybackCoordinator triggers refreshScheduleNotifications on idle so '
-        'the alarm table tail is refilled after every native fire', () {
+        'the notification card advances and (in Round 24+) the alarm table '
+        'periodic-refill window is respected', () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
       // Find `_onNativePlaybackState` and check its idle branch includes
       // the refresh call.
@@ -170,7 +184,11 @@ void main() {
       final handlerBody = src.substring(handlerIdx, handlerEnd);
       expect(handlerBody, contains('refreshScheduleNotifications?.call()'),
           reason:
-              'Without a refresh on completion, the alarm table tail dries up after 288 fires. With it, the tail is refilled from the just-stamped completion.');
+              'Without a refresh on completion, the "next in ..." notification '
+              'card would stay stuck on the just-fired slot. In Round 24 the '
+              'refresh is safe: the underlying `applySnapshot` is guarded by '
+              'a structural fingerprint and only touches the alarm table when '
+              'the structure or the periodic-refill window (12 h) demands it.');
       expect(handlerBody, contains('_stampNativeFireCompletion'),
           reason:
               'Completion stamp must be inside `_onNativePlaybackState` so the same handler both stamps AND refreshes.');

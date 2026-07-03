@@ -100,16 +100,29 @@ class NativeAlarmsBridge {
   static const int _kMaxFiresPerSchedule = 288;
   static const int _kMaxFiresTotal = 400;
 
-  /// Round 23 — last snapshot JSON we shipped to native, keyed off a
-  /// stable fingerprint that excludes future fires we haven't fired
-  /// yet. `applySnapshot` compares before dispatching, which avoids
-  /// cancelling + re-registering the SAME 288 alarms 12 times a minute
-  /// as the engine's 5-second notification tick loops. Constant
-  /// re-registration was measured to add up to a full second of
-  /// latency around the actual fire time on aggressive OEMs
-  /// (Xiaomi / Vivo) which contributed to the "later schedules are
-  /// delayed" QA report.
-  String? _lastSnapshotFingerprint;
+  /// Round 24 — STRUCTURAL fingerprint (schedules + clips + active state
+  /// only; NEVER fire times). The prior Round-23 fingerprint hashed
+  /// projected fire times, which caused a devastating bug: every fire
+  /// slightly drifted `lastFired`, which drifted the projected times,
+  /// which changed the fingerprint, which forced `applySnapshot` to
+  /// cancel EVERY pending alarm and re-register with new times. If a
+  /// pending alarm was about to fire (within the 500 ms delivery
+  /// latency window), the OS silently dropped it. Combined with the
+  /// engine's 5-second notification tick, that meant EVERY fire past
+  /// the first was at risk of being cancelled mid-delivery.
+  ///
+  /// The correct model: the alarm table structure only changes when
+  /// the user creates/edits/deletes a schedule, swaps a playlist's
+  /// first playable clip, or toggles Active. All other refreshes
+  /// (notification card updates, engine ticks, state listener fires)
+  /// MUST NOT touch the alarm table.
+  String? _lastStructuralFingerprint;
+
+  /// Round 24 — millis at which we last actually re-registered the
+  /// alarm table. Used by `refreshTail` to decide whether the tail
+  /// might have dried up (e.g. after ~24 h since last register we
+  /// should proactively re-register the tail regardless of structure).
+  DateTime? _lastRegisteredAt;
 
   /// Broadcasts every native playback state transition to the Dart side.
   /// The `PlaybackCoordinator` subscribes so it can light up the mini-
@@ -125,7 +138,8 @@ class NativeAlarmsBridge {
 
   @visibleForTesting
   void debugResetFingerprint() {
-    _lastSnapshotFingerprint = null;
+    _lastStructuralFingerprint = null;
+    _lastRegisteredAt = null;
   }
 
   Future<void> _onMethodCall(MethodCall call) async {
@@ -151,10 +165,31 @@ class NativeAlarmsBridge {
     }
   }
 
+  /// Rebuilds the native alarm table.
+  ///
+  /// Round 24 — this is now guarded by a STRUCTURAL fingerprint. The
+  /// alarm table is only cancel-and-re-registered when the STRUCTURE
+  /// changes: user added / edited / deleted a schedule, swapped a
+  /// playlist's first playable clip, or toggled Active. Everything
+  /// else (the 5-second notification tick, state-listener refreshes,
+  /// small `lastFired` drift after a fire) is a no-op.
+  ///
+  /// This closes the Round 23 regression where every fire slightly
+  /// changed the projected slots, which drifted the fingerprint,
+  /// which forced a cancel+re-register that could cancel the NEXT
+  /// pending alarm mid-delivery. The user's QA "only the first
+  /// schedule played, all subsequent ones did not" was that exact
+  /// race — the cancel-and-re-register was racing the OS's alarm
+  /// delivery for the very next slot.
+  ///
+  /// If [forceRebuild] is true, the fingerprint check is bypassed —
+  /// used on cold start / boot receiver replay when we can't be sure
+  /// the AlarmManager table matches our last computed snapshot.
   Future<void> applySnapshot({
     required Iterable<PlaybackSchedule> schedules,
     required PlaylistRepository playlists,
     required bool active,
+    bool forceRebuild = false,
   }) async {
     if (!Platform.isAndroid) return;
     if (!active) {
@@ -166,20 +201,23 @@ class NativeAlarmsBridge {
       await cancelAll();
       return;
     }
-    final fires = <Map<String, Object?>>[];
-    final now = DateTime.now();
-    final lastFired = ScheduleLastFiredStore.instance;
+
+    // ── STAGE 1: resolve the first playable clip for each schedule. This
+    // is the only I/O-bound step; keep it OUTSIDE the fingerprint check
+    // so a fingerprint-hit still returns quickly, but INSIDE the
+    // projection loop so the fires we register point at real files.
+    final resolvedClips = <String, ({String path, String title})>{};
     for (final schedule in enabled) {
-      String? clipPath;
-      String clipTitle = 'WhisperBack';
       try {
         final list = await playlists.getClips(schedule.playlistId);
         for (final clip in list) {
           final path = clip.filePath;
           if (path.isEmpty) continue;
           if (!await File(path).exists()) continue;
-          clipPath = path;
-          clipTitle = clip.title.isNotEmpty ? clip.title : clipTitle;
+          resolvedClips[schedule.id] = (
+            path: path,
+            title: clip.title.isNotEmpty ? clip.title : 'WhisperBack',
+          );
           break;
         }
       } catch (e, st) {
@@ -187,7 +225,57 @@ class NativeAlarmsBridge {
           print('NativeAlarmsBridge: resolve clip for ${schedule.id} failed: $e\n$st');
         }
       }
-      if (clipPath == null) continue;
+    }
+
+    // ── STAGE 2: structural fingerprint. Only these fields change the
+    // alarm TABLE structure: schedule id, days, start/end, interval,
+    // playlist duration (drives `effectiveStepMinutes`), clip path
+    // (drives what the receiver actually plays), and active state.
+    // We intentionally do NOT include `lastFired` — the alarm table
+    // is invariant across fires that only shift the projection by
+    // sub-second drift.
+    final structural = enabled
+        .where((s) => resolvedClips.containsKey(s.id))
+        .map((s) {
+          final clip = resolvedClips[s.id]!;
+          return [
+            s.id,
+            s.daysMask,
+            s.startTime.hour * 60 + s.startTime.minute,
+            (s.endTime?.hour ?? -1) * 60 + (s.endTime?.minute ?? 0),
+            s.intervalMinutes,
+            s.playlistDurationMs ~/ 1000,
+            clip.path,
+          ].join(':');
+        })
+        .toList()
+      ..sort();
+    final structuralFingerprint = '$active|${structural.join('|')}';
+
+    // Refill window — if the last register was >12 h ago, force a
+    // rebuild even if the fingerprint matches, so the tail of the
+    // alarm table doesn't dry up on marathon (multi-day) sessions.
+    final now = DateTime.now();
+    final needsPeriodicRefill = _lastRegisteredAt == null ||
+        now.difference(_lastRegisteredAt!) > const Duration(hours: 12);
+
+    if (!forceRebuild &&
+        !needsPeriodicRefill &&
+        structuralFingerprint == _lastStructuralFingerprint) {
+      if (kDebugMode) {
+        print('NativeAlarmsBridge: structural fingerprint unchanged, '
+            'alarm table left as-is (${enabled.length} schedules)');
+      }
+      return;
+    }
+
+    // ── STAGE 3: project fires. Only reached when the structure changed
+    // OR the periodic refill window elapsed OR the caller forced it.
+    final fires = <Map<String, Object?>>[];
+    final lastFired = ScheduleLastFiredStore.instance;
+    for (final schedule in enabled) {
+      final clip = resolvedClips[schedule.id];
+      if (clip == null) continue;
       var lastCompletion = lastFired.completion(schedule.id);
       var lastSlot = lastFired.slot(schedule.id);
       var added = 0;
@@ -204,10 +292,11 @@ class NativeAlarmsBridge {
         if (!next.isAfter(now)) break;
         fires.add({
           'scheduleId': schedule.id,
-          'clipPath': clipPath,
-          'clipTitle': clipTitle,
-          'playlistName':
-              schedule.playlistName.isNotEmpty ? schedule.playlistName : 'WhisperBack',
+          'clipPath': clip.path,
+          'clipTitle': clip.title,
+          'playlistName': schedule.playlistName.isNotEmpty
+              ? schedule.playlistName
+              : 'WhisperBack',
           'fireEpochMs': next.millisecondsSinceEpoch,
         });
         added++;
@@ -223,31 +312,17 @@ class NativeAlarmsBridge {
         (a['fireEpochMs']! as int).compareTo(b['fireEpochMs']! as int));
     final trimmed = fires.take(_kMaxFiresTotal).toList();
     final json = jsonEncode(trimmed);
-    // Round 23 — dedup: bucket the earliest fireEpochMs into 60-second
-    // grains so a re-run within the same minute (which happens 12+ times
-    // per minute via the 5 s notification tick) resolves to the same
-    // fingerprint and is skipped without touching AlarmManager. Includes
-    // the ordered list of (scheduleId, fireEpochMs / 1000) pairs so any
-    // actual change (schedule added, interval changed, playlist swap)
-    // still forces a fresh registration.
-    final fingerprint = trimmed
-        .map((f) => '${f['scheduleId']}@${(f['fireEpochMs']! as int) ~/ 1000}')
-        .join('|');
-    if (fingerprint == _lastSnapshotFingerprint) {
-      if (kDebugMode) {
-        print('NativeAlarmsBridge: snapshot fingerprint unchanged '
-            '(${trimmed.length} fires); skipping AlarmManager rewrite');
-      }
-      return;
-    }
-    _lastSnapshotFingerprint = fingerprint;
+
+    _lastStructuralFingerprint = structuralFingerprint;
+    _lastRegisteredAt = now;
     try {
       final registered = await _channel.invokeMethod<int>('setSnapshot', {
         'snapshot': json,
         'active': active,
       });
       if (kDebugMode) {
-        print('NativeAlarmsBridge: native registered $registered alarms');
+        print('NativeAlarmsBridge: native registered $registered alarms '
+            '(structural=${forceRebuild ? "force" : needsPeriodicRefill ? "refill" : "change"})');
       }
     } on MissingPluginException {
       if (kDebugMode) {
@@ -262,7 +337,8 @@ class NativeAlarmsBridge {
 
   Future<void> cancelAll() async {
     if (!Platform.isAndroid) return;
-    _lastSnapshotFingerprint = null;
+    _lastStructuralFingerprint = null;
+    _lastRegisteredAt = null;
     try {
       await _channel.invokeMethod<void>('cancelAll');
     } on MissingPluginException {

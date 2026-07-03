@@ -194,7 +194,16 @@ class PlaybackCoordinator {
   }
 
   /// Called after a scheduled whisper finishes so notifications show the next slot.
-  Future<void> Function()? refreshScheduleNotifications;
+  ///
+  /// Round 24 — accepts a `forceAlarmRebuild` flag. When true, the
+  /// underlying `syncWhisperNotifications` is instructed to bypass the
+  /// native alarm bridge's structural fingerprint and fully cancel +
+  /// re-register the alarm table. Use for user-initiated CRUD paths
+  /// (Active toggle, schedule save/delete) where we can't be sure the
+  /// fingerprint has actually shifted; leave false for the internal
+  /// notification-tick refresh where the fingerprint short-circuit is
+  /// what keeps the alarm chain stable.
+  Future<void> Function({bool forceAlarmRebuild})? refreshScheduleNotifications;
 
   /// Invoked when a scheduled clip finishes naturally. Carries the schedule id
   /// of the run that just completed and the wall-clock time it finished so
@@ -375,11 +384,16 @@ class PlaybackCoordinator {
       // Idle — clear the snapshot only if we'd previously promoted it.
       if (_nativeScheduledActive) {
         _nativeScheduledActive = false;
-        // Round 23 — stamp actual completion so `next = completion +
-        // interval` computes correctly, then rebuild the alarm table so
-        // the tail stays populated. Without the refresh, if the user
-        // has 288 fires registered and the app runs in the background
-        // for weeks, the tail eventually dries up.
+        // Round 24 — stamp actual completion so the "upcoming events"
+        // widget and the always-on notification card show the correct
+        // next-fire time. We do NOT trigger a full snapshot refresh
+        // here: that path calls `applySnapshot`, which the Round-24
+        // rewrite guards behind a STRUCTURAL fingerprint so it's now
+        // a no-op unless the user actually changed a schedule. The
+        // alarm table already contains the next 288 fires per
+        // schedule, all pre-registered with `setAlarmClock`; the OS
+        // will deliver them independently of anything the app does
+        // after this point.
         final endedAt = DateTime.now();
         final scheduleId = _nativeActiveScheduleId ?? native.scheduleId;
         _nativeActiveScheduleId = null;
@@ -394,9 +408,11 @@ class PlaybackCoordinator {
             modalVisible: false,
           ));
         }
-        // Fire-and-forget refresh so the alarm table gets a fresh tail
-        // computed from the just-stamped completion. Any failure is
-        // logged inside `refreshScheduleNotifications`.
+        // Refresh only the LOCAL notification card so "next in 5 min"
+        // updates. This is `flutter_local_notifications` land, NOT
+        // AlarmManager; the tail-refill decision is now the sole
+        // responsibility of `applySnapshot`'s periodic-refill window
+        // (default 12 h) and the schedule editor CRUD path.
         unawaited(() async {
           try {
             await refreshScheduleNotifications?.call();
@@ -424,10 +440,14 @@ class PlaybackCoordinator {
     unawaited(() async {
       try {
         final store = await ScheduleLastFiredStore.ensureLoaded();
+        // Round 24 — stamp ONLY the slot here. The completion stamp is
+        // set by `_stampNativeFireCompletion` when the MediaPlayer
+        // actually finishes. Setting completion == slot here would
+        // collapse the projection's "case 1" (real end known) into
+        // "case 2" (placeholder end = slot + duration), causing the
+        // upcoming-events widget and the `applySnapshot` projection
+        // to double-add the playlist duration.
         await store.setSlot(scheduleId, when);
-        // Mirror slot into completion so the Dart engine's projection
-        // math treats the slot as "in flight until playback finishes".
-        await store.setCompletion(scheduleId, when);
       } catch (e, st) {
         if (kDebugMode) {
           debugPrint('coordinator _stampNativeFireStart failed: $e\n$st');
@@ -996,7 +1016,13 @@ class PlaybackCoordinator {
     // Each call is independently try/caught so a single failure can
     // never block the others.
     try {
-      await refreshScheduleNotifications?.call();
+      // Round 24 — Active toggle changes the alarm-table state (from
+      // "cancelled" to "populated") so we MUST bypass the structural
+      // fingerprint here. Otherwise on Vivo / Xiaomi the toggle from
+      // OFF → ON on a previously-persisted schedule set could hit a
+      // cached fingerprint that matches an ALREADY-CANCELLED table
+      // and skip re-registration entirely.
+      await refreshScheduleNotifications?.call(forceAlarmRebuild: true);
     } catch (e, st) {
       if (kDebugMode) {
         debugPrint(

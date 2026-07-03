@@ -139,6 +139,19 @@ class WhisperAlarmReceiver : BroadcastReceiver() {
                 // wake-up (e.g. duplicate firing during a Doze unbox).
                 Log.e(TAG, "startForegroundService failed", t)
             }
+
+            // Round 24 — after handing off to the FG service, top up the
+            // alarm table if we're running low. This is what keeps the
+            // chain firing indefinitely even when the app process has
+            // been reaped: we DON'T rely on Dart being alive to project
+            // the next 288 fires. `refillIfNeeded()` is cheap on the
+            // common path (returns 0 immediately if the tail is still
+            // healthy).
+            try {
+                WhisperAlarmScheduler.get(context).refillIfNeeded()
+            } catch (t: Throwable) {
+                Log.e(TAG, "refillIfNeeded from onReceive failed", t)
+            }
         } catch (t: Throwable) {
             Log.e(TAG, "onReceive failed (swallowed)", t)
         }
