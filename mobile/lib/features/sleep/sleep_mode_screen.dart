@@ -41,7 +41,7 @@ class _SleepModeScreenState extends ConsumerState<SleepModeScreen> {
       final locale = Localizations.localeOf(context).toString();
       final endLabel = DateFormat.jm(locale).format(end);
       final message = context.l10n.sleepModeUntil(endLabel);
-      context.pop();
+      context.go('/home');
       context.showShellSnackBar(message, icon: AppIcons.bedtime);
     }
   }
@@ -79,7 +79,7 @@ class _SleepModeScreenState extends ConsumerState<SleepModeScreen> {
           body: SafeArea(
             child: Column(
               children: [
-                _SleepTopBar(theme: theme, onBack: () => context.pop()),
+                _SleepTopBar(theme: theme, onBack: () => context.go('/home')),
                 Expanded(
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),

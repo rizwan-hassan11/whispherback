@@ -93,6 +93,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 const NoTransitionPage(child: ScheduledOverviewScreen()),
           ),
           GoRoute(
+            path: '/sleep',
+            pageBuilder: (context, state) =>
+                const NoTransitionPage(child: SleepModeScreen()),
+          ),
+          GoRoute(
             path: '/settings',
             pageBuilder: (context, state) =>
                 const NoTransitionPage(child: SettingsScreen()),
@@ -116,11 +121,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => ScheduleBuilderScreen(
           playlistId: state.pathParameters['playlistId']!,
         ),
-      ),
-      GoRoute(
-        path: '/sleep',
-        parentNavigatorKey: _rootKey,
-        builder: (context, state) => const SleepModeScreen(),
       ),
       GoRoute(
         path: '/prayer',

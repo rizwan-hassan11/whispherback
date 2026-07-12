@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../../core/theme/app_radii.dart';
+import '../../../core/theme/playlist_cover.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../l10n/duration_format.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_icons.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/ux/tap_feedback.dart';
 import '../../../core/widgets/depth_surface.dart';
 import '../../../core/widgets/prominent_play_button.dart';
 import '../../../core/widgets/whisper_card.dart';
@@ -28,220 +30,250 @@ class PlaylistCard extends StatelessWidget {
     super.key,
     required this.playlist,
     required this.index,
+    this.isPlaying = false,
     this.onTap,
-    this.onPlay,
+    this.onPlayPause,
+    this.onFavourite,
+    this.onEdit,
+    this.onDelete,
   });
 
   final Playlist playlist;
   final int index;
+  final bool isPlaying;
   final VoidCallback? onTap;
-  final VoidCallback? onPlay;
-
-  List<Color> _coverColors(WhisperThemeExtension theme) {
-    if (theme.isDark) {
-      final palettes = [
-        [AppColors.brandDark, AppColors.brandLight],
-        [AppColors.deep2, AppColors.inkSecondary],
-        [const Color(0xFF0A2048), AppColors.gold.withValues(alpha: 0.85)],
-        [const Color(0xFF3D5A80), const Color(0xFF5B8FC4)],
-      ];
-      return palettes[index % palettes.length];
-    }
-    final lightPalettes = [
-      [AppColors.ink, AppColors.inkSecondary],
-      [const Color(0xFF0A2048), AppColors.ink],
-      [const Color(0xFF1E3A5F), const Color(0xFF3D5A80)],
-      [AppColors.inkSecondary, const Color(0xFF0A2048)],
-    ];
-    return lightPalettes[index % lightPalettes.length];
-  }
-
-  static bool _coverIsDark(List<Color> colors) {
-    final mid = Color.lerp(colors.first, colors.last, 0.5)!;
-    return mid.computeLuminance() < 0.45;
-  }
+  final VoidCallback? onPlayPause;
+  final VoidCallback? onFavourite;
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
     final theme = whisperTheme(context);
-    final l10n = context.l10n;
-    final colors = _coverColors(theme);
-    final darkCover = _coverIsDark(colors);
+    final colors =
+        PlaylistCoverPalette.colorsForIndex(index, isDark: theme.isDark);
 
-    return DepthTile(
-      onTap: onTap,
-      radius: AppRadii.sm,
-      elevated: true,
-      padding: const EdgeInsets.all(14),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _CoverArt(
-            colors: colors,
-            hasSchedule: playlist.hasSchedule,
-            darkCover: darkCover,
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  playlist.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 16,
-                    color: theme.foreground,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  l10n.clipsSummary(
-                    playlist.clipCount,
-                    formatPlaylistDurationLocalized(
-                        context, playlist.totalDurationMs),
-                  ),
-                  style: TextStyle(fontSize: 12, color: theme.muted),
-                ),
-                if (playlist.hasSchedule || playlist.shuffleEnabled) ...[
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 4,
+    return RepaintBoundary(
+      child: DepthSurface(
+        radius: AppRadii.sm,
+        elevated: true,
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: onTap == null
+                      ? null
+                      : () {
+                          selectionHaptic();
+                          onTap!();
+                        },
+                  borderRadius: BorderRadius.circular(AppRadii.sm),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (playlist.hasSchedule)
-                        WhisperBadge(
-                          label: l10n.scheduledBadge,
-                          variant: WhisperBadgeVariant.gold,
-                        ),
-                      if (playlist.shuffleEnabled)
-                        WhisperBadge(label: l10n.shuffleOn),
+                      PlaylistCoverArt(
+                        colors: colors,
+                        hasSchedule: playlist.hasSchedule,
+                        isPlaying: isPlaying,
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                          child: _PlaylistInfo(playlist: playlist, theme: theme)),
                     ],
                   ),
-                ],
-                if (playlist.hasSchedule && playlist.clipCount > 0) ...[
-                  const SizedBox(height: 10),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(4),
-                    child: LinearProgressIndicator(
-                      value: 0.55,
-                      minHeight: 4,
-                      backgroundColor: theme.glassBorder,
-                      color: theme.actionFill,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          if (playlist.clipCount > 0 && onPlay != null)
-            ProminentPlayButton(onTap: onPlay)
-          else
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: theme.glass,
-                border: Border.all(color: theme.glassBorder),
+                ),
               ),
-              child: Icon(AppIcons.add, size: 20, color: theme.muted),
             ),
-        ],
+            const SizedBox(width: 8),
+            _PlaylistCardActions(
+              theme: theme,
+              playlist: playlist,
+              isPlaying: isPlaying,
+              onOpen: onTap,
+              onPlayPause: onPlayPause,
+              onFavourite: onFavourite,
+              onEdit: onEdit,
+              onDelete: onDelete,
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
-class _CoverArt extends StatelessWidget {
-  const _CoverArt({
-    required this.colors,
-    required this.hasSchedule,
-    required this.darkCover,
-  });
+class _PlaylistInfo extends StatelessWidget {
+  const _PlaylistInfo({required this.playlist, required this.theme});
 
-  final List<Color> colors;
-  final bool hasSchedule;
-  final bool darkCover;
+  final Playlist playlist;
+  final WhisperThemeExtension theme;
 
   @override
   Widget build(BuildContext context) {
-    final barColor = darkCover
-        ? Colors.white.withValues(alpha: 0.92)
-        : AppColors.deep.withValues(alpha: 0.62);
-    final markColor = darkCover
-        ? Colors.white.withValues(alpha: 0.38)
-        : AppColors.deep.withValues(alpha: 0.2);
-
-    return Stack(
-      clipBehavior: Clip.none,
+    final l10n = context.l10n;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Container(
-          width: 56,
-          height: 56,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(AppRadii.sm),
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: colors,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.28),
-                blurRadius: 16,
-                offset: const Offset(0, 4),
-              ),
-            ],
-            border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
-          ),
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              Icon(
-                AppIcons.music,
-                color: markColor,
-                size: 24,
-              ),
-              Positioned(
-                bottom: 10,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    _bar(8, barColor),
-                    _bar(14, barColor),
-                    _bar(20, barColor),
-                    _bar(12, barColor),
-                    _bar(16, barColor),
-                  ],
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                playlist.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 16,
+                  color: theme.foreground,
                 ),
               ),
+            ),
+            if (playlist.isFavourite)
+              const Padding(
+                padding: EdgeInsets.only(left: 4),
+                child: Icon(AppIcons.heart, size: 14, color: AppColors.gold),
+              ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(
+          l10n.clipsSummary(
+            playlist.clipCount,
+            formatPlaylistDurationLocalized(context, playlist.totalDurationMs),
+          ),
+          style: TextStyle(fontSize: 12, color: theme.muted),
+        ),
+        if (playlist.hasSchedule || playlist.shuffleEnabled) ...[
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            runSpacing: 4,
+            children: [
+              if (playlist.hasSchedule)
+                WhisperBadge(
+                  label: l10n.scheduledBadge,
+                  variant: WhisperBadgeVariant.gold,
+                ),
+              if (playlist.shuffleEnabled)
+                WhisperBadge(label: l10n.shuffleOn),
             ],
           ),
-        ),
-        if (hasSchedule)
-          const Positioned(
-            top: -5,
-            right: -5,
-            child: ScheduleBadgeDot(),
-          ),
+        ],
       ],
     );
   }
+}
 
-  Widget _bar(double h, Color color) => Container(
-        width: 4,
-        height: h,
-        margin: const EdgeInsets.symmetric(horizontal: 1.5),
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(2),
+class _PlaylistCardActions extends StatelessWidget {
+  const _PlaylistCardActions({
+    required this.theme,
+    required this.playlist,
+    required this.isPlaying,
+    this.onOpen,
+    this.onPlayPause,
+    this.onFavourite,
+    this.onEdit,
+    this.onDelete,
+  });
+
+  final WhisperThemeExtension theme;
+  final Playlist playlist;
+  final bool isPlaying;
+  final VoidCallback? onOpen;
+  final VoidCallback? onPlayPause;
+  final VoidCallback? onFavourite;
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final canPlay = playlist.clipCount > 0 && onPlayPause != null;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (canPlay)
+          ProminentPlayButton(
+            onTap: onPlayPause,
+            isPlaying: isPlaying,
+            size: 40,
+            iconSize: 18,
+          )
+        else
+          _ActionIcon(
+            icon: AppIcons.add,
+            label: l10n.addClips,
+            color: theme.muted,
+            onTap: onOpen,
+          ),
+        const SizedBox(height: 6),
+        _ActionIcon(
+          icon: AppIcons.heart,
+          label: playlist.isFavourite
+              ? l10n.removeFromFavourites
+              : l10n.addToFavourites,
+          color: playlist.isFavourite ? AppColors.gold : theme.muted,
+          onTap: onFavourite,
         ),
-      );
+        _ActionIcon(
+          icon: AppIcons.edit,
+          label: l10n.renamePlaylist,
+          color: theme.muted,
+          onTap: onEdit,
+        ),
+        _ActionIcon(
+          icon: AppIcons.trash,
+          label: l10n.deletePlaylist,
+          color: AppColors.error.withValues(alpha: 0.85),
+          onTap: onDelete,
+        ),
+      ],
+    );
+  }
+}
+
+class _ActionIcon extends StatelessWidget {
+  const _ActionIcon({
+    required this.icon,
+    required this.label,
+    required this.color,
+    this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: label,
+      button: true,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap == null
+              ? null
+              : () {
+                  selectionHaptic();
+                  onTap!();
+                },
+          borderRadius: BorderRadius.circular(8),
+          child: SizedBox(
+            width: 36,
+            height: 32,
+            child: Icon(icon, size: 18, color: color),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class PlaylistsSummaryStrip extends StatelessWidget {

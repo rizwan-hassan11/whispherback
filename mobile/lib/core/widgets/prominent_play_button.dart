@@ -1,25 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
-import '../theme/app_theme.dart';
 import '../theme/app_icons.dart';
+import '../theme/app_theme.dart';
+import '../ux/tap_feedback.dart';
 
-/// High-contrast circular play control for list cards.
-///
-/// QA-report context: the previous implementation used a transparent outer
-/// [Material] wrapping an [Ink] with `BoxShape.circle`. On Samsung One UI
-/// 5/6 and some Vivo / Infinix devices the rasterizer painted a faint
-/// rectangular shadow around the `Ink` widget's bounding box, even though
-/// the visible decoration was circular — the user perceived this as
-/// "square boundary around the circular icons".
-///
-/// This implementation pins the painting to a true circle by giving the
-/// outer [Material] itself the [CircleBorder] shape (so its shadow + ink
-/// surface are circular), drops the redundant `Ink` decoration, and uses
-/// a [SizedBox] for sizing. The colored fill, border, and glow live on a
-/// single [DecoratedBox] underneath the Material's ink surface — the
-/// Material renders the splash inside the CircleBorder, never spilling
-/// past it.
+/// High-contrast circular play / pause control for list cards.
 class ProminentPlayButton extends StatelessWidget {
   const ProminentPlayButton({
     super.key,
@@ -27,12 +13,14 @@ class ProminentPlayButton extends StatelessWidget {
     this.size = 44,
     this.iconSize = 22,
     this.filled = true,
+    this.isPlaying = false,
   });
 
   final VoidCallback? onTap;
   final double size;
   final double iconSize;
   final bool filled;
+  final bool isPlaying;
 
   @override
   Widget build(BuildContext context) {
@@ -40,6 +28,7 @@ class ProminentPlayButton extends StatelessWidget {
     final fill = theme.actionFill;
     final fg = theme.onActionFill;
     final glow = theme.isDark ? AppColors.brandGlow : AppColors.lightBrandGlow;
+    final icon = isPlaying ? AppIcons.pause : AppIcons.play;
 
     if (filled) {
       return SizedBox(
@@ -73,14 +62,15 @@ class ProminentPlayButton extends StatelessWidget {
             ),
             clipBehavior: Clip.antiAlias,
             child: InkWell(
-              onTap: onTap,
+              onTap: onTap == null
+                  ? null
+                  : () {
+                      tapHaptic();
+                      onTap!();
+                    },
               customBorder: const CircleBorder(),
               child: Center(
-                child: Icon(
-                  AppIcons.play,
-                  color: fg,
-                  size: iconSize,
-                ),
+                child: Icon(icon, color: fg, size: iconSize),
               ),
             ),
           ),
@@ -98,14 +88,15 @@ class ProminentPlayButton extends StatelessWidget {
         ),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
-          onTap: onTap,
+          onTap: onTap == null
+              ? null
+              : () {
+                  tapHaptic();
+                  onTap!();
+                },
           customBorder: const CircleBorder(),
           child: Center(
-            child: Icon(
-              AppIcons.play,
-              color: theme.accentIcon,
-              size: iconSize,
-            ),
+            child: Icon(icon, color: theme.accentIcon, size: iconSize),
           ),
         ),
       ),

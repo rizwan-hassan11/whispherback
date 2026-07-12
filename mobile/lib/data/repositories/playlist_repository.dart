@@ -49,7 +49,7 @@ class PlaylistRepository {
       LEFT JOIN clips c ON c.id = pc.clip_id
       LEFT JOIN schedules s ON s.playlist_id = p.id AND s.enabled = 1
       GROUP BY p.id
-      ORDER BY p.updated_at DESC
+      ORDER BY p.is_favourite DESC, p.updated_at DESC
     ''');
     return rows.map(_fromRow).toList();
   }
@@ -107,6 +107,7 @@ class PlaylistRepository {
         'created_at': playlist.createdAt.toIso8601String(),
         'updated_at': playlist.updatedAt.toIso8601String(),
         'shuffle_enabled': 0,
+        'is_favourite': 0,
       });
     } on DatabaseException catch (e) {
       // SQLite `UNIQUE constraint failed: playlists.name` — translate to a
@@ -135,6 +136,19 @@ class PlaylistRepository {
       }
       rethrow;
     }
+  }
+
+  Future<void> setFavourite(String id, bool favourite) async {
+    final db = await _db.database;
+    await db.update(
+      'playlists',
+      {
+        'is_favourite': favourite ? 1 : 0,
+        'updated_at': DateTime.now().toIso8601String(),
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   Future<void> setShuffle(String id, bool enabled) async {
@@ -276,6 +290,7 @@ class PlaylistRepository {
       createdAt: DateTime.parse(row['created_at']! as String),
       updatedAt: DateTime.parse(row['updated_at']! as String),
       shuffleEnabled: (row['shuffle_enabled'] as int) == 1,
+      isFavourite: (row['is_favourite'] as int? ?? 0) == 1,
       clipCount: row['clip_count'] as int? ?? 0,
       totalDurationMs: row['total_duration_ms'] as int? ?? 0,
       hasSchedule: (row['has_schedule'] as int? ?? 0) == 1,

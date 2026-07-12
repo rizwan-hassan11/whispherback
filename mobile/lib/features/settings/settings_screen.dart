@@ -136,7 +136,7 @@ class SettingsScreen extends ConsumerWidget {
                     icon: AppIcons.bedtime,
                     title: l10n.sleepMode,
                     subtitle: l10n.sleepModeSubtitle,
-                    onTap: () => context.push('/sleep'),
+                    onTap: () => context.go('/sleep'),
                   ),
                   if (kAdhanFeatureEnabled) ...[
                     Divider(height: 1, color: theme.glassBorder),

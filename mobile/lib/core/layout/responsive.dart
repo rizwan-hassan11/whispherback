@@ -156,7 +156,7 @@ class Responsive {
         AppSizeClass.expanded => 32,
       },
       heroControlSize:
-          (shortest * (flipCover ? 0.48 : 0.55)).clamp(140.0, 220.0),
+          (shortest * (flipCover ? 0.54 : 0.64)).clamp(168.0, 252.0),
     );
   }
 

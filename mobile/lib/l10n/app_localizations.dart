@@ -88,6 +88,8 @@ class AppLocalizations {
       _s('Clips', 'کلپس', 'المقاطع', 'Clips', 'Clips', 'Đoạn ghi');
   String get navSchedule =>
       _s('Schedule', 'شیڈول', 'الجدول', 'Schema', 'Planning', 'Lịch');
+  String get navSleep =>
+      _s('Sleep', 'نیند', 'النوم', 'Slaap', 'Sommeil', 'Ngủ');
   String get navSettings => _s('Settings', 'ترتیبات', 'الإعدادات',
       'Instellingen', 'Paramètres', 'Cài đặt');
 
@@ -426,6 +428,29 @@ class AppLocalizations {
       'Scheduled', 'شیڈول شدہ', 'مجدول', 'Gepland', 'Planifié', 'Đã lên lịch');
   String get yourLibrary => _s('Your library', 'آپ کی لائبریری', 'مكتبتك',
       'Jouw bibliotheek', 'Votre bibliothèque', 'Thư viện của bạn');
+  String get favourites => _s('Favourites', 'پسندیدہ', 'المفضلة', 'Favorieten',
+      'Favoris', 'Yêu thích');
+  String get addToFavourites => _s(
+      'Add to favourites',
+      'پسندیدہ میں شامل کریں',
+      'إضافة إلى المفضلة',
+      'Toevoegen aan favorieten',
+      'Ajouter aux favoris',
+      'Thêm vào yêu thích');
+  String get removeFromFavourites => _s(
+      'Remove from favourites',
+      'پسندیدہ سے ہٹائیں',
+      'إزالة من المفضلة',
+      'Verwijderen uit favorieten',
+      'Retirer des favoris',
+      'Xóa khỏi yêu thích');
+  String get selectPlaylistForClips => _s(
+      'Choose a playlist to add clips',
+      'کلپس شامل کرنے کے لیے پلے لسٹ منتخب کریں',
+      'اختر قائمة لإضافة المقاطع',
+      'Kies een afspeellijst voor clips',
+      'Choisir une playlist pour les clips',
+      'Chọn danh sách phát để thêm đoạn ghi');
   String get addClips => _s('Add clips', 'کلپس شامل کریں', 'إضافة مقاطع',
       'Clips toevoegen', 'Ajouter des clips', 'Thêm đoạn ghi');
   String get newPlaylist => _s('New playlist', 'نئی پلے لسٹ', 'قائمة جديدة',

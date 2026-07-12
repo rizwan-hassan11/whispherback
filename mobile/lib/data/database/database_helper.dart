@@ -17,7 +17,7 @@ class DatabaseHelper {
     final path = join(dbPath, 'whisperback.db');
     return openDatabase(
       path,
-      version: 4,
+      version: 5,
       onConfigure: (db) async {
         // SQLite ships with foreign keys OFF; the schema declares
         // `ON DELETE CASCADE` for `playlist_clips` and `schedules` rows that
@@ -53,6 +53,11 @@ class DatabaseHelper {
             'UPDATE prayer_settings SET play_adhan = 0 WHERE id = 1',
           );
         }
+        if (oldVersion < 5) {
+          await db.execute(
+            'ALTER TABLE playlists ADD COLUMN is_favourite INTEGER NOT NULL DEFAULT 0',
+          );
+        }
       },
     );
   }
@@ -74,7 +79,8 @@ class DatabaseHelper {
             name TEXT NOT NULL UNIQUE,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
-            shuffle_enabled INTEGER NOT NULL DEFAULT 0
+            shuffle_enabled INTEGER NOT NULL DEFAULT 0,
+            is_favourite INTEGER NOT NULL DEFAULT 0
           )
         ''');
     await db.execute('''

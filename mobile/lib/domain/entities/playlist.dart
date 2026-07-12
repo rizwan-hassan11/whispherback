@@ -7,6 +7,7 @@ class Playlist extends Equatable {
     required this.createdAt,
     required this.updatedAt,
     this.shuffleEnabled = false,
+    this.isFavourite = false,
     this.clipCount = 0,
     this.totalDurationMs = 0,
     this.hasSchedule = false,
@@ -17,6 +18,7 @@ class Playlist extends Equatable {
   final DateTime createdAt;
   final DateTime updatedAt;
   final bool shuffleEnabled;
+  final bool isFavourite;
   final int clipCount;
   final int totalDurationMs;
   final bool hasSchedule;
@@ -24,6 +26,7 @@ class Playlist extends Equatable {
   Playlist copyWith({
     String? name,
     bool? shuffleEnabled,
+    bool? isFavourite,
     int? clipCount,
     int? totalDurationMs,
     bool? hasSchedule,
@@ -35,6 +38,7 @@ class Playlist extends Equatable {
       createdAt: createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       shuffleEnabled: shuffleEnabled ?? this.shuffleEnabled,
+      isFavourite: isFavourite ?? this.isFavourite,
       clipCount: clipCount ?? this.clipCount,
       totalDurationMs: totalDurationMs ?? this.totalDurationMs,
       hasSchedule: hasSchedule ?? this.hasSchedule,
@@ -48,6 +52,7 @@ class Playlist extends Equatable {
         createdAt,
         updatedAt,
         shuffleEnabled,
+        isFavourite,
         clipCount,
         totalDurationMs,
         hasSchedule,

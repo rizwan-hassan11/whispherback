@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -9,7 +11,10 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../core/layout/responsive.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_icons.dart';
+import '../../core/theme/playlist_cover.dart';
+import '../../core/ux/tap_feedback.dart';
 import '../../domain/playback/playback_state.dart';
+import '../../domain/playback/playlist_playback_badge.dart';
 import '../../l10n/app_localizations.dart';
 import '../../providers/playback_providers.dart';
 
@@ -17,6 +22,7 @@ import '../../providers/playback_providers.dart';
 /// logged no-op instead of letting it propagate as an unhandled
 /// future error (which the OS surfaces as "app crashed").
 void _safeCall(Future<void> Function() body, String tag) {
+  tapHaptic();
   unawaited(() async {
     try {
       await body();
@@ -72,6 +78,30 @@ class MiniPlayerBar extends ConsumerWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final canSkip = coordinator.canSkipClips;
+    final playlistId = snapshot.playlistId;
+    final coverMeta = playlistId == null
+        ? null
+        : ref.watch(
+            playlistsProvider.select((async) {
+              final list = async.valueOrNull;
+              if (list == null) return null;
+              final idx = list.indexWhere((p) => p.id == playlistId);
+              if (idx < 0) return null;
+              return PlaylistCoverMeta(
+                paletteIndex: idx,
+                hasSchedule: list[idx].hasSchedule,
+              );
+            }),
+          );
+    List<Color>? coverColors;
+    var hasSchedule = false;
+    if (coverMeta != null) {
+      coverColors = PlaylistCoverPalette.colorsForIndex(
+        coverMeta.paletteIndex,
+        isDark: isDark,
+      );
+      hasSchedule = coverMeta.hasSchedule;
+    }
 
     return ClipRRect(
       borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
@@ -98,6 +128,8 @@ class MiniPlayerBar extends ConsumerWidget {
                 _MiniCover(
                   isPlaying: snapshot.isPlaying,
                   onTap: coordinator.showModal,
+                  colors: coverColors,
+                  hasSchedule: hasSchedule,
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -284,12 +316,17 @@ class _MiniIconButton extends StatelessWidget {
 }
 
 class _MiniCover extends StatelessWidget {
-  const _MiniCover({required this.isPlaying, required this.onTap});
+  const _MiniCover({
+    required this.isPlaying,
+    required this.onTap,
+    this.colors,
+    this.hasSchedule = false,
+  });
 
   final bool isPlaying;
   final VoidCallback onTap;
-
-  static const _bars = [10.0, 18.0, 24.0, 14.0, 20.0];
+  final List<Color>? colors;
+  final bool hasSchedule;
 
   @override
   Widget build(BuildContext context) {
@@ -299,39 +336,60 @@ class _MiniCover extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(10),
-        child: Container(
-          width: 44,
-          height: 44,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(10),
-            gradient: const LinearGradient(
-              colors: [AppColors.neon, AppColors.brand],
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: AppColors.neon.withValues(alpha: 0.35),
-                blurRadius: 12,
-              ),
-            ],
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              for (final h in _bars)
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 260),
-                  width: 2.5,
-                  height: isPlaying ? h : h * 0.45,
-                  margin: const EdgeInsets.symmetric(horizontal: 1),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.9),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-            ],
-          ),
+        child: colors != null
+            ? PlaylistCoverArt(
+                colors: colors!,
+                size: 44,
+                borderRadius: 10,
+                hasSchedule: hasSchedule,
+                isPlaying: isPlaying,
+              )
+            : _GenericMiniCover(isPlaying: isPlaying),
+      ),
+    );
+  }
+}
+
+class _GenericMiniCover extends StatelessWidget {
+  const _GenericMiniCover({required this.isPlaying});
+
+  final bool isPlaying;
+
+  static const _bars = [10.0, 18.0, 24.0, 14.0, 20.0];
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 44,
+      height: 44,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(10),
+        gradient: const LinearGradient(
+          colors: [AppColors.neon, AppColors.brand],
         ),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.neon.withValues(alpha: 0.35),
+            blurRadius: 12,
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          for (final h in _bars)
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 260),
+              width: 2.5,
+              height: isPlaying ? h : h * 0.45,
+              margin: const EdgeInsets.symmetric(horizontal: 1),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.9),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+        ],
       ),
     );
   }

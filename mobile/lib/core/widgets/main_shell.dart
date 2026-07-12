@@ -91,6 +91,11 @@ class _MainShellState extends ConsumerState<MainShell> {
         label: l10n.navSchedule,
       ),
       GlassNavDestination(
+        icon: AppIcons.bedtime,
+        selectedIcon: AppIcons.bedtime,
+        label: l10n.navSleep,
+      ),
+      GlassNavDestination(
         icon: AppIcons.settings,
         selectedIcon: AppIcons.settings,
         label: l10n.navSettings,
@@ -103,7 +108,8 @@ class _MainShellState extends ConsumerState<MainShell> {
     if (location.startsWith('/playlists')) return 1;
     if (location.startsWith('/clips')) return 2;
     if (location.startsWith('/schedule')) return 3;
-    if (location.startsWith('/settings')) return 4;
+    if (location.startsWith('/sleep')) return 4;
+    if (location.startsWith('/settings')) return 5;
     return 0;
   }
 
@@ -118,6 +124,8 @@ class _MainShellState extends ConsumerState<MainShell> {
       case 3:
         context.go('/schedule');
       case 4:
+        context.go('/sleep');
+      case 5:
         context.go('/settings');
     }
   }

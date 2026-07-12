@@ -59,19 +59,17 @@ This release focuses on **reliable scheduled playback**, **correct clip duration
 
 ### UI/UX (from your June 2026 review — status)
 
-| ID | Item | Status |
-|----|------|--------|
-| Home — Sleep button in header | Move to bottom nav | **Open** — Sleep remains in header (Zzz) and Settings; not in bottom nav (would require nav redesign). |
-| Home — Activation position | Move lower / larger | **Addressed** — Toggle zone vertically centered; header pinned (no scroll-away). |
-| Home — Decorative audio bars | Remove clutter | **Addressed** — Removed from home toggle zone. |
-| Home — Primary button color | Match neon palette | **Addressed** — Uses theme `actionFill` / neon styling. |
-| Home — Moon graphic | Remove | **Addressed** — Top-corner decorative orbs removed; ambient field simplified. |
-| Playlists — Back button | Add to app bar | **N/A** — Playlists is a **main tab** (bottom nav), not a pushed screen; system back returns to previous app. |
-| Playlist card — Play button | White circle / square artifact | **Addressed** — `ProminentPlayButton` uses true circular Material shape. |
-| Playlist card — Chevron arrow | Redundant navigation | **Addressed** — Removed; **tap anywhere on the card** opens playlist detail. |
-| Playlist card — Extra actions | Heart / edit / delete on card | **Open** — Edit/delete live on playlist detail screen. |
-| Mini-player — Playlist icon match | Show active playlist art | **Partial** — Generic waveform cover; playlist colors are decorative per card. |
-| Mini-player — Edge-to-edge | Add horizontal margin | **Addressed** — Mini-player inset to match screen content gutters. |
+See also: [`CLIENT_UAT_BRIEFING_UI.md`](CLIENT_UAT_BRIEFING_UI.md) for the full item-by-item table.
+
+| Highlights | Status |
+|------------|--------|
+| App icon rebrand (WB + neon waveform) | **Done** |
+| Sleep in bottom nav (removed from home header) | **Done** |
+| Larger / lower Active toggle | **Done** |
+| Playlist cards: play↔pause, heart, edit, delete; tap body → detail | **Done** |
+| "+ Add clips" → pick playlist → add sheet | **Done** |
+| Mini-player matches active playlist colour | **Done** |
+| Favourites section + sort | **Done** |
 
 ---
 

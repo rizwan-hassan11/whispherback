@@ -117,10 +117,7 @@ class HomeScreen extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   const SizedBox(height: 8),
-                  _HomeHeader(
-                    theme: theme,
-                    onSleep: () => context.push('/sleep'),
-                  ),
+                  _HomeHeader(theme: theme),
                   SizedBox(height: r.isFlipCover ? 10 : 14),
                   _GreetingCard(
                     theme: theme,
@@ -307,7 +304,12 @@ class HomeScreen extends ConsumerWidget {
                           // The user no longer perceives the power button
                           // as "inclined upward" — it sits in the middle
                           // of the visible content area.
-                          Expanded(child: Center(child: toggleZone)),
+                          Expanded(
+                            child: Align(
+                              alignment: const Alignment(0, 0.38),
+                              child: toggleZone,
+                            ),
+                          ),
                           // The stats region is bounded to a fraction of
                           // the viewport so it never starves the toggle
                           // zone. If stats overflow this bound (multiple
@@ -348,42 +350,29 @@ class HomeScreen extends ConsumerWidget {
 }
 
 class _HomeHeader extends StatelessWidget {
-  const _HomeHeader({required this.theme, required this.onSleep});
+  const _HomeHeader({required this.theme});
 
   final WhisperThemeExtension theme;
-  final VoidCallback onSleep;
 
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
     final locale = Localizations.localeOf(context).toString();
-    return Row(
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'WhisperBack',
-                style: GoogleFonts.fraunces(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: -0.4,
-                  color: theme.foreground,
-                ),
-              ),
-              Text(
-                DateFormat('EEEE, MMM d', locale).format(now),
-                style: TextStyle(fontSize: 12, color: theme.muted),
-              ),
-            ],
+        Text(
+          'WhisperBack',
+          style: GoogleFonts.fraunces(
+            fontSize: 22,
+            fontWeight: FontWeight.w600,
+            letterSpacing: -0.4,
+            color: theme.foreground,
           ),
         ),
-        Semantics(
-          label: context.l10n.sleepMode,
-          button: true,
-          child: _ZzzButton(onPressed: onSleep, theme: theme),
+        Text(
+          DateFormat('EEEE, MMM d', locale).format(now),
+          style: TextStyle(fontSize: 12, color: theme.muted),
         ),
       ],
     );
@@ -579,49 +568,6 @@ class _NextWhisperCardState extends ConsumerState<_NextWhisperCard> {
             ),
             Icon(AppIcons.chevronRight, color: widget.theme.muted, size: 20),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ZzzButton extends StatelessWidget {
-  const _ZzzButton({required this.onPressed, required this.theme});
-
-  final VoidCallback onPressed;
-  final WhisperThemeExtension theme;
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        color: AppColors.neon.withValues(alpha: theme.isDark ? 0.14 : 0.1),
-        border: Border.all(color: AppColors.neon.withValues(alpha: 0.4)),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.neon.withValues(alpha: theme.isDark ? 0.22 : 0.15),
-            blurRadius: 10,
-            spreadRadius: -2,
-          ),
-        ],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(14),
-        child: InkWell(
-          onTap: onPressed,
-          borderRadius: BorderRadius.circular(14),
-          splashColor: AppColors.neonCyan.withValues(alpha: 0.18),
-          child: const SizedBox(
-            width: 48,
-            height: 48,
-            child: Icon(
-              AppIcons.bedtime,
-              size: 22,
-              color: AppColors.neonBright,
-            ),
-          ),
         ),
       ),
     );

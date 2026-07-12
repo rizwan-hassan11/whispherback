@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
+import '../ux/tap_feedback.dart';
 import 'depth_surface.dart';
 
 class GlassNavBar extends StatelessWidget {
@@ -101,6 +102,7 @@ class GlassNavBar extends StatelessWidget {
                     builder: (context, constraints) {
                       final count = destinations.length;
                       final itemWidth = constraints.maxWidth / count;
+                      final compact = count >= 6;
 
                       return Stack(
                         clipBehavior: Clip.none,
@@ -109,8 +111,8 @@ class GlassNavBar extends StatelessWidget {
                           // the items under RTL locales (Arabic/Urdu) and stays
                           // aligned to the correct destination.
                           AnimatedPositionedDirectional(
-                            duration: const Duration(milliseconds: 340),
-                            curve: const Cubic(0.34, 1.28, 0.64, 1),
+                            duration: const Duration(milliseconds: 260),
+                            curve: Curves.easeOutCubic,
                             start: selectedIndex * itemWidth,
                             top: 0,
                             bottom: 0,
@@ -149,7 +151,11 @@ class GlassNavBar extends StatelessWidget {
                                   destination: d,
                                   selected: selected,
                                   showLabel: showLabel,
-                                  onTap: () => onSelected(i),
+                                  compact: compact,
+                                  onTap: () {
+                                    tapHaptic();
+                                    onSelected(i);
+                                  },
                                 ),
                               );
                             }),
@@ -173,12 +179,14 @@ class _NavItem extends StatelessWidget {
     required this.destination,
     required this.selected,
     required this.showLabel,
+    required this.compact,
     required this.onTap,
   });
 
   final GlassNavDestination destination;
   final bool selected;
   final bool showLabel;
+  final bool compact;
   final VoidCallback onTap;
 
   @override
@@ -213,7 +221,7 @@ class _NavItem extends StatelessWidget {
                   curve: Curves.easeOutCubic,
                   child: Icon(
                     selected ? destination.selectedIcon : destination.icon,
-                    size: 22,
+                    size: compact ? 20 : 22,
                     color: selected ? activeColor : inactiveColor,
                     shadows: selected
                         ? const [
@@ -234,7 +242,7 @@ class _NavItem extends StatelessWidget {
                           child: AnimatedDefaultTextStyle(
                             duration: const Duration(milliseconds: 200),
                             style: TextStyle(
-                              fontSize: 10,
+                              fontSize: compact ? 9 : 10,
                               fontWeight:
                                   selected ? FontWeight.w700 : FontWeight.w500,
                               letterSpacing: 0.2,

@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -9,11 +7,14 @@ import '../../core/layout/responsive.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_icons.dart';
 import '../../core/theme/app_theme.dart';
-import '../../domain/entities/playlist.dart';
 import '../../core/widgets/async_error_view.dart';
+import '../../domain/entities/playlist.dart';
+import '../../domain/playback/playlist_playback_badge.dart';
 import '../../l10n/app_localizations.dart';
 import '../../providers/playback_providers.dart';
+import 'playlist_actions.dart';
 import 'widgets/playlist_card.dart';
+import 'widgets/playlist_picker_sheet.dart';
 
 class PlaylistsScreen extends ConsumerWidget {
   const PlaylistsScreen({super.key});
@@ -21,6 +22,13 @@ class PlaylistsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final playlistsAsync = ref.watch(playlistsProvider);
+    // Rebuild the list only when the active playlist or play/pause state
+    // changes — not on every unrelated snapshot tick.
+    final playbackBadge = ref.watch(
+      playbackSnapshotProvider.select(
+        (async) => PlaylistPlaybackBadge.fromSnapshot(async.valueOrNull),
+      ),
+    );
     final theme = whisperTheme(context);
 
     return Stack(
@@ -37,38 +45,43 @@ class PlaylistsScreen extends ConsumerWidget {
             ),
           ),
         ),
-        Positioned(
-          top: -40,
-          right: -30,
-          child: Container(
-            width: 160,
-            height: 160,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: AppColors.brandLight
-                  .withValues(alpha: theme.isDark ? 0.08 : 0.12),
-            ),
-          ),
-        ),
         Scaffold(
           backgroundColor: Colors.transparent,
           body: SafeArea(
             child: playlistsAsync.when(
               data: (playlists) => _PlaylistsBody(
                 playlists: playlists,
+                playbackBadge: playbackBadge,
                 onCreate: () => context.push('/playlists/new'),
                 onOpen: (id) => context.push('/playlists/$id'),
-                onPlay: (id) {
-                  unawaited(
-                    ref
-                        .read(playbackCoordinatorProvider)
-                        .playPlaylist(id)
-                        .catchError((Object e, StackTrace st) {
-                      debugPrint('playlists playPlaylist handled: $e\n$st');
-                      return false;
-                    }),
-                  );
-                },
+                onAddClips: () => showPlaylistPickerForClips(
+                  context,
+                  ref,
+                  playlists: playlists,
+                ),
+                onPlayPause: (id) => togglePlaylistPlayPause(
+                  context,
+                  ref,
+                  playlistId: id,
+                  snapshot: ref.read(playbackSnapshotProvider).valueOrNull,
+                ),
+                onFavourite: (id, fav) => togglePlaylistFavourite(
+                  ref,
+                  playlistId: id,
+                  favourite: fav,
+                ),
+                onEdit: (id, name) => renamePlaylistDialog(
+                  context,
+                  ref,
+                  playlistId: id,
+                  currentName: name,
+                ),
+                onDelete: (id, name) => deletePlaylistDialog(
+                  context,
+                  ref,
+                  playlistId: id,
+                  playlistName: name,
+                ),
               ),
               loading: () => const Center(child: CircularProgressIndicator()),
               error: (e, _) => AsyncErrorView(
@@ -86,15 +99,25 @@ class PlaylistsScreen extends ConsumerWidget {
 class _PlaylistsBody extends StatelessWidget {
   const _PlaylistsBody({
     required this.playlists,
+    required this.playbackBadge,
     required this.onCreate,
     required this.onOpen,
-    required this.onPlay,
+    required this.onAddClips,
+    required this.onPlayPause,
+    required this.onFavourite,
+    required this.onEdit,
+    required this.onDelete,
   });
 
   final List<Playlist> playlists;
+  final PlaylistPlaybackBadge playbackBadge;
   final VoidCallback onCreate;
   final ValueChanged<String> onOpen;
-  final ValueChanged<String> onPlay;
+  final VoidCallback onAddClips;
+  final ValueChanged<String> onPlayPause;
+  final void Function(String id, bool favourite) onFavourite;
+  final void Function(String id, String name) onEdit;
+  final void Function(String id, String name) onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -107,10 +130,32 @@ class _PlaylistsBody extends StatelessWidget {
 
     final totalClips = playlists.fold<int>(0, (s, p) => s + p.clipCount);
     final scheduled = playlists.where((p) => p.hasSchedule).length;
-    final scheduledList = playlists.where((p) => p.hasSchedule).toList();
-    final otherList = playlists.where((p) => !p.hasSchedule).toList();
+    final favouriteList = playlists.where((p) => p.isFavourite).toList();
+    final scheduledList =
+        playlists.where((p) => p.hasSchedule && !p.isFavourite).toList();
+    final otherList = playlists
+        .where((p) => !p.hasSchedule && !p.isFavourite)
+        .toList();
+
+    int cardIndex(String id) => playlists.indexWhere((p) => p.id == id);
+
+    Widget buildCard(Playlist p) {
+      final i = cardIndex(p.id);
+      return PlaylistCard(
+        key: ValueKey(p.id),
+        playlist: p,
+        index: i,
+        isPlaying: playbackBadge.isActiveFor(p.id),
+        onTap: () => onOpen(p.id),
+        onPlayPause: () => onPlayPause(p.id),
+        onFavourite: () => onFavourite(p.id, !p.isFavourite),
+        onEdit: () => onEdit(p.id, p.name),
+        onDelete: () => onDelete(p.id, p.name),
+      );
+    }
 
     return CustomScrollView(
+      cacheExtent: 480,
       slivers: [
         SliverToBoxAdapter(
           child: Padding(
@@ -145,13 +190,6 @@ class _PlaylistsBody extends StatelessWidget {
                       onPressed: onCreate,
                       icon: const Icon(AppIcons.add, size: 18),
                       label: Text(l10n.newPlaylist),
-                      style: FilledButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 10,
-                        ),
-                      ),
                     ),
                   ],
                 ),
@@ -162,32 +200,44 @@ class _PlaylistsBody extends StatelessWidget {
                   scheduledCount: scheduled,
                 ),
                 const SizedBox(height: 24),
-                if (scheduledList.isNotEmpty) ...[
-                  _SectionLabel(l10n.scheduled, theme: theme),
-                  const SizedBox(height: 10),
-                ],
               ],
             ),
           ),
         ),
-        if (scheduledList.isNotEmpty)
+        if (favouriteList.isNotEmpty) ...[
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+              child: _SectionLabel(l10n.favourites, theme: theme),
+            ),
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            sliver: SliverList.separated(
+              itemCount: favouriteList.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 12),
+              itemBuilder: (context, i) => buildCard(favouriteList[i]),
+            ),
+          ),
+        ],
+        if (scheduledList.isNotEmpty) ...[
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(
+                  20, favouriteList.isEmpty ? 0 : 24, 20, 10),
+              child: _SectionLabel(l10n.scheduled, theme: theme),
+            ),
+          ),
           SliverPadding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
             sliver: SliverList.separated(
               itemCount: scheduledList.length,
               separatorBuilder: (_, __) => const SizedBox(height: 12),
-              itemBuilder: (context, i) {
-                final p = scheduledList[i];
-                return PlaylistCard(
-                  playlist: p,
-                  index: i,
-                  onTap: () => onOpen(p.id),
-                  onPlay: p.clipCount > 0 ? () => onPlay(p.id) : null,
-                );
-              },
+              itemBuilder: (context, i) => buildCard(scheduledList[i]),
             ),
           ),
-        if (otherList.isNotEmpty) ...[
+        ],
+        if (otherList.isNotEmpty || favouriteList.isNotEmpty) ...[
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(20, 24, 20, 10),
@@ -196,8 +246,8 @@ class _PlaylistsBody extends StatelessWidget {
                 children: [
                   _SectionLabel(l10n.yourLibrary, theme: theme),
                   TextButton.icon(
-                    onPressed: () => context.push('/clips'),
-                    icon: const Icon(AppIcons.mic, size: 18),
+                    onPressed: onAddClips,
+                    icon: const Icon(AppIcons.add, size: 18),
                     label: Text(l10n.addClips),
                     style: TextButton.styleFrom(
                       foregroundColor: AppColors.brandLight,
@@ -207,25 +257,21 @@ class _PlaylistsBody extends StatelessWidget {
               ),
             ),
           ),
+        ],
+        if (otherList.isNotEmpty)
           SliverPadding(
             padding: EdgeInsets.fromLTRB(
                 20, 0, 20, context.shellScrollPadding.bottom),
             sliver: SliverList.separated(
               itemCount: otherList.length,
               separatorBuilder: (_, __) => const SizedBox(height: 12),
-              itemBuilder: (context, i) {
-                final p = otherList[i];
-                return PlaylistCard(
-                  playlist: p,
-                  index: scheduledList.length + i,
-                  onTap: () => onOpen(p.id),
-                  onPlay: p.clipCount > 0 ? () => onPlay(p.id) : null,
-                );
-              },
+              itemBuilder: (context, i) => buildCard(otherList[i]),
             ),
+          )
+        else
+          SliverToBoxAdapter(
+            child: SizedBox(height: context.shellScrollPadding.bottom),
           ),
-        ] else
-          const SliverToBoxAdapter(child: SizedBox(height: 100)),
       ],
     );
   }
