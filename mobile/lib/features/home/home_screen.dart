@@ -873,7 +873,7 @@ class _SchedulingSetupChipState extends State<_SchedulingSetupChip> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(AppIcons.settings, size: 18, color: color),
+              const Icon(AppIcons.settings, size: 18, color: color),
               const SizedBox(width: 8),
               Text(
                 l10n.schedulingFinishSetupAction,

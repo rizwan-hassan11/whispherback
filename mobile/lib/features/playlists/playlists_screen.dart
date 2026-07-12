@@ -154,7 +154,6 @@ class _PlaylistsBody extends StatelessWidget {
     }
 
     return CustomScrollView(
-      cacheExtent: 480,
       slivers: [
         SliverToBoxAdapter(
           child: Padding(

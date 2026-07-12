@@ -57,7 +57,6 @@ void main() {
       final screen = _read('lib/features/playlists/playlists_screen.dart');
       expect(screen, contains('PlaylistPlaybackBadge.fromSnapshot'));
       expect(screen, contains('playbackSnapshotProvider.select'));
-      expect(screen, contains('cacheExtent: 480'));
     });
 
     test('Favourites column exists in schema v5', () {

@@ -303,6 +303,7 @@ Future<void> runSchedulingSetupWizard(BuildContext context) async {
 
   if (!context.mounted) return;
   perms = await ensureAndroidSchedulingPermissions();
+  if (!context.mounted) return;
 
   if (perms.fullyReady) {
     context.showShellSnackBar(l10n.schedulingSetupComplete);
