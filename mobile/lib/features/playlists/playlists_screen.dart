@@ -133,9 +133,8 @@ class _PlaylistsBody extends StatelessWidget {
     final favouriteList = playlists.where((p) => p.isFavourite).toList();
     final scheduledList =
         playlists.where((p) => p.hasSchedule && !p.isFavourite).toList();
-    final otherList = playlists
-        .where((p) => !p.hasSchedule && !p.isFavourite)
-        .toList();
+    final otherList =
+        playlists.where((p) => !p.hasSchedule && !p.isFavourite).toList();
 
     int cardIndex(String id) => playlists.indexWhere((p) => p.id == id);
 

@@ -82,7 +82,8 @@ class PlaylistCard extends StatelessWidget {
                       ),
                       const SizedBox(width: 14),
                       Expanded(
-                          child: _PlaylistInfo(playlist: playlist, theme: theme)),
+                          child:
+                              _PlaylistInfo(playlist: playlist, theme: theme)),
                     ],
                   ),
                 ),
@@ -158,8 +159,7 @@ class _PlaylistInfo extends StatelessWidget {
                   label: l10n.scheduledBadge,
                   variant: WhisperBadgeVariant.gold,
                 ),
-              if (playlist.shuffleEnabled)
-                WhisperBadge(label: l10n.shuffleOn),
+              if (playlist.shuffleEnabled) WhisperBadge(label: l10n.shuffleOn),
             ],
           ),
         ],

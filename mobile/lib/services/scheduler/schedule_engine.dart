@@ -48,8 +48,8 @@ class ScheduleEngine {
         // Tests and non-Android hosts continue to fire from Dart
         // (they cover the full firing pipeline; the platform-guard
         // wouldn't be reachable there anyway).
-        _delegateFiringToNative = delegateFiringToNative ??
-            (!kIsWeb && Platform.isAndroid) {
+        _delegateFiringToNative =
+            delegateFiringToNative ?? (!kIsWeb && Platform.isAndroid) {
     // Whenever a scheduled clip finishes naturally, stamp `completion` with the
     // actual completion timestamp so the next slot is computed as
     // `completionTime + intervalMinutes`. Without this, the next fire would
@@ -491,7 +491,8 @@ class ScheduleEngine {
       await onNotificationsSync?.call();
     } catch (e, st) {
       if (kDebugMode) {
-        debugPrint('ScheduleEngine: periodic notification sync failed: $e\n$st');
+        debugPrint(
+            'ScheduleEngine: periodic notification sync failed: $e\n$st');
       }
     }
   }
@@ -514,8 +515,7 @@ class ScheduleEngine {
     // double-increment when both code paths run in the same tick.
     _lastFired.clear(id);
     final existingBackoff = _failureBackoff[id];
-    if (existingBackoff == null ||
-        DateTime.now().isAfter(existingBackoff)) {
+    if (existingBackoff == null || DateTime.now().isAfter(existingBackoff)) {
       // Only set a default fallback backoff if one isn't already in
       // effect. The proper exponential backoff is applied by `_runTick`.
       _failureBackoff[id] = DateTime.now().add(_baseBackoff);

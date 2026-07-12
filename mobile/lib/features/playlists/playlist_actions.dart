@@ -86,8 +86,7 @@ Future<void> deletePlaylistDialog(
     await coordinator.stop();
   }
 
-  final deleted =
-      await ref.read(playlistRepositoryProvider).delete(playlistId);
+  final deleted = await ref.read(playlistRepositoryProvider).delete(playlistId);
   if (!context.mounted) return;
   if (!deleted) {
     context.showShellSnackBar(l10n.deletePlaylistBlocked);

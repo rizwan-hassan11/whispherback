@@ -176,8 +176,7 @@ abstract final class ScheduleFireHelper {
               Duration(milliseconds: schedule.playlistDurationMs),
             );
           }
-          slot = projectedEnd
-              .add(Duration(minutes: schedule.intervalMinutes));
+          slot = projectedEnd.add(Duration(minutes: schedule.intervalMinutes));
         }
       }
 
@@ -185,8 +184,7 @@ abstract final class ScheduleFireHelper {
       // This is the same effective step used by `intervalAlarmSlots`
       // so the engine, alarm scheduler, and display all agree on what
       // the next grid line is.
-      final stepDuration =
-          Duration(minutes: effectiveStepMinutes(schedule));
+      final stepDuration = Duration(minutes: effectiveStepMinutes(schedule));
 
       while (true) {
         if (end != null && slot.isAfter(end)) break;
@@ -195,8 +193,7 @@ abstract final class ScheduleFireHelper {
           // engine mode, only skip slots beyond the grace window.
           // Round 19: when `force` is set, also keep past slots so the
           // alarm-tap path can recover a slot the OS missed by minutes.
-          if (forDisplay ||
-              (!force && now.difference(slot) > maxLateness)) {
+          if (forDisplay || (!force && now.difference(slot) > maxLateness)) {
             slot = slot.add(stepDuration);
             continue;
           }

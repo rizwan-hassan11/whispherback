@@ -222,7 +222,8 @@ class NativeAlarmsBridge {
         }
       } catch (e, st) {
         if (kDebugMode) {
-          print('NativeAlarmsBridge: resolve clip for ${schedule.id} failed: $e\n$st');
+          print(
+              'NativeAlarmsBridge: resolve clip for ${schedule.id} failed: $e\n$st');
         }
       }
     }
@@ -234,22 +235,20 @@ class NativeAlarmsBridge {
     // We intentionally do NOT include `lastFired` — the alarm table
     // is invariant across fires that only shift the projection by
     // sub-second drift.
-    final structural = enabled
-        .where((s) => resolvedClips.containsKey(s.id))
-        .map((s) {
-          final clip = resolvedClips[s.id]!;
-          return [
-            s.id,
-            s.daysMask,
-            s.startTime.hour * 60 + s.startTime.minute,
-            (s.endTime?.hour ?? -1) * 60 + (s.endTime?.minute ?? 0),
-            s.intervalMinutes,
-            s.playlistDurationMs ~/ 1000,
-            clip.path,
-          ].join(':');
-        })
-        .toList()
-      ..sort();
+    final structural =
+        enabled.where((s) => resolvedClips.containsKey(s.id)).map((s) {
+      final clip = resolvedClips[s.id]!;
+      return [
+        s.id,
+        s.daysMask,
+        s.startTime.hour * 60 + s.startTime.minute,
+        (s.endTime?.hour ?? -1) * 60 + (s.endTime?.minute ?? 0),
+        s.intervalMinutes,
+        s.playlistDurationMs ~/ 1000,
+        clip.path,
+      ].join(':');
+    }).toList()
+          ..sort();
     final structuralFingerprint = '$active|${structural.join('|')}';
 
     // Refill window — if the last register was >12 h ago, force a
@@ -301,7 +300,8 @@ class NativeAlarmsBridge {
         });
         added++;
         lastSlot = next;
-        lastCompletion = next.add(Duration(milliseconds: schedule.playlistDurationMs));
+        lastCompletion =
+            next.add(Duration(milliseconds: schedule.playlistDurationMs));
         // Move the cursor PAST this slot so the helper returns the next one.
         cursor = next.add(const Duration(seconds: 1));
         if (fires.length >= _kMaxFiresTotal) break;
@@ -404,7 +404,8 @@ class NativeAlarmsBridge {
   Future<NativePlaybackSnapshot> fetchPlaybackState() async {
     if (!Platform.isAndroid) return NativePlaybackSnapshot.idle();
     try {
-      final raw = await _channel.invokeMethod<Map<Object?, Object?>>('getPlaybackState');
+      final raw = await _channel
+          .invokeMethod<Map<Object?, Object?>>('getPlaybackState');
       if (raw == null) return NativePlaybackSnapshot.idle();
       final snapshot = NativePlaybackSnapshot(
         state: (raw['state'] as String?) ?? NativePlaybackState.idle,

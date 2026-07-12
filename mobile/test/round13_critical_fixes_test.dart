@@ -95,8 +95,7 @@ void main() {
     test(
         'PlaybackCoordinator.dismissPlayer exists and routes through the '
         'pause/resume serializer for crash safety', () {
-      final src =
-          _readFile('lib/services/playback/playback_coordinator.dart');
+      final src = _readFile('lib/services/playback/playback_coordinator.dart');
       final dismissIdx = src.indexOf('Future<void> dismissPlayer()');
       expect(dismissIdx, greaterThan(0),
           reason: 'dismissPlayer method is missing from the coordinator.');
@@ -139,8 +138,7 @@ void main() {
     test(
         '_wouldConflict only flags conflicts when start-times are within 1 '
         'minute on overlapping days (no more all-pairs clock-grid scan)', () {
-      final src =
-          _readFile('lib/data/repositories/schedule_repository.dart');
+      final src = _readFile('lib/data/repositories/schedule_repository.dart');
       // The old all-pairs scan path must be gone. Look for the old loop
       // structure that compared every existingSlot against every newSlot.
       expect(
@@ -172,8 +170,7 @@ void main() {
     test(
         'ScheduleConflictException now carries a `suggestedStartTime` so '
         'the UI can surface a one-tap "Use ${"{time}"}" action', () {
-      final src =
-          _readFile('lib/data/repositories/schedule_repository.dart');
+      final src = _readFile('lib/data/repositories/schedule_repository.dart');
       expect(
         src,
         contains('final DateTime? suggestedStartTime;'),
@@ -212,8 +209,7 @@ void main() {
         'tick (including the inactive-toggle path) so the persistent '
         'notification headline never drifts more than 30s from the '
         'schedule page countdown', () {
-      final src =
-          _readFile('lib/services/scheduler/schedule_engine.dart');
+      final src = _readFile('lib/services/scheduler/schedule_engine.dart');
       expect(
         src,
         contains('await _maybeSyncNotifications(force: false);'),
@@ -221,7 +217,8 @@ void main() {
       );
       expect(
         src,
-        contains('static const _notificationSyncCadence = Duration(seconds: 5);'),
+        contains(
+            'static const _notificationSyncCadence = Duration(seconds: 5);'),
         reason: 'Round 15 update: sync cadence dropped to 5s (matching '
             'the engine tick) so the notification\'s "Next at" line '
             'refreshes in near-real-time. The `syncSchedules` '
@@ -249,13 +246,13 @@ void main() {
     });
   });
 
-  group('Round 13-D — engine guarantees FG service before each schedule fire', () {
+  group('Round 13-D — engine guarantees FG service before each schedule fire',
+      () {
     test(
         '_runTick calls coordinator.ensureForegroundForSchedule immediately '
         'BEFORE requestScheduledPlay so a reclaimed FG service can\'t '
         'silently swallow the play', () {
-      final src =
-          _readFile('lib/services/scheduler/schedule_engine.dart');
+      final src = _readFile('lib/services/scheduler/schedule_engine.dart');
       final tickIdx = src.indexOf('await _coordinator.requestScheduledPlay(');
       expect(tickIdx, greaterThan(0),
           reason: 'requestScheduledPlay call site missing in _runTick.');
@@ -276,10 +273,8 @@ void main() {
 
     test(
         'PlaybackCoordinator.ensureForegroundForSchedule exists and is a '
-        'best-effort wrapper around `_audio.enterForeground` (idempotent)',
-        () {
-      final src =
-          _readFile('lib/services/playback/playback_coordinator.dart');
+        'best-effort wrapper around `_audio.enterForeground` (idempotent)', () {
+      final src = _readFile('lib/services/playback/playback_coordinator.dart');
       expect(
         src,
         contains('Future<void> ensureForegroundForSchedule()'),
@@ -299,8 +294,7 @@ void main() {
   group('Round 13-E — persistent notification uses onlyAlertOnce', () {
     test(
         'The Active ongoing notification sets `onlyAlertOnce: true` so the '
-        'periodic 30s re-post never produces a sound or heads-up alert',
-        () {
+        'periodic 30s re-post never produces a sound or heads-up alert', () {
       final src =
           _readFile('lib/services/notifications/notification_service.dart');
       // Find showActiveOngoing's AndroidNotificationDetails block and pin

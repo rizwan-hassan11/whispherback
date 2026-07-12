@@ -134,8 +134,7 @@ void main() {
     test(
         'NativeAlarmsBridge.cancelAll invalidates BOTH the structural '
         'fingerprint AND the last-registered stamp so a subsequent '
-        'applySnapshot is guaranteed to re-register from scratch',
-        () {
+        'applySnapshot is guaranteed to re-register from scratch', () {
       final src = _read('lib/services/scheduler/native_alarms_bridge.dart');
       final cancelIdx = src.indexOf('Future<void> cancelAll()');
       expect(cancelIdx, greaterThanOrEqualTo(0));
@@ -208,9 +207,11 @@ void main() {
           reason: 'The snapshot must be persisted under a versioned key so '
               'upgrades never collide with an older schema.');
       // setSnapshot must WRITE to KEY_SNAPSHOT_JSON before registering.
-      final setSnapshotIdx = src.indexOf('fun setSnapshot(snapshotJson: String)');
+      final setSnapshotIdx =
+          src.indexOf('fun setSnapshot(snapshotJson: String)');
       expect(setSnapshotIdx, greaterThanOrEqualTo(0));
-      final setSnapshotBody = src.substring(setSnapshotIdx, setSnapshotIdx + 800);
+      final setSnapshotBody =
+          src.substring(setSnapshotIdx, setSnapshotIdx + 800);
       expect(setSnapshotBody, contains('KEY_SNAPSHOT_JSON'),
           reason: 'setSnapshot must persist the JSON so refillIfNeeded can '
               'read it back.');

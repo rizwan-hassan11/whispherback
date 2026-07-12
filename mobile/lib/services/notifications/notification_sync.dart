@@ -81,8 +81,7 @@ Future<void> syncWhisperNotifications({
         if (!nextWhen.isAfter(now)) break;
         upcoming.add((
           when: nextWhen,
-          playlistName:
-              s.playlistName.isEmpty ? 'WhisperBack' : s.playlistName,
+          playlistName: s.playlistName.isEmpty ? 'WhisperBack' : s.playlistName,
         ));
         // Advance the cursor for the NEXT iteration. We pretend this
         // event has just completed (slot = nextWhen, completion =

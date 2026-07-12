@@ -148,7 +148,8 @@ void main() {
       final src =
           _readFile('lib/services/notifications/notification_service.dart');
       // Locate the status-channel registration.
-      final channelIdx = src.indexOf("_statusChannelId,\n        'Active status'");
+      final channelIdx =
+          src.indexOf("_statusChannelId,\n        'Active status'");
       expect(channelIdx, greaterThan(0));
       final channelBody = src.substring(channelIdx, channelIdx + 800);
       expect(
@@ -240,8 +241,7 @@ void main() {
       );
     });
 
-    test('_onNotificationResponse routes schedule_play_now to the engine',
-        () {
+    test('_onNotificationResponse routes schedule_play_now to the engine', () {
       final src =
           _readFile('lib/services/notifications/notification_service.dart');
       final respIdx = src.indexOf('_onNotificationResponse(');

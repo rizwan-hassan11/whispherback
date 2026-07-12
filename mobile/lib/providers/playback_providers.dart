@@ -37,7 +37,8 @@ final playbackCoordinatorProvider = Provider<PlaybackCoordinator>((ref) {
     playbackService: ref.watch(audioPlaybackServiceProvider),
     scheduleRepository: ref.watch(scheduleRepositoryProvider),
   );
-  coordinator.refreshScheduleNotifications = ({bool forceAlarmRebuild = false}) async {
+  coordinator.refreshScheduleNotifications =
+      ({bool forceAlarmRebuild = false}) async {
     await syncWhisperNotifications(
       appState: ref.read(appStateRepositoryProvider),
       schedules: ref.read(scheduleRepositoryProvider),

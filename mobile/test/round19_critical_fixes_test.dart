@@ -63,9 +63,8 @@ PlaybackSchedule _buildSchedule({
     playlistId: 'pl-test',
     playlistName: 'Test playlist',
     startTime: DateTime(2020, 1, 1, startHour, startMinute),
-    endTime: endHour != null
-        ? DateTime(2020, 1, 1, endHour, endMinute ?? 0)
-        : null,
+    endTime:
+        endHour != null ? DateTime(2020, 1, 1, endHour, endMinute ?? 0) : null,
     intervalMinutes: intervalMinutes,
     daysMask: daysMask,
     enabled: true,
@@ -178,9 +177,7 @@ void main() {
       );
     });
 
-    test(
-        'onTaskRemoved restarts the silence loop when keep-alive is on',
-        () {
+    test('onTaskRemoved restarts the silence loop when keep-alive is on', () {
       final src = _readFile('lib/services/audio/whisper_audio_handler.dart');
       final idx = src.indexOf('Future<void> onTaskRemoved()');
       expect(idx, greaterThan(0));
@@ -198,9 +195,9 @@ void main() {
   });
 
   group('Round 19-C — alarm-tap forces a fire even when late', () {
-    test('NotificationService passes force: true when alarm is tapped',
-        () {
-      final src = _readFile('lib/services/notifications/notification_service.dart');
+    test('NotificationService passes force: true when alarm is tapped', () {
+      final src =
+          _readFile('lib/services/notifications/notification_service.dart');
       expect(
         src,
         contains('ScheduleEngineBinding.instance.fireNow(force: true)'),
@@ -222,8 +219,8 @@ void main() {
     });
 
     test('engine binding signature carries the force flag', () {
-      final src = _readFile(
-          'lib/services/scheduler/schedule_engine_binding.dart');
+      final src =
+          _readFile('lib/services/scheduler/schedule_engine_binding.dart');
       expect(
         src,
         contains('Future<void> fireNow({bool force = false})'),
@@ -276,8 +273,8 @@ void main() {
 
   group('Round 19-E — schedule overview shows upcoming fires table', () {
     test('overview screen renders a _UpcomingFiresList widget', () {
-      final src = _readFile(
-          'lib/features/schedule/scheduled_overview_screen.dart');
+      final src =
+          _readFile('lib/features/schedule/scheduled_overview_screen.dart');
       expect(
         src,
         contains('_UpcomingFiresList'),

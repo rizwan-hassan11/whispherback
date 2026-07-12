@@ -104,8 +104,7 @@ Future<void> showPlaylistPickerForClips(
                             ref,
                             playlistId: p.id,
                             playlistName: p.name,
-                            onChanged: () =>
-                                ref.invalidate(playlistsProvider),
+                            onChanged: () => ref.invalidate(playlistsProvider),
                           );
                         },
                       );

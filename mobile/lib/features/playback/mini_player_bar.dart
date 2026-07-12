@@ -60,11 +60,9 @@ class MiniPlayerBar extends ConsumerWidget {
     if (snapshot == null || snapshot.modalVisible) {
       return const SizedBox.shrink();
     }
-    final inPlayContext =
-        snapshot.state == AppPlaybackState.manualPlaying ||
-            snapshot.state == AppPlaybackState.scheduledPlaying;
-    final clipActuallyPlaying =
-        audio.currentPath != null && audio.isPlaying;
+    final inPlayContext = snapshot.state == AppPlaybackState.manualPlaying ||
+        snapshot.state == AppPlaybackState.scheduledPlaying;
+    final clipActuallyPlaying = audio.currentPath != null && audio.isPlaying;
     if (!inPlayContext && !clipActuallyPlaying) {
       return const SizedBox.shrink();
     }

@@ -46,7 +46,8 @@ String _readFile(String relative) {
 }
 
 void main() {
-  group('Round 14-A — cross icon hides the player without crashing the app', () {
+  group('Round 14-A — cross icon hides the player without crashing the app',
+      () {
     test('dismissPlayer is serialised and branches on Active state', () {
       final src = _readFile('lib/services/playback/playback_coordinator.dart');
       final idx = src.indexOf('Future<void> dismissPlayer()');
@@ -54,8 +55,7 @@ void main() {
           reason: 'dismissPlayer must remain on the coordinator API.');
       // Round 22 — bumped window from 3500 to 6000 because the body
       // grew to include the native-scheduled-playback bypass branch.
-      final body =
-          src.substring(idx, (idx + 6000).clamp(0, src.length));
+      final body = src.substring(idx, (idx + 6000).clamp(0, src.length));
       // Round 18 contract: the dismiss path now branches.
       //   Active mode → stop the clip player (which transitions
       //     atomically into the silence keep-alive so the FG service
@@ -89,7 +89,8 @@ void main() {
     test(
         'syncSchedules caps the number of registered alarms so it never '
         'serialises 400+ binder calls in a row', () {
-      final src = _readFile('lib/services/notifications/notification_service.dart');
+      final src =
+          _readFile('lib/services/notifications/notification_service.dart');
       expect(
         src,
         contains('maxAlarmsPerSchedule'),
@@ -132,8 +133,8 @@ void main() {
           _readFile('lib/services/notifications/notification_sync.dart');
       expect(syncSrc, contains('forDisplay: true'),
           reason: 'notification_sync must request display-only mode.');
-      final overviewSrc = _readFile(
-          'lib/features/schedule/scheduled_overview_screen.dart');
+      final overviewSrc =
+          _readFile('lib/features/schedule/scheduled_overview_screen.dart');
       expect(overviewSrc, contains('forDisplay: true'),
           reason: 'Schedule overview must request display-only mode.');
       final homeSrc = _readFile('lib/features/home/home_screen.dart');
@@ -146,8 +147,7 @@ void main() {
     test(
         'PlaybackSchedule carries playlistDurationMs and the repository '
         'populates it from the clips table', () {
-      final entitySrc =
-          _readFile('lib/domain/entities/playback_schedule.dart');
+      final entitySrc = _readFile('lib/domain/entities/playback_schedule.dart');
       expect(
         entitySrc,
         contains('this.playlistDurationMs'),

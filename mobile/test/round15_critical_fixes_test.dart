@@ -193,8 +193,7 @@ void main() {
         intervalMinutes: 10,
         playlistDurationMs: 5 * 60 * 1000,
       );
-      final slots =
-          ScheduleFireHelper.intervalAlarmSlots(schedule).toList();
+      final slots = ScheduleFireHelper.intervalAlarmSlots(schedule).toList();
       final minutes = slots.map((s) => s.hour * 60 + s.minute).toList();
       // 9:00, 9:15, 9:30, 9:45 — step is 15 min, end is exclusive.
       // Whether the last 9:45 is included depends on `!slot.isAfter(end)`
@@ -213,10 +212,8 @@ void main() {
   });
 
   group('Round 15-D — conflict detection is window-based', () {
-    test('repository computes new schedule duration before conflict check',
-        () {
-      final src =
-          _readFile('lib/data/repositories/schedule_repository.dart');
+    test('repository computes new schedule duration before conflict check', () {
+      final src = _readFile('lib/data/repositories/schedule_repository.dart');
       expect(
         src,
         contains('newDurationMs'),
@@ -233,8 +230,7 @@ void main() {
     });
 
     test('_wouldConflict computes window overlap on shared weekdays', () {
-      final src =
-          _readFile('lib/data/repositories/schedule_repository.dart');
+      final src = _readFile('lib/data/repositories/schedule_repository.dart');
       final idx = src.indexOf('bool _wouldConflict(');
       expect(idx, greaterThan(0));
       final body = src.substring(idx, idx + 3500);
@@ -259,8 +255,7 @@ void main() {
   });
 
   group('Round 15-E — notification fingerprint cache', () {
-    test('syncSchedules early-returns when the schedule set is unchanged',
-        () {
+    test('syncSchedules early-returns when the schedule set is unchanged', () {
       final src =
           _readFile('lib/services/notifications/notification_service.dart');
       expect(
@@ -280,8 +275,7 @@ void main() {
   });
 
   group('Round 15-F — enterForeground is idempotent', () {
-    test('enterForeground skips silence loop rebuild when already running',
-        () {
+    test('enterForeground skips silence loop rebuild when already running', () {
       final src = _readFile('lib/services/audio/whisper_audio_handler.dart');
       final idx = src.indexOf('Future<void> enterForeground()');
       expect(idx, greaterThan(0));

@@ -312,8 +312,7 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
       } catch (e, st) {
         _keepAliveRunning = false;
         if (kDebugMode) {
-          debugPrint(
-              'keep-alive attempt $attempt/3 failed: $e\n$st');
+          debugPrint('keep-alive attempt $attempt/3 failed: $e\n$st');
         }
         if (attempt < 3) {
           await Future<void>.delayed(Duration(milliseconds: 250 * attempt));
@@ -696,8 +695,7 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     // version from previous installs pick up the new 10-second one
     // (and don't keep using the rapid-loop version that some OEMs
     // misclassify as "not playing").
-    final file =
-        File(p.join(dir.path, 'whisperback_session_silence_v2.wav'));
+    final file = File(p.join(dir.path, 'whisperback_session_silence_v2.wav'));
     if (!file.existsSync()) {
       await file.writeAsBytes(_silentWav());
     }

@@ -31,8 +31,8 @@ Future<void> main() async {
       FlutterError.onError = (FlutterErrorDetails details) {
         FlutterError.dumpErrorToConsole(details);
         // Forward to the zone handler so it appears in our crash log.
-        Zone.current
-            .handleUncaughtError(details.exception, details.stack ?? StackTrace.empty);
+        Zone.current.handleUncaughtError(
+            details.exception, details.stack ?? StackTrace.empty);
       };
       // Catch platform-channel errors from outside the Flutter framework
       // (e.g. native plugin futures, isolate ports). Without this, an

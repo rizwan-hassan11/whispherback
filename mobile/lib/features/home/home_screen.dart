@@ -194,8 +194,8 @@ class HomeScreen extends ConsumerWidget {
                                   if (context.mounted) {
                                     await syncWhisperNotifications(
                                       appState: appState,
-                                      schedules: ref
-                                          .read(scheduleRepositoryProvider),
+                                      schedules:
+                                          ref.read(scheduleRepositoryProvider),
                                       prayer:
                                           ref.read(prayerRepositoryProvider),
                                     );
@@ -272,8 +272,7 @@ class HomeScreen extends ConsumerWidget {
 
               if (!canPinLayout) {
                 return Padding(
-                  padding:
-                      EdgeInsets.symmetric(horizontal: r.horizontalGutter),
+                  padding: EdgeInsets.symmetric(horizontal: r.horizontalGutter),
                   child: SingleChildScrollView(
                     physics: const ClampingScrollPhysics(),
                     child: Column(
@@ -322,8 +321,7 @@ class HomeScreen extends ConsumerWidget {
                             child: SingleChildScrollView(
                               physics: const ClampingScrollPhysics(),
                               child: Column(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.stretch,
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: statsChildren,
                               ),
                             ),

@@ -174,7 +174,8 @@ class PrayerNotificationScheduler {
       await _cancelAll();
     } catch (e, st) {
       if (kDebugMode) {
-        debugPrint('PrayerNotificationScheduler.cancelAllScheduled failed: $e\n$st');
+        debugPrint(
+            'PrayerNotificationScheduler.cancelAllScheduled failed: $e\n$st');
       }
     }
   }

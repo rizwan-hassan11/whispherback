@@ -74,7 +74,8 @@ void main() {
         '`notification_sync` no longer gates `showActiveOngoing` on '
         '`shouldUseFlutterActiveNotification` — the card posts whenever '
         'Active is ON and no clip is playing', () {
-      final src = _readFile('lib/services/notifications/notification_sync.dart');
+      final src =
+          _readFile('lib/services/notifications/notification_sync.dart');
       // The conditional that suppressed the Flutter notification when the
       // audio_service silent card claimed to be live must be gone.
       expect(
@@ -188,8 +189,7 @@ void main() {
         '`PlaybackCoordinator.stop` routes `refreshModeState()` through a '
         'guarded `unawaited` wrapper so a sleep/prayer/adhan I/O error '
         'cannot escape', () {
-      final src =
-          _readFile('lib/services/playback/playback_coordinator.dart');
+      final src = _readFile('lib/services/playback/playback_coordinator.dart');
       expect(
         src,
         contains('await refreshModeState();'),
@@ -204,8 +204,7 @@ void main() {
     });
 
     test('every `_errorController.add` is guarded by an `isClosed` check', () {
-      final src =
-          _readFile('lib/services/playback/playback_coordinator.dart');
+      final src = _readFile('lib/services/playback/playback_coordinator.dart');
       // Find every `_errorController.add(` site and confirm an isClosed
       // check appears within 4 lines above it.
       final lines = src.split('\n');
@@ -236,7 +235,8 @@ void main() {
           _readFile('lib/features/schedule/schedule_builder_screen.dart');
       expect(
         src,
-        contains('final dialogBg = theme.isDark ? AppColors.deep2 : Colors.white;'),
+        contains(
+            'final dialogBg = theme.isDark ? AppColors.deep2 : Colors.white;'),
         reason: 'Custom-interval popup must use an OPAQUE background — the '
             'QA report "popup is transparent BG" was caused by the 10%-alpha '
             '`theme.surface`.',
@@ -263,7 +263,8 @@ void main() {
       final src = _readFile('lib/app.dart');
       expect(
         src,
-        contains('await requestAppPermissionKind(AppPermissionKind.microphone)'),
+        contains(
+            'await requestAppPermissionKind(AppPermissionKind.microphone)'),
         reason: 'Microphone permission must be requested up front so the '
             'recorder works on the user\'s very first attempt.',
       );
@@ -287,8 +288,7 @@ void main() {
         '`_activateInBackground` calls `refreshScheduleNotifications` before '
         '`enterForeground` so the user sees the WhisperBack card even on '
         'OEMs where the audio_service silent card is suppressed', () {
-      final src =
-          _readFile('lib/services/playback/playback_coordinator.dart');
+      final src = _readFile('lib/services/playback/playback_coordinator.dart');
       final activateIdx = src.indexOf('Future<void> _activateInBackground');
       expect(activateIdx, greaterThan(0),
           reason: '`_activateInBackground` is missing.');
@@ -323,7 +323,8 @@ void main() {
       );
       expect(
         src,
-        contains('await Future<void>.delayed(Duration(milliseconds: 250 * attempt));'),
+        contains(
+            'await Future<void>.delayed(Duration(milliseconds: 250 * attempt));'),
         reason: 'Each retry must back off so the audio focus grant has '
             'time to settle.',
       );

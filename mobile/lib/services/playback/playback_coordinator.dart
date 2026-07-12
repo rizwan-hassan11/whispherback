@@ -264,8 +264,7 @@ class PlaybackCoordinator {
       // Only roll the snapshot back if THIS clip is still the active
       // one — by the time the 5s watchdog fires the user may have
       // already tapped another clip that started fine.
-      final still =
-          _snapshot.isPlaying && (_snapshot.clipTitle == title);
+      final still = _snapshot.isPlaying && (_snapshot.clipTitle == title);
       if (still) {
         unawaited(() async {
           try {
@@ -296,7 +295,8 @@ class PlaybackCoordinator {
         // root cause of "rapid pause/play crashes the app". Silently
         // swallow so the activity stays alive.
         if (kDebugMode) {
-          debugPrint('coordinator playerStateStream error (swallowed): $e\n$st');
+          debugPrint(
+              'coordinator playerStateStream error (swallowed): $e\n$st');
         }
       },
     );
@@ -308,7 +308,8 @@ class PlaybackCoordinator {
       _onNativePlaybackState,
       onError: (Object e, StackTrace st) {
         if (kDebugMode) {
-          debugPrint('coordinator native state stream error (swallowed): $e\n$st');
+          debugPrint(
+              'coordinator native state stream error (swallowed): $e\n$st');
         }
       },
     );
@@ -419,7 +420,8 @@ class PlaybackCoordinator {
             await refreshScheduleNotifications?.call();
           } catch (e, st) {
             if (kDebugMode) {
-              debugPrint('coordinator refresh after native fire failed: $e\n$st');
+              debugPrint(
+                  'coordinator refresh after native fire failed: $e\n$st');
             }
           }
         }());
@@ -1034,16 +1036,14 @@ class PlaybackCoordinator {
       await _audio.enterForeground();
     } catch (e, st) {
       if (kDebugMode) {
-        debugPrint(
-            '_activateInBackground: enterForeground failed: $e\n$st');
+        debugPrint('_activateInBackground: enterForeground failed: $e\n$st');
       }
     }
     try {
       await refreshModeState();
     } catch (e, st) {
       if (kDebugMode) {
-        debugPrint(
-            '_activateInBackground: refreshModeState failed: $e\n$st');
+        debugPrint('_activateInBackground: refreshModeState failed: $e\n$st');
       }
     }
     // Re-sync notifications AFTER keep-alive so the status card reflects
@@ -1735,9 +1735,8 @@ class PlaybackCoordinator {
       return false;
     }
 
-    final prayer = kAdhanFeatureEnabled
-        ? await _prayer.getCurrentPrayerWindow()
-        : null;
+    final prayer =
+        kAdhanFeatureEnabled ? await _prayer.getCurrentPrayerWindow() : null;
     if (prayer != null) {
       _emit(_snapshot.copyWith(
           state: AppPlaybackState.prayerPaused, isPlaying: false));
@@ -1776,9 +1775,8 @@ class PlaybackCoordinator {
       return;
     }
 
-    final prayer = kAdhanFeatureEnabled
-        ? await _prayer.getCurrentPrayerWindow()
-        : null;
+    final prayer =
+        kAdhanFeatureEnabled ? await _prayer.getCurrentPrayerWindow() : null;
     if (prayer != null) {
       await _systemPause();
       _emit(_snapshot.copyWith(

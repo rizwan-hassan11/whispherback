@@ -69,12 +69,10 @@ void main() {
           emitError: () => errorEventFired = true,
         );
         expect(ok, isTrue,
-            reason:
-                'The play tap must complete without rethrowing — '
+            reason: 'The play tap must complete without rethrowing — '
                 'otherwise the user perceives it as an app crash.');
         expect(errorEventFired, isTrue,
-            reason:
-                'Caller MUST surface a PlaybackErrorEvent so the shell '
+            reason: 'Caller MUST surface a PlaybackErrorEvent so the shell '
                 'can show a snackbar — silent failure was the original '
                 '"tapped play, nothing happened" client report.');
       },
@@ -156,8 +154,7 @@ void main() {
           sawUiCrash = true;
         }
         expect(sawUiCrash, isFalse,
-            reason:
-                'The UI tap handler is the safety net — even if the '
+            reason: 'The UI tap handler is the safety net — even if the '
                 'coordinator regresses, `unawaited(...).catchError(...)` '
                 'keeps the app from crashing.');
       },

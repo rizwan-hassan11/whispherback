@@ -152,7 +152,8 @@ class AppLocalizations {
       'CHUCHOTEMENTS À VENIR',
       'WHISPER SẮP TỚI');
 
-  String get now => _s('now', 'ابھی', 'الآن', 'nu', 'maintenant', 'ngay bây giờ');
+  String get now =>
+      _s('now', 'ابھی', 'الآن', 'nu', 'maintenant', 'ngay bây giờ');
 
   String inSeconds(int seconds) => _s(
       'in ${seconds}s',
@@ -170,21 +171,11 @@ class AppLocalizations {
       'dans ${minutes}min',
       'sau $minutes phút');
 
-  String inHours(int hours) => _s(
-      'in ${hours}h',
-      '$hours گھنٹے میں',
-      'خلال $hours ساعة',
-      'over ${hours}u',
-      'dans ${hours}h',
-      'sau $hours giờ');
+  String inHours(int hours) => _s('in ${hours}h', '$hours گھنٹے میں',
+      'خلال $hours ساعة', 'over ${hours}u', 'dans ${hours}h', 'sau $hours giờ');
 
-  String inDays(int days) => _s(
-      'in ${days}d',
-      '$days دن میں',
-      'خلال $days يوم',
-      'over ${days}d',
-      'dans ${days}j',
-      'sau $days ngày');
+  String inDays(int days) => _s('in ${days}d', '$days دن میں', 'خلال $days يوم',
+      'over ${days}d', 'dans ${days}j', 'sau $days ngày');
 
   // ── Settings ────────────────────────────────────────────────────────────────
   String get settings => _s('Settings', 'ترتیبات', 'الإعدادات', 'Instellingen',
@@ -428,8 +419,8 @@ class AppLocalizations {
       'Scheduled', 'شیڈول شدہ', 'مجدول', 'Gepland', 'Planifié', 'Đã lên lịch');
   String get yourLibrary => _s('Your library', 'آپ کی لائبریری', 'مكتبتك',
       'Jouw bibliotheek', 'Votre bibliothèque', 'Thư viện của bạn');
-  String get favourites => _s('Favourites', 'پسندیدہ', 'المفضلة', 'Favorieten',
-      'Favoris', 'Yêu thích');
+  String get favourites => _s(
+      'Favourites', 'پسندیدہ', 'المفضلة', 'Favorieten', 'Favoris', 'Yêu thích');
   String get addToFavourites => _s(
       'Add to favourites',
       'پسندیدہ میں شامل کریں',
@@ -989,8 +980,7 @@ class AppLocalizations {
         'L\'intervalle maximum est de 720 minutes (12 heures).',
         'Khoảng cách tối đa là 720 phút (12 giờ).',
       );
-  String get minutesUnit =>
-      _s('min', 'منٹ', 'دقيقة', 'min', 'min', 'phút');
+  String get minutesUnit => _s('min', 'منٹ', 'دقيقة', 'min', 'min', 'phút');
   String get playbackAndAlarms => _s(
       'Playback & alarms',
       'پلے بیک اور الارم',

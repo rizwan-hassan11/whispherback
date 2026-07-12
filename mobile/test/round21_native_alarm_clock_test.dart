@@ -42,7 +42,9 @@ String _read(String relPath) {
 
 void main() {
   group('Round 21 — native alarm-clock background playback', () {
-    test('AndroidManifest declares WhisperAlarmReceiver + WhisperPlaybackService', () {
+    test(
+        'AndroidManifest declares WhisperAlarmReceiver + WhisperPlaybackService',
+        () {
       final manifest = _read('android/app/src/main/AndroidManifest.xml');
       expect(manifest, contains('.alarms.WhisperAlarmReceiver'),
           reason:
@@ -50,20 +52,25 @@ void main() {
       expect(manifest, contains('.alarms.WhisperPlaybackService'),
           reason:
               'The typed mediaPlayback FG service must be declared so it can play audio when started from the background.');
-      expect(manifest, contains('android:foregroundServiceType="mediaPlayback"'),
+      expect(
+          manifest, contains('android:foregroundServiceType="mediaPlayback"'),
           reason:
               'Without foregroundServiceType="mediaPlayback" the OS will deny audio playback on Android 14+.');
-      expect(manifest, contains('android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK'),
+      expect(manifest,
+          contains('android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK'),
           reason: 'mediaPlayback FG type requires this permission.');
       expect(manifest, contains('android.permission.USE_EXACT_ALARM'),
           reason:
               'Android 14+ requires USE_EXACT_ALARM (no runtime grant needed for an alarms app) for setAlarmClock to succeed without user navigation.');
-      expect(manifest, contains('android.permission.RECEIVE_LOCKED_BOOT_COMPLETED'),
+      expect(manifest,
+          contains('android.permission.RECEIVE_LOCKED_BOOT_COMPLETED'),
           reason:
               'We re-arm alarms BEFORE the user unlocks the device (essential for morning whispers).');
     });
 
-    test('AndroidManifest registers WhisperBootReceiver with all reboot actions', () {
+    test(
+        'AndroidManifest registers WhisperBootReceiver with all reboot actions',
+        () {
       final manifest = _read('android/app/src/main/AndroidManifest.xml');
       expect(manifest, contains('.alarms.WhisperBootReceiver'));
       expect(manifest, contains('android.intent.action.BOOT_COMPLETED'));
@@ -102,12 +109,13 @@ void main() {
       expect(
         src,
         contains('Round 21'),
-        reason: 'The fix must reference the round so future refactors know why.',
+        reason:
+            'The fix must reference the round so future refactors know why.',
       );
       // Pin the structural choice: the playingClip-only cancel branch is gone.
-      final hasOldCancel =
-          RegExp(r'if\s*\(\s*playingClip\s*\)[^{]*\{\s*[^}]*cancelActiveOngoing')
-              .hasMatch(src);
+      final hasOldCancel = RegExp(
+              r'if\s*\(\s*playingClip\s*\)[^{]*\{\s*[^}]*cancelActiveOngoing')
+          .hasMatch(src);
       expect(
         hasOldCancel,
         isFalse,
@@ -134,7 +142,9 @@ void main() {
               'Toggling Active OFF must cancel every pending alarm so the device can stay in Doze.');
     });
 
-    test('WhisperPlaybackService uses mediaPlayback FG type + media (NOT alarm) audio attrs', () {
+    test(
+        'WhisperPlaybackService uses mediaPlayback FG type + media (NOT alarm) audio attrs',
+        () {
       final src = _read(
           'android/app/src/main/kotlin/com/whisperback/whisperback/alarms/WhisperPlaybackService.kt');
       expect(src, contains('FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK'),
@@ -149,7 +159,8 @@ void main() {
           reason:
               'Scheduled clips are music, not an alarm tone — they must route through STREAM_MUSIC so the user\'s media volume controls them.');
       expect(src, contains('CONTENT_TYPE_MUSIC'),
-          reason: 'Content type must match the usage for correct OS audio routing.');
+          reason:
+              'Content type must match the usage for correct OS audio routing.');
       // Only treat NON-comment lines as a violation — the docstring keeps
       // the migration note so future devs know why we flipped away
       // from USAGE_ALARM.
@@ -164,7 +175,8 @@ void main() {
           reason:
               'Without audio focus, the OS silently denies playback in the background.');
       expect(src, contains('PARTIAL_WAKE_LOCK'),
-          reason: 'Without a wake lock, MediaPlayer can pause mid-clip when CPU sleeps.');
+          reason:
+              'Without a wake lock, MediaPlayer can pause mid-clip when CPU sleeps.');
       expect(src, contains('isActiveByPrefs'),
           reason:
               'Defense-in-depth: the service must check Active=ON before playing so a stale alarm can never surprise the user after they turned the toggle off.');
@@ -181,7 +193,9 @@ void main() {
               'The receiver must use startForegroundService (Android 8+) so we have the FG-start grant.');
     });
 
-    test('WhisperAlarmScheduler prefers setAlarmClock with allowWhileIdle fallback', () {
+    test(
+        'WhisperAlarmScheduler prefers setAlarmClock with allowWhileIdle fallback',
+        () {
       final src = _read(
           'android/app/src/main/kotlin/com/whisperback/whisperback/alarms/WhisperAlarmScheduler.kt');
       expect(src, contains('setAlarmClock'),
@@ -199,18 +213,23 @@ void main() {
     });
 
     test('MainActivity exposes com.whisperback.alarms MethodChannel', () {
-      final src = _read('android/app/src/main/kotlin/com/whisperback/whisperback/MainActivity.kt');
+      final src = _read(
+          'android/app/src/main/kotlin/com/whisperback/whisperback/MainActivity.kt');
       expect(src, contains('com.whisperback.alarms'),
-          reason: 'The Dart bridge channel name must match the Kotlin handler.');
+          reason:
+              'The Dart bridge channel name must match the Kotlin handler.');
       expect(src, contains('"setSnapshot"'),
-          reason: 'Dart calls setSnapshot to push the upcoming-fires JSON to native.');
+          reason:
+              'Dart calls setSnapshot to push the upcoming-fires JSON to native.');
       expect(src, contains('"cancelAll"'),
           reason: 'Dart calls cancelAll on Active OFF.');
       expect(src, contains('WhisperAlarmScheduler.get(applicationContext)'),
           reason: 'The handler must delegate to the native scheduler.');
     });
 
-    test('app.dart bootstrap registers the PlaylistRepository handle for the bridge', () {
+    test(
+        'app.dart bootstrap registers the PlaylistRepository handle for the bridge',
+        () {
       final src = _read('lib/app.dart');
       expect(src, contains('registerPlaylistRepositoryForBridge'),
           reason:

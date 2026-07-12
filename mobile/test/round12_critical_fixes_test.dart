@@ -61,16 +61,14 @@ void main() {
         '`PlaybackCoordinator.resume()` only flips `isPlaying: true` and '
         'does NOT pass `modalVisible: true` (which was hiding the '
         'mini-player after pause+resume cycles)', () {
-      final src =
-          _readFile('lib/services/playback/playback_coordinator.dart');
+      final src = _readFile('lib/services/playback/playback_coordinator.dart');
 
       // Find the resume() function body and strip line-comments so the
       // assertion looks only at executable code (documentation lines
       // explaining what we DO NOT do would otherwise trigger the
       // contains() guard).
       final resumeIdx = src.indexOf('Future<void> resume()');
-      expect(resumeIdx, greaterThan(0),
-          reason: 'resume() method missing.');
+      expect(resumeIdx, greaterThan(0), reason: 'resume() method missing.');
       final body = src.substring(resumeIdx, resumeIdx + 1500);
       final codeOnly = body
           .split('\n')
@@ -101,9 +99,9 @@ void main() {
       // Find the stopClip body and verify the standalone branch logs
       // its skip and does NOT call super.stop().
       final stopClipIdx = src.indexOf('Future<void> stopClip()');
-      expect(stopClipIdx, greaterThan(0),
-          reason: 'stopClip() method missing.');
-      final standaloneIdx = src.indexOf('if (_standalonePlayback)', stopClipIdx);
+      expect(stopClipIdx, greaterThan(0), reason: 'stopClip() method missing.');
+      final standaloneIdx =
+          src.indexOf('if (_standalonePlayback)', stopClipIdx);
       expect(standaloneIdx, greaterThan(0),
           reason: '_standalonePlayback branch missing in stopClip.');
       // The next 1000 chars cover this branch entirely.

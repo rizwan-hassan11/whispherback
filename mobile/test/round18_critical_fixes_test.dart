@@ -69,8 +69,7 @@ void main() {
     });
 
     test('AndroidManifest declares the keep-alive service', () {
-      final manifest =
-          _readFile('android/app/src/main/AndroidManifest.xml');
+      final manifest = _readFile('android/app/src/main/AndroidManifest.xml');
       expect(
         manifest,
         contains('WhisperKeepAliveService'),
@@ -122,8 +121,7 @@ void main() {
 
   group('Round 18-B — Active toggle drives the keep-alive service', () {
     test('toggleActive starts the service when going ON', () {
-      final src =
-          _readFile('lib/services/playback/playback_coordinator.dart');
+      final src = _readFile('lib/services/playback/playback_coordinator.dart');
       final idx = src.indexOf('Future<ActiveToggleResult> toggleActive()');
       expect(idx, greaterThan(0));
       final body = src.substring(idx, idx + 2400);
@@ -144,8 +142,7 @@ void main() {
     });
 
     test('cold-start while Active restarts the keep-alive service', () {
-      final src =
-          _readFile('lib/services/playback/playback_coordinator.dart');
+      final src = _readFile('lib/services/playback/playback_coordinator.dart');
       // Look for the cold-start restoration block (right after the
       // initial snapshot emit).
       expect(
@@ -166,8 +163,8 @@ void main() {
       expect(stopIdx, greaterThan(0));
       // Capture the body up to the END of stopClip — find the next
       // top-level method declaration after stopClip.
-      final nextMethodIdx = src.indexOf('Future<String> _ensureSilenceFile',
-          stopIdx);
+      final nextMethodIdx =
+          src.indexOf('Future<String> _ensureSilenceFile', stopIdx);
       expect(nextMethodIdx, greaterThan(stopIdx));
       final body = src.substring(stopIdx, nextMethodIdx);
 
@@ -181,8 +178,8 @@ void main() {
         reason: 'stopClip must early-return into the keep-alive path '
             'when keep-alive is enabled.',
       );
-      final keepAliveSlice = body.substring(keepAliveIdx,
-          body.indexOf('return;', keepAliveIdx));
+      final keepAliveSlice =
+          body.substring(keepAliveIdx, body.indexOf('return;', keepAliveIdx));
       // In Round 18 the keep-alive branch only stops the player and
       // restarts the silence loop — no `playing: false` publish.
       expect(
@@ -198,8 +195,7 @@ void main() {
 
   group('Round 18-D — dismissPlayer branches on Active state', () {
     test('Active branch uses stop (keep-alive handoff)', () {
-      final src =
-          _readFile('lib/services/playback/playback_coordinator.dart');
+      final src = _readFile('lib/services/playback/playback_coordinator.dart');
       final idx = src.indexOf('Future<void> dismissPlayer()');
       expect(idx, greaterThan(0));
       final body = src.substring(idx, idx + 4000);
@@ -214,8 +210,7 @@ void main() {
     });
 
     test('Inactive branch uses pause (preserves clip position)', () {
-      final src =
-          _readFile('lib/services/playback/playback_coordinator.dart');
+      final src = _readFile('lib/services/playback/playback_coordinator.dart');
       final idx = src.indexOf('Future<void> dismissPlayer()');
       expect(idx, greaterThan(0));
       final body = src.substring(idx, idx + 4000);
@@ -230,8 +225,7 @@ void main() {
     test(
         'dismissPlayer no longer CALLS hideClipMediaNotification (which '
         'was demoting the FG service)', () {
-      final src =
-          _readFile('lib/services/playback/playback_coordinator.dart');
+      final src = _readFile('lib/services/playback/playback_coordinator.dart');
       final idx = src.indexOf('Future<void> dismissPlayer()');
       expect(idx, greaterThan(0));
       final body = src.substring(idx, idx + 4000);

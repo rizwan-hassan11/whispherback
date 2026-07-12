@@ -56,9 +56,8 @@ PlaybackSchedule _buildSchedule({
     playlistId: 'pl-test',
     playlistName: 'Test playlist',
     startTime: DateTime(2020, 1, 1, startHour, startMinute),
-    endTime: endHour != null
-        ? DateTime(2020, 1, 1, endHour, endMinute ?? 0)
-        : null,
+    endTime:
+        endHour != null ? DateTime(2020, 1, 1, endHour, endMinute ?? 0) : null,
     intervalMinutes: intervalMinutes,
     daysMask: daysMask,
     enabled: true,
@@ -96,8 +95,7 @@ void main() {
       );
     });
 
-    test('save still unawaits the post-DB notification sync (no ANR risk)',
-        () {
+    test('save still unawaits the post-DB notification sync (no ANR risk)', () {
       final src =
           _readFile('lib/features/schedule/schedule_builder_screen.dart');
       final saveIdx = src.indexOf('Future<void> _save()');
@@ -174,8 +172,7 @@ void main() {
       // eligible. Net: null without force, but 10:05 with force.
       final now = DateTime(2026, 6, 28, 10, 9);
 
-      final lateSkipped =
-          ScheduleFireHelper.slotToFire(schedule, now, null);
+      final lateSkipped = ScheduleFireHelper.slotToFire(schedule, now, null);
       expect(lateSkipped, isNull,
           reason: 'Without force, a 4-min-late slot must be skipped '
               'because the 2-min lateness cap applies.');

@@ -15,7 +15,10 @@ void main() {
       expect(shell, contains("context.go('/sleep')"));
       final router = _read('lib/core/router/app_router.dart');
       expect(router, contains("path: '/sleep'"));
-      expect(router, isNot(contains("parentNavigatorKey: _rootKey,\n        builder: (context, state) => const SleepModeScreen()")));
+      expect(
+          router,
+          isNot(contains(
+              "parentNavigatorKey: _rootKey,\n        builder: (context, state) => const SleepModeScreen()")));
     });
 
     test('Home header no longer hosts the sleep shortcut', () {
@@ -65,8 +68,10 @@ void main() {
 
     test('Tap feedback wired for snappy interactions', () {
       expect(_read('lib/core/ux/tap_feedback.dart'), contains('tapHaptic'));
-      expect(_read('lib/core/widgets/glass_nav_bar.dart'), contains('tapHaptic'));
-      expect(_read('lib/features/playlists/playlist_actions.dart'), contains('unawaited'));
+      expect(
+          _read('lib/core/widgets/glass_nav_bar.dart'), contains('tapHaptic'));
+      expect(_read('lib/features/playlists/playlist_actions.dart'),
+          contains('unawaited'));
     });
 
     test('Launcher icon source asset exists', () {

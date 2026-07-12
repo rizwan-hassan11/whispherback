@@ -349,8 +349,7 @@ class NotificationService {
   }) async {
     await init();
     final fingerprint = _fingerprintFor(schedules);
-    if (_lastSyncedFingerprint == fingerprint &&
-        _lastSyncedActive == active) {
+    if (_lastSyncedFingerprint == fingerprint && _lastSyncedActive == active) {
       return;
     }
     _lastSyncedFingerprint = fingerprint;

@@ -952,9 +952,8 @@ class _UpcomingFiresList extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
       decoration: BoxDecoration(
-        color: theme.isDark
-            ? theme.glass
-            : Colors.white.withValues(alpha: 0.85),
+        color:
+            theme.isDark ? theme.glass : Colors.white.withValues(alpha: 0.85),
         borderRadius: BorderRadius.circular(AppRadii.md),
         border: Border.all(color: theme.glassBorder),
         boxShadow: theme.isDark

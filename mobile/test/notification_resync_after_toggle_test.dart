@@ -88,7 +88,8 @@ void main() {
   test(
       'WhisperAudioHandler tracks `_keepAliveRunning` so '
       '`isForegroundNotificationActive` cannot lie when the silence loop '
-      'failed to start — the flutter notification fallback then takes over', () {
+      'failed to start — the flutter notification fallback then takes over',
+      () {
     final handlerPath = p.join(
       Directory.current.path,
       'lib',

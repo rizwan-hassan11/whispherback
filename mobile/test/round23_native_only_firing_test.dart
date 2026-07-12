@@ -49,7 +49,9 @@ String _read(String relPath) {
 }
 
 void main() {
-  group('Round 23 — native-only firing + refill on completion + fingerprint dedup', () {
+  group(
+      'Round 23 — native-only firing + refill on completion + fingerprint dedup',
+      () {
     test(
         'ScheduleEngine delegates actual firing to native on Android via '
         '`_delegateFiringToNative` short-circuit', () {
@@ -83,7 +85,8 @@ void main() {
               'Notification refresh must run BEFORE the delegation guard so the persistent card keeps updating even when the Dart firing path is short-circuited.');
     });
 
-    test('ScheduleEngine still refreshes notifications on Android (delegation is FIRE-only)',
+    test(
+        'ScheduleEngine still refreshes notifications on Android (delegation is FIRE-only)',
         () {
       final src = _read('lib/services/scheduler/schedule_engine.dart');
       expect(src, contains('_maybeSyncNotifications(force: false)'),
@@ -94,7 +97,8 @@ void main() {
               'The keep-alive heartbeat must still run on Android so the FG service does not get demoted between native fires.');
     });
 
-    test('Snapshot cap bumped from 48/180 to 288/400 so a 5-min schedule '
+    test(
+        'Snapshot cap bumped from 48/180 to 288/400 so a 5-min schedule '
         'pre-registers a full 24 hours', () {
       final src = _read('lib/services/scheduler/native_alarms_bridge.dart');
       expect(src, contains('_kMaxFiresPerSchedule = 288'),
@@ -105,7 +109,8 @@ void main() {
               'Total cap must be bumped in step so a single hyper-active schedule can actually reach the new per-schedule cap.');
     });
 
-    test('Native WhisperAlarmScheduler MAX_ALARMS raised from 192 to 400 to '
+    test(
+        'Native WhisperAlarmScheduler MAX_ALARMS raised from 192 to 400 to '
         'match the Dart cap', () {
       final src = _read(
           'android/app/src/main/kotlin/com/whisperback/whisperback/alarms/WhisperAlarmScheduler.kt');
@@ -118,19 +123,16 @@ void main() {
         'NativeAlarmsBridge.applySnapshot uses a STRUCTURAL fingerprint dedup so the '
         '5-second notification tick does not cancel + re-register 400 alarms '
         '12 times a minute (Round 24 replaces the fire-time fingerprint that '
-        'drifted on every fire)',
-        () {
+        'drifted on every fire)', () {
       final src = _read('lib/services/scheduler/native_alarms_bridge.dart');
       expect(src, contains('_lastStructuralFingerprint'),
-          reason:
-              'Round 24 renamed the fingerprint state so it is clearly '
+          reason: 'Round 24 renamed the fingerprint state so it is clearly '
               'STRUCTURAL (schedules + clips + active) instead of derived '
               'from projected fire times, which drifted on every fire '
               'and defeated the dedup.');
       expect(
           src, contains('structuralFingerprint == _lastStructuralFingerprint'),
-          reason:
-              'The equality check must gate the AlarmManager round-trip; '
+          reason: 'The equality check must gate the AlarmManager round-trip; '
               'without it the fingerprint is dead code.');
       // Fingerprint must invalidate on cancelAll, otherwise the next
       // applySnapshot after a cancellation would incorrectly no-op.
@@ -201,7 +203,8 @@ void main() {
       final src = _read(
           'android/app/src/main/kotlin/com/whisperback/whisperback/alarms/WhisperAlarmReceiver.kt');
       expect(src, contains('DEDUP_WINDOW_MS'),
-          reason: 'Window constant must exist so the behaviour is testable / tweakable.');
+          reason:
+              'Window constant must exist so the behaviour is testable / tweakable.');
       expect(src, contains('60_000L'),
           reason:
               '60 s is safely below the 1-min minimum supported interval so genuine successive fires are never mistakenly deduped.');
@@ -223,8 +226,7 @@ void main() {
               'onReceive must actually call the dedup helper before starting the FG service.');
     });
 
-    test('ScheduleEngine exposes `delegateFiringToNative` for testability',
-        () {
+    test('ScheduleEngine exposes `delegateFiringToNative` for testability', () {
       final src = _read('lib/services/scheduler/schedule_engine.dart');
       expect(src, contains('@visibleForTesting'),
           reason:
@@ -241,7 +243,8 @@ void main() {
           reason:
               'Tests need to reset the fingerprint between assertions; without this the second call in the same test would incorrectly no-op.');
       expect(src, contains('@visibleForTesting'),
-          reason: 'The reset must be annotated as test-only, not exposed publicly.');
+          reason:
+              'The reset must be annotated as test-only, not exposed publicly.');
     });
   });
 }
