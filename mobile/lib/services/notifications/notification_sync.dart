@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../../core/config/feature_flags.dart';
 import '../../data/repositories/app_state_repository.dart';
 import '../../data/repositories/playlist_repository.dart';
 import '../../data/repositories/prayer_repository.dart';
@@ -175,7 +176,7 @@ Future<void> syncWhisperNotifications({
       }
     }
 
-    if (prayer != null) {
+    if (prayer != null && kAdhanFeatureEnabled) {
       final prayerScheduler = PrayerNotificationScheduler(
         plugin: service.plugin,
         prayerRepository: prayer,
@@ -183,6 +184,14 @@ Future<void> syncWhisperNotifications({
       // Adhan reminders are independent of the Active toggle — they fire as
       // long as the user has the "Play adhan voice" setting enabled.
       await prayerScheduler.sync();
+    } else if (prayer != null && !kAdhanFeatureEnabled) {
+      // Shelved for this release — cancel any prayer notifications that
+      // may have been scheduled by an earlier APK so they never fire.
+      final prayerScheduler = PrayerNotificationScheduler(
+        plugin: service.plugin,
+        prayerRepository: prayer,
+      );
+      await prayerScheduler.cancelAllScheduled();
     }
   } catch (e, st) {
     if (kDebugMode) {

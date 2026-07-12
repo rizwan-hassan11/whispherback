@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 
+import '../../core/config/feature_flags.dart';
 import '../../data/repositories/app_state_repository.dart';
 import '../../data/repositories/playlist_repository.dart';
 import '../../data/repositories/schedule_repository.dart';
@@ -1734,7 +1735,9 @@ class PlaybackCoordinator {
       return false;
     }
 
-    final prayer = await _prayer.getCurrentPrayerWindow();
+    final prayer = kAdhanFeatureEnabled
+        ? await _prayer.getCurrentPrayerWindow()
+        : null;
     if (prayer != null) {
       _emit(_snapshot.copyWith(
           state: AppPlaybackState.prayerPaused, isPlaying: false));
@@ -1747,14 +1750,16 @@ class PlaybackCoordinator {
   Future<void> refreshModeState() async {
     final active = await _appState.isActive();
 
-    // Adhan voice is decoupled from the master Active toggle so users still
-    // hear the call to prayer even when WhisperBack whispers are off.
-    final prayer = await _prayer.getCurrentPrayerWindow();
-    if (prayer != null && await _prayer.adhanEnabled()) {
-      final key = '${prayer.name}-${prayer.start.toIso8601String()}';
-      if (_lastAdhanWindowKey != key) {
-        _lastAdhanWindowKey = key;
-        unawaited(AdhanPlayer.instance.playFor(key));
+    if (kAdhanFeatureEnabled) {
+      // Adhan voice is decoupled from the master Active toggle so users still
+      // hear the call to prayer even when WhisperBack whispers are off.
+      final prayer = await _prayer.getCurrentPrayerWindow();
+      if (prayer != null && await _prayer.adhanEnabled()) {
+        final key = '${prayer.name}-${prayer.start.toIso8601String()}';
+        if (_lastAdhanWindowKey != key) {
+          _lastAdhanWindowKey = key;
+          unawaited(AdhanPlayer.instance.playFor(key));
+        }
       }
     }
 
@@ -1771,6 +1776,9 @@ class PlaybackCoordinator {
       return;
     }
 
+    final prayer = kAdhanFeatureEnabled
+        ? await _prayer.getCurrentPrayerWindow()
+        : null;
     if (prayer != null) {
       await _systemPause();
       _emit(_snapshot.copyWith(

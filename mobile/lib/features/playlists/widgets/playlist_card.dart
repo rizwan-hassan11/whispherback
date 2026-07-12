@@ -137,41 +137,19 @@ class PlaylistCard extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          Column(
-            children: [
-              if (playlist.clipCount > 0 && onPlay != null)
-                ProminentPlayButton(onTap: onPlay)
-              else
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: theme.glass,
-                    border: Border.all(color: theme.glassBorder),
-                  ),
-                  child: Icon(AppIcons.add, size: 20, color: theme.muted),
-                ),
-              const SizedBox(height: 10),
-              Container(
-                width: 28,
-                height: 28,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(8),
-                  color: theme.isDark
-                      ? Colors.white.withValues(alpha: 0.06)
-                      : AppColors.ink.withValues(alpha: 0.05),
-                  border: Border.all(
-                    color: theme.isDark
-                        ? Colors.white.withValues(alpha: 0.08)
-                        : AppColors.ink.withValues(alpha: 0.08),
-                  ),
-                ),
-                child: Icon(AppIcons.chevronRight,
-                    color: theme.foreground, size: 16),
+          if (playlist.clipCount > 0 && onPlay != null)
+            ProminentPlayButton(onTap: onPlay)
+          else
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: theme.glass,
+                border: Border.all(color: theme.glassBorder),
               ),
-            ],
-          ),
+              child: Icon(AppIcons.add, size: 20, color: theme.muted),
+            ),
         ],
       ),
     );

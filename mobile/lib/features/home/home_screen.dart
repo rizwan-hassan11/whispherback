@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/config/feature_flags.dart';
 import '../../core/layout/responsive.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_icons.dart';
@@ -146,7 +147,6 @@ class HomeScreen extends ConsumerWidget {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          HomeWaveBars(active: isActive),
                           SizedBox(height: r.isFlipCover ? 10 : 16),
                           ActiveToggle(
                             isActive: isActive,
@@ -243,7 +243,8 @@ class HomeScreen extends ConsumerWidget {
                     theme: theme,
                   ),
                 ],
-                if (snapshot.state == AppPlaybackState.prayerPaused) ...[
+                if (kAdhanFeatureEnabled &&
+                    snapshot.state == AppPlaybackState.prayerPaused) ...[
                   const SizedBox(height: 14),
                   _ModeChip(
                     icon: AppIcons.prayer,

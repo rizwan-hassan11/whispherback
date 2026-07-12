@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../../core/config/feature_flags.dart';
 import '../../core/layout/responsive.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_icons.dart';
@@ -137,14 +138,16 @@ class SettingsScreen extends ConsumerWidget {
                     subtitle: l10n.sleepModeSubtitle,
                     onTap: () => context.push('/sleep'),
                   ),
-                  Divider(height: 1, color: theme.glassBorder),
-                  _SettingsLinkRow(
-                    theme: theme,
-                    icon: AppIcons.prayer,
-                    title: l10n.prayerMode,
-                    subtitle: l10n.prayerModeSubtitle,
-                    onTap: () => context.push('/prayer'),
-                  ),
+                  if (kAdhanFeatureEnabled) ...[
+                    Divider(height: 1, color: theme.glassBorder),
+                    _SettingsLinkRow(
+                      theme: theme,
+                      icon: AppIcons.prayer,
+                      title: l10n.prayerMode,
+                      subtitle: l10n.prayerModeSubtitle,
+                      onTap: () => context.push('/prayer'),
+                    ),
+                  ],
                 ],
               ),
               const SizedBox(height: 20),

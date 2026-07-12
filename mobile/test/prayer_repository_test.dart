@@ -5,7 +5,7 @@ import 'package:whisperback/data/database/database_helper.dart';
 import 'package:whisperback/data/repositories/prayer_repository.dart';
 
 void main() {
-  test('prayer settings round-trip with playAdhan default true', () async {
+  test('prayer settings default playAdhan is false on fresh install', () async {
     // Use an in-memory DB through the public helper; clean the file path so
     // the test is isolated from any previous run.
     final dir = await getDatabasesPath();
@@ -16,7 +16,7 @@ void main() {
 
     final repo = PrayerRepository(DatabaseHelper.instance);
     final initial = await repo.getSettings();
-    expect(initial.playAdhan, isTrue);
+    expect(initial.playAdhan, isFalse);
     expect(initial.calculationMethod, 'Karachi');
 
     await repo.saveSettings(initial.copyWith(playAdhan: false));

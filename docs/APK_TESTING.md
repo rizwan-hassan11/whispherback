@@ -2,6 +2,10 @@
 
 Use this to install the app on a real phone and test **record → playlist → schedule → playback**.
 
+**Client handoff:** Share [`CLIENT_UAT_BRIEFING.md`](CLIENT_UAT_BRIEFING.md) with your client before UAT. It includes acceptance criteria, answers to earlier Adhan/Active questions, and a playlist happy path.
+
+**This release:** Adhan (call-to-prayer audio) is **disabled**. Fresh installs will not play prayer audio. Scheduled whispers use **media volume**, not alarm volume.
+
 ---
 
 ## 1. Build the APK (on your PC)

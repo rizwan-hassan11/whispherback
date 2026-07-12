@@ -17,7 +17,7 @@ class DatabaseHelper {
     final path = join(dbPath, 'whisperback.db');
     return openDatabase(
       path,
-      version: 3,
+      version: 4,
       onConfigure: (db) async {
         // SQLite ships with foreign keys OFF; the schema declares
         // `ON DELETE CASCADE` for `playlist_clips` and `schedules` rows that
@@ -44,6 +44,13 @@ class DatabaseHelper {
         if (oldVersion < 3) {
           await db.execute(
             'ALTER TABLE prayer_settings ADD COLUMN play_adhan INTEGER NOT NULL DEFAULT 1',
+          );
+        }
+        if (oldVersion < 4) {
+          // Adhan shelved for current release — clear any enabled flag so
+          // leftover settings from earlier APKs cannot re-arm prayer audio.
+          await db.execute(
+            'UPDATE prayer_settings SET play_adhan = 0 WHERE id = 1',
           );
         }
       },
@@ -110,7 +117,7 @@ class DatabaseHelper {
             madhab TEXT NOT NULL DEFAULT 'Shafi',
             use_gps INTEGER NOT NULL DEFAULT 1,
             manual_city TEXT,
-            play_adhan INTEGER NOT NULL DEFAULT 1
+            play_adhan INTEGER NOT NULL DEFAULT 0
           )
         ''');
     await db.execute('''
@@ -127,6 +134,7 @@ class DatabaseHelper {
       'calculation_method': 'Karachi',
       'madhab': 'Shafi',
       'use_gps': 1,
+      'play_adhan': 0,
     });
   }
 

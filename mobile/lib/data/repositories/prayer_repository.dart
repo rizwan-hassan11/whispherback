@@ -6,7 +6,7 @@ class PrayerSettings {
     required this.madhab,
     required this.useGps,
     this.manualCity,
-    this.playAdhan = true,
+    this.playAdhan = false,
   });
 
   final String calculationMethod;
@@ -45,6 +45,7 @@ class PrayerRepository {
         calculationMethod: 'Karachi',
         madhab: 'Shafi',
         useGps: true,
+        playAdhan: false,
       );
     }
     final row = rows.first;
@@ -53,7 +54,7 @@ class PrayerRepository {
       madhab: row['madhab']! as String,
       useGps: (row['use_gps'] as int) == 1,
       manualCity: row['manual_city'] as String?,
-      playAdhan: ((row['play_adhan'] as int?) ?? 1) == 1,
+      playAdhan: ((row['play_adhan'] as int?) ?? 0) == 1,
     );
   }
 

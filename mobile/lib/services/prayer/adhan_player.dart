@@ -4,6 +4,8 @@ import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 
+import '../../core/config/feature_flags.dart';
+
 /// Plays the bundled adhan asset once when a prayer window starts.
 ///
 /// Uses its own [AudioPlayer] instance so it never interferes with the
@@ -24,6 +26,7 @@ class AdhanPlayer {
   /// Plays the adhan for [windowKey] (typically the prayer name + start time).
   /// No-op if the same key already played during the current process lifetime.
   Future<void> playFor(String windowKey) async {
+    if (!kAdhanFeatureEnabled) return;
     if (_lastPlayedWindowKey == windowKey) return;
     if (_loading) return;
     _loading = true;

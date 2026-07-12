@@ -197,7 +197,10 @@ class _MainShellState extends ConsumerState<MainShell> {
     final bottomBar = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const MiniPlayerBar(),
+        Padding(
+          padding: EdgeInsets.symmetric(horizontal: r.horizontalGutter),
+          child: const MiniPlayerBar(),
+        ),
         GlassNavBar(
           showAllLabels: theme.showLabels,
           selectedIndex: index,
@@ -236,7 +239,10 @@ class _MainShellState extends ConsumerState<MainShell> {
             ),
           ],
         ),
-        bottomNavigationBar: const MiniPlayerBar(),
+        bottomNavigationBar: Padding(
+          padding: EdgeInsets.symmetric(horizontal: r.horizontalGutter),
+          child: const MiniPlayerBar(),
+        ),
       );
     }
 

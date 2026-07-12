@@ -7,6 +7,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:timezone/timezone.dart' as tz;
 
 import '../../data/repositories/prayer_repository.dart';
+import '../../core/config/feature_flags.dart';
 import '../../l10n/runtime_copy.dart';
 
 /// Re-arms a small set of "prayer time" notifications for the next 24h so the
@@ -38,6 +39,8 @@ class PrayerNotificationScheduler {
   Future<void> sync() async {
     try {
       await _cancelAll();
+
+      if (!kAdhanFeatureEnabled) return;
 
       final settings = await _prayer.getSettings();
       if (!settings.playAdhan) return;
@@ -160,6 +163,18 @@ class PrayerNotificationScheduler {
         if (kDebugMode) {
           debugPrint('Prayer notification $id inexact-fallback failed: $e2');
         }
+      }
+    }
+  }
+
+  /// Cancels every reserved prayer notification slot. Safe to call when
+  /// adhan is shelved so leftover alarms from an older APK are cleared.
+  Future<void> cancelAllScheduled() async {
+    try {
+      await _cancelAll();
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint('PrayerNotificationScheduler.cancelAllScheduled failed: $e\n$st');
       }
     }
   }
