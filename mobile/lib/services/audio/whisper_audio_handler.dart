@@ -106,7 +106,17 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   /// Silent loop while Active + idle — drives the audio_service foreground service.
-  final AudioPlayer _player = AudioPlayer();
+  ///
+  /// `handleAudioSessionActivation: false` is CRITICAL. By default just_audio
+  /// calls `AudioSession.setActive(true)` on EVERY `play()` — including the
+  /// inaudible keep-alive silence loop. With the `.music()` config that
+  /// requests permanent `AndroidAudioFocusGainType.gain`, which PAUSES every
+  /// other app (YouTube, Spotify, podcasts…). Because the keep-alive loop
+  /// restarts on the engine heartbeat, other apps got paused over and over
+  /// and the user had to keep tapping resume. We now own focus activation
+  /// ourselves: only real clip playback ([playFile] / [play]) grabs focus,
+  /// and the silent keep-alive never does.
+  final AudioPlayer _player = AudioPlayer(handleAudioSessionActivation: false);
 
   AudioPlayer get player => _player;
 
@@ -228,6 +238,20 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
 
   bool _wasPlayingBeforeInterruption = false;
 
+  /// Releases audio focus so other apps (YouTube, Spotify, podcasts) resume
+  /// after our clip finishes. Best-effort — a failure here is harmless, the
+  /// OS reaps focus when the process ends anyway.
+  Future<void> _releaseAudioFocus() async {
+    try {
+      final session = await AudioSession.instance;
+      await session.setActive(false);
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint('releaseAudioFocus failed (swallowed): $e\n$st');
+      }
+    }
+  }
+
   // ── Active session (scheduling keep-alive, no media notification) ───────────
 
   Future<void> enterForeground() async {
@@ -262,8 +286,12 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     for (var attempt = 1; attempt <= 3; attempt++) {
       try {
         await _ensureAudioSession();
-        final session = await AudioSession.instance;
-        await session.setActive(true);
+        // NOTE: we deliberately do NOT call `session.setActive(true)` here.
+        // The keep-alive loop is inaudible silence whose only job is to keep
+        // the foreground service bound for scheduling. Requesting audio focus
+        // would pause whatever the user is listening to in other apps
+        // (YouTube, Spotify…) every time the loop (re)starts. Focus is only
+        // grabbed for real clip playback in `playFile` / `play`.
 
         final path = await _ensureSilenceFile();
         final copy = RuntimeCopy.l10n;
@@ -357,6 +385,7 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
         debugPrint('exitForeground: _player.stop failed: $e\n$st');
       }
     }
+    await _releaseAudioFocus();
     try {
       mediaItem.add(null);
       queue.add([]);
@@ -625,6 +654,9 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
         onClipSessionChanged?.call();
       } catch (_) {}
       _standalonePlayback = false;
+      // Release focus so whatever the user was listening to elsewhere
+      // resumes; the silence loop we restart below never re-grabs it.
+      await _releaseAudioFocus();
       try {
         await _startIdleKeepAlive();
       } catch (e, st) {
@@ -662,6 +694,9 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     try {
       onClipSessionChanged?.call();
     } catch (_) {}
+
+    // Give focus back so other apps (YouTube/Spotify) resume.
+    await _releaseAudioFocus();
 
     if (_standalonePlayback) {
       _standalonePlayback = false;

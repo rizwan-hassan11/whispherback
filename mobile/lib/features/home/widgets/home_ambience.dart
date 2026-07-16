@@ -33,7 +33,6 @@ class _HomeAmbiencePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     _drawOrbs(canvas, size);
-    _drawArcRings(canvas, size);
     _drawDotField(canvas, size);
     if (isActive) _drawActiveGlow(canvas, size);
   }
@@ -90,40 +89,6 @@ class _HomeAmbiencePainter extends CustomPainter {
           ],
         ).createShader(Rect.fromCircle(center: center, radius: radius));
       canvas.drawCircle(center, radius, paint);
-    }
-  }
-
-  void _drawArcRings(Canvas canvas, Size size) {
-    final center = Offset(size.width * 0.5, size.height * 0.46);
-    final ringColor = isDark ? AppColors.brandLight : AppColors.ink;
-    final radii = [118.0, 148.0, 178.0];
-    for (var i = 0; i < radii.length; i++) {
-      final paint = Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.2
-        ..color = ringColor.withValues(
-          alpha: isDark ? (0.14 - i * 0.04) : (0.12 - i * 0.03),
-        );
-      canvas.drawArc(
-        Rect.fromCircle(center: center, radius: radii[i]),
-        math.pi * 0.72,
-        math.pi * 0.56,
-        false,
-        paint,
-      );
-    }
-
-    // Gold accent tick marks
-    final tickPaint = Paint()
-      ..color = (isDark ? AppColors.gold : AppColors.ink)
-          .withValues(alpha: isDark ? 0.35 : 0.28)
-      ..strokeWidth = 2
-      ..strokeCap = StrokeCap.round;
-    for (var i = 0; i < 8; i++) {
-      final angle = math.pi * 0.72 + (math.pi * 0.56 / 7) * i;
-      final inner = center + Offset(math.cos(angle), math.sin(angle)) * 108;
-      final outer = center + Offset(math.cos(angle), math.sin(angle)) * 114;
-      canvas.drawLine(inner, outer, tickPaint);
     }
   }
 

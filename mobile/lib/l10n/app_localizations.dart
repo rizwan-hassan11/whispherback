@@ -444,6 +444,8 @@ class AppLocalizations {
       'Chọn danh sách phát để thêm đoạn ghi');
   String get addClips => _s('Add clips', 'کلپس شامل کریں', 'إضافة مقاطع',
       'Clips toevoegen', 'Ajouter des clips', 'Thêm đoạn ghi');
+  String get moreOptions => _s('More options', 'مزید اختیارات', 'خيارات أخرى',
+      'Meer opties', 'Plus d\'options', 'Tùy chọn khác');
   String get newPlaylist => _s('New playlist', 'نئی پلے لسٹ', 'قائمة جديدة',
       'Nieuwe afspeellijst', 'Nouvelle playlist', 'Danh sách phát mới');
   String get noPlaylistsYet => _s(

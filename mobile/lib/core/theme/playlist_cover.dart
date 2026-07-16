@@ -63,11 +63,8 @@ class PlaylistCoverArt extends StatelessWidget {
   Widget build(BuildContext context) {
     final darkCover = PlaylistCoverPalette.coverIsDark(colors);
     final barColor = darkCover
-        ? Colors.white.withValues(alpha: 0.92)
-        : AppColors.deep.withValues(alpha: 0.62);
-    final markColor = darkCover
-        ? Colors.white.withValues(alpha: 0.38)
-        : AppColors.deep.withValues(alpha: 0.2);
+        ? Colors.white.withValues(alpha: 0.95)
+        : AppColors.deep.withValues(alpha: 0.72);
     final scale = size / 56.0;
 
     return Stack(
@@ -85,34 +82,43 @@ class PlaylistCoverArt extends StatelessWidget {
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.28),
-                blurRadius: 16 * scale,
+                color: Colors.black.withValues(alpha: 0.22),
+                blurRadius: 14 * scale,
                 offset: Offset(0, 4 * scale),
               ),
             ],
-            border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
           ),
           child: Stack(
             alignment: Alignment.center,
             children: [
-              Icon(
-                Icons.music_note_rounded,
-                color: markColor,
-                size: 24 * scale,
-              ),
-              Positioned(
-                bottom: 10 * scale,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    _bar(8 * scale, barColor, isPlaying),
-                    _bar(14 * scale, barColor, isPlaying),
-                    _bar(20 * scale, barColor, isPlaying),
-                    _bar(12 * scale, barColor, isPlaying),
-                    _bar(16 * scale, barColor, isPlaying),
-                  ],
+              // Soft top-left sheen for a glossy, premium finish.
+              Positioned.fill(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(borderRadius),
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.center,
+                      colors: [
+                        Colors.white.withValues(alpha: 0.16),
+                        Colors.white.withValues(alpha: 0),
+                      ],
+                    ),
+                  ),
                 ),
+              ),
+              // Centered equalizer — the single, clean focal point.
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  _bar(12 * scale, barColor, isPlaying),
+                  _bar(22 * scale, barColor, isPlaying),
+                  _bar(30 * scale, barColor, isPlaying),
+                  _bar(18 * scale, barColor, isPlaying),
+                  _bar(24 * scale, barColor, isPlaying),
+                ],
               ),
             ],
           ),

@@ -57,9 +57,9 @@ class PlaylistCard extends StatelessWidget {
       child: DepthSurface(
         radius: AppRadii.sm,
         elevated: true,
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.all(12),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Expanded(
               child: Material(
@@ -73,14 +73,15 @@ class PlaylistCard extends StatelessWidget {
                         },
                   borderRadius: BorderRadius.circular(AppRadii.sm),
                   child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       PlaylistCoverArt(
                         colors: colors,
+                        size: 52,
                         hasSchedule: playlist.hasSchedule,
                         isPlaying: isPlaying,
                       ),
-                      const SizedBox(width: 14),
+                      const SizedBox(width: 12),
                       Expanded(
                           child:
                               _PlaylistInfo(playlist: playlist, theme: theme)),
@@ -89,7 +90,7 @@ class PlaylistCard extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 6),
             _PlaylistCardActions(
               theme: theme,
               playlist: playlist,
@@ -194,84 +195,161 @@ class _PlaylistCardActions extends StatelessWidget {
     final l10n = context.l10n;
     final canPlay = playlist.clipCount > 0 && onPlayPause != null;
 
-    return Column(
+    return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         if (canPlay)
           ProminentPlayButton(
             onTap: onPlayPause,
             isPlaying: isPlaying,
-            size: 40,
-            iconSize: 18,
+            size: 42,
+            iconSize: 19,
           )
         else
-          _ActionIcon(
-            icon: AppIcons.add,
+          Semantics(
             label: l10n.addClips,
-            color: theme.muted,
-            onTap: onOpen,
+            button: true,
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: onOpen == null
+                    ? null
+                    : () {
+                        selectionHaptic();
+                        onOpen!();
+                      },
+                borderRadius: BorderRadius.circular(21),
+                child: Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: theme.glass,
+                    border: Border.all(color: theme.glassBorder),
+                  ),
+                  child: Icon(AppIcons.add, size: 20, color: theme.muted),
+                ),
+              ),
+            ),
           ),
-        const SizedBox(height: 6),
-        _ActionIcon(
-          icon: AppIcons.heart,
-          label: playlist.isFavourite
-              ? l10n.removeFromFavourites
-              : l10n.addToFavourites,
-          color: playlist.isFavourite ? AppColors.gold : theme.muted,
-          onTap: onFavourite,
-        ),
-        _ActionIcon(
-          icon: AppIcons.edit,
-          label: l10n.renamePlaylist,
-          color: theme.muted,
-          onTap: onEdit,
-        ),
-        _ActionIcon(
-          icon: AppIcons.trash,
-          label: l10n.deletePlaylist,
-          color: AppColors.error.withValues(alpha: 0.85),
-          onTap: onDelete,
+        _PlaylistOverflowMenu(
+          theme: theme,
+          isFavourite: playlist.isFavourite,
+          onFavourite: onFavourite,
+          onEdit: onEdit,
+          onDelete: onDelete,
         ),
       ],
     );
   }
 }
 
-class _ActionIcon extends StatelessWidget {
-  const _ActionIcon({
-    required this.icon,
-    required this.label,
-    required this.color,
-    this.onTap,
+/// Compact 3-dot overflow menu holding the secondary card actions
+/// (favourite / rename / delete). Keeps the card short and tidy.
+class _PlaylistOverflowMenu extends StatelessWidget {
+  const _PlaylistOverflowMenu({
+    required this.theme,
+    required this.isFavourite,
+    this.onFavourite,
+    this.onEdit,
+    this.onDelete,
   });
 
-  final IconData icon;
-  final String label;
-  final Color color;
-  final VoidCallback? onTap;
+  final WhisperThemeExtension theme;
+  final bool isFavourite;
+  final VoidCallback? onFavourite;
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
-    return Semantics(
-      label: label,
-      button: true,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap == null
-              ? null
-              : () {
-                  selectionHaptic();
-                  onTap!();
-                },
-          borderRadius: BorderRadius.circular(8),
-          child: SizedBox(
-            width: 36,
-            height: 32,
-            child: Icon(icon, size: 18, color: color),
+    final l10n = context.l10n;
+    return PopupMenuButton<_CardAction>(
+      tooltip: l10n.moreOptions,
+      icon: Icon(AppIcons.moreVertical, size: 20, color: theme.muted),
+      padding: EdgeInsets.zero,
+      splashRadius: 20,
+      color: theme.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      position: PopupMenuPosition.under,
+      onSelected: (action) {
+        selectionHaptic();
+        switch (action) {
+          case _CardAction.favourite:
+            onFavourite?.call();
+            break;
+          case _CardAction.edit:
+            onEdit?.call();
+            break;
+          case _CardAction.delete:
+            onDelete?.call();
+            break;
+        }
+      },
+      itemBuilder: (context) => [
+        if (onFavourite != null)
+          PopupMenuItem(
+            value: _CardAction.favourite,
+            child: _MenuRow(
+              icon: AppIcons.heart,
+              color: isFavourite ? AppColors.gold : theme.foreground,
+              label: isFavourite
+                  ? l10n.removeFromFavourites
+                  : l10n.addToFavourites,
+              theme: theme,
+            ),
           ),
+        if (onEdit != null)
+          PopupMenuItem(
+            value: _CardAction.edit,
+            child: _MenuRow(
+              icon: AppIcons.edit,
+              color: theme.foreground,
+              label: l10n.renamePlaylist,
+              theme: theme,
+            ),
+          ),
+        if (onDelete != null)
+          PopupMenuItem(
+            value: _CardAction.delete,
+            child: _MenuRow(
+              icon: AppIcons.trash,
+              color: AppColors.error,
+              label: l10n.deletePlaylist,
+              theme: theme,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+enum _CardAction { favourite, edit, delete }
+
+class _MenuRow extends StatelessWidget {
+  const _MenuRow({
+    required this.icon,
+    required this.color,
+    required this.label,
+    required this.theme,
+  });
+
+  final IconData icon;
+  final Color color;
+  final String label;
+  final WhisperThemeExtension theme;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: color),
+        const SizedBox(width: 12),
+        Text(
+          label,
+          style: TextStyle(fontSize: 14, color: theme.foreground),
         ),
-      ),
+      ],
     );
   }
 }
