@@ -358,29 +358,48 @@ class PlaybackCoordinator {
   void _onNativePlaybackState(NativePlaybackSnapshot native) {
     try {
       if (native.isPlaying) {
+        // Round 27: progress ticks (every 500 ms) also arrive as
+        // `isPlaying` snapshots so the mini-player can scrub. Only the
+        // FIRST transition into native play should stamp lastFired /
+        // suspend silence / emit the scheduledPlaying frame.
+        final firstStart = !_nativeScheduledActive;
+        final wasPaused = _nativeScheduledActive && !_snapshot.isPlaying;
         _nativeScheduledActive = true;
-        // Round 23 — stamp `lastFired` the moment native starts a slot.
-        // The Dart engine reads this store on its next tick and skips
-        // any slot with a fresh stamp, so the double-fire race is closed.
-        final startedAt = DateTime.now();
-        _nativeActiveScheduleId = native.scheduleId;
-        _stampNativeFireStart(native.scheduleId, startedAt);
-        _emit(_snapshot.copyWith(
-          state: AppPlaybackState.scheduledPlaying,
-          isPlaying: true,
-          playlistName: native.playlistName ?? _snapshot.playlistName,
-          clipTitle: native.clipTitle ?? _snapshot.clipTitle,
-        ));
+        if (firstStart) {
+          final startedAt = DateTime.now();
+          _nativeActiveScheduleId = native.scheduleId;
+          _stampNativeFireStart(native.scheduleId, startedAt);
+          unawaited(() async {
+            try {
+              await _audio.suspendSilenceForExternalPlayback();
+            } catch (e, st) {
+              if (kDebugMode) {
+                debugPrint('suspendSilence on native play failed: $e\n$st');
+              }
+            }
+          }());
+        }
+        if (firstStart || wasPaused) {
+          _emit(_snapshot.copyWith(
+            state: AppPlaybackState.scheduledPlaying,
+            isPlaying: true,
+            playlistName: native.playlistName ?? _snapshot.playlistName,
+            clipTitle: native.clipTitle ?? _snapshot.clipTitle,
+          ));
+        }
         return;
       }
       if (native.isPaused) {
         _nativeScheduledActive = true;
-        _emit(_snapshot.copyWith(
-          state: AppPlaybackState.scheduledPlaying,
-          isPlaying: false,
-          playlistName: native.playlistName ?? _snapshot.playlistName,
-          clipTitle: native.clipTitle ?? _snapshot.clipTitle,
-        ));
+        if (_snapshot.isPlaying ||
+            _snapshot.state != AppPlaybackState.scheduledPlaying) {
+          _emit(_snapshot.copyWith(
+            state: AppPlaybackState.scheduledPlaying,
+            isPlaying: false,
+            playlistName: native.playlistName ?? _snapshot.playlistName,
+            clipTitle: native.clipTitle ?? _snapshot.clipTitle,
+          ));
+        }
         return;
       }
       // Idle — clear the snapshot only if we'd previously promoted it.
@@ -400,6 +419,17 @@ class PlaybackCoordinator {
         final scheduleId = _nativeActiveScheduleId ?? native.scheduleId;
         _nativeActiveScheduleId = null;
         _stampNativeFireCompletion(scheduleId, endedAt);
+        // Round 27 — restore the silence keep-alive now that native
+        // MediaPlayer has released the media stream.
+        unawaited(() async {
+          try {
+            await _audio.resumeSilenceAfterExternalPlayback();
+          } catch (e, st) {
+            if (kDebugMode) {
+              debugPrint('resumeSilence after native idle failed: $e\n$st');
+            }
+          }
+        }());
         // Don't blow away the snapshot if the Dart side has since started
         // its own clip (e.g. user tapped Play); we only roll back our own
         // scheduledPlaying frame.
@@ -884,6 +914,10 @@ class PlaybackCoordinator {
   /// fire so an OS-reclaimed FG service can't silently swallow the play.
   Future<void> ensureForegroundForSchedule() async {
     if (!await _appState.isActive()) return;
+    // Round 27: while native MediaPlayer owns the scheduled clip, the
+    // engine's 5-second heartbeat must NOT restart the Dart silence
+    // keep-alive — that restart was interrupting native audio mid-clip.
+    if (_nativeScheduledActive) return;
     try {
       await _audio.enterForeground();
     } catch (e, st) {

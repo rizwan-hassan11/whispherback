@@ -159,6 +159,8 @@ class MainActivity : AudioServiceActivity() {
                             "clipTitle" to prefs.getString(WhisperPlaybackService.KEY_CURRENT_TITLE, null),
                             "playlistName" to prefs.getString(WhisperPlaybackService.KEY_CURRENT_PLAYLIST, null),
                             "scheduleId" to prefs.getString(WhisperPlaybackService.KEY_CURRENT_SCHEDULE_ID, null),
+                            "durationMs" to prefs.getLong(WhisperPlaybackService.KEY_DURATION_MS, 0L),
+                            "positionMs" to prefs.getLong(WhisperPlaybackService.KEY_POSITION_MS, 0L),
                         )
                         result.success(map)
                     }
@@ -175,7 +177,7 @@ class MainActivity : AudioServiceActivity() {
         // Flutter. This is what makes the mini-player light up the moment
         // the scheduled clip starts.
         WhisperPlaybackService.stateListener =
-            lambda@{ state, clipPath, clipTitle, playlistName, scheduleId ->
+            lambda@{ state, clipPath, clipTitle, playlistName, scheduleId, durationMs, positionMs ->
                 try {
                     val ch = alarmChannel ?: return@lambda
                     // MUST hop to the main thread — invokeMethod is not safe
@@ -192,6 +194,8 @@ class MainActivity : AudioServiceActivity() {
                                     "clipTitle" to clipTitle,
                                     "playlistName" to playlistName,
                                     "scheduleId" to scheduleId,
+                                    "durationMs" to durationMs,
+                                    "positionMs" to positionMs,
                                 ),
                             )
                         } catch (_: Throwable) {

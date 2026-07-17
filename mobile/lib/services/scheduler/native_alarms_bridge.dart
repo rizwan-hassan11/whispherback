@@ -32,6 +32,8 @@ class NativePlaybackSnapshot {
     this.clipTitle,
     this.playlistName,
     this.scheduleId,
+    this.durationMs = 0,
+    this.positionMs = 0,
   });
 
   factory NativePlaybackSnapshot.idle() => const NativePlaybackSnapshot(
@@ -43,11 +45,14 @@ class NativePlaybackSnapshot {
   final String? clipTitle;
   final String? playlistName;
   final String? scheduleId;
+  final int durationMs;
+  final int positionMs;
 
   bool get isPlaying => state == NativePlaybackState.playing;
   bool get isPaused => state == NativePlaybackState.paused;
   bool get isIdle => state == NativePlaybackState.idle;
   bool get hasClip => (clipPath ?? '').isNotEmpty;
+  bool get hasProgress => durationMs > 0;
 }
 
 /// Round 21 — bridge to the native Android alarm-clock scheduler.
@@ -152,6 +157,8 @@ class NativeAlarmsBridge {
           clipTitle: args['clipTitle'] as String?,
           playlistName: args['playlistName'] as String?,
           scheduleId: args['scheduleId'] as String?,
+          durationMs: _asIntMs(args['durationMs']),
+          positionMs: _asIntMs(args['positionMs']),
         );
         _lastSnapshot = snapshot;
         if (!_stateController.isClosed) {
@@ -413,6 +420,8 @@ class NativeAlarmsBridge {
         clipTitle: raw['clipTitle'] as String?,
         playlistName: raw['playlistName'] as String?,
         scheduleId: raw['scheduleId'] as String?,
+        durationMs: _asIntMs(raw['durationMs']),
+        positionMs: _asIntMs(raw['positionMs']),
       );
       _lastSnapshot = snapshot;
       if (!_stateController.isClosed) {
@@ -441,4 +450,10 @@ class NativeAlarmsBridge {
       }
     }
   }
+}
+
+int _asIntMs(Object? raw) {
+  if (raw is int) return raw;
+  if (raw is num) return raw.toInt();
+  return 0;
 }

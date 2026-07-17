@@ -125,6 +125,13 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   bool _audioSessionReady = false;
   bool _playingClip = false;
   bool _playlistMode = false;
+
+  /// True while native [WhisperPlaybackService] owns the audible clip.
+  /// Prevents the silence keep-alive (and the engine's 5-second heartbeat
+  /// that restarts it) from re-binding ExoPlayer mid-schedule and
+  /// interrupting MediaPlayer — the QA "schedule pauses after a few
+  /// seconds" root cause alongside transient audio focus.
+  bool _silenceSuspendedForExternal = false;
   String? _silencePath;
 
   String? _clipTitle;
@@ -257,6 +264,9 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> enterForeground() async {
     _keepAlive = true;
     if (_playingClip) return;
+    // Round 27: native scheduled playback owns the media stream —
+    // do NOT restart the silence loop underneath it.
+    if (_silenceSuspendedForExternal) return;
     // Round 15: idempotent — skip the silence-loop rebuild when the
     // loop is ALREADY running. Without this guard, the engine's 5-
     // second heartbeat (Round 14) would re-run `setAudioSource(silence)`
@@ -278,6 +288,7 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
 
   Future<void> _startIdleKeepAlive() async {
     if (_playingClip) return;
+    if (_silenceSuspendedForExternal) return;
     // Up to 3 attempts with a short backoff between each. The first
     // attempt sometimes lands BEFORE the system audio focus grant
     // completes on cold start (Samsung Exynos firmware in particular),
@@ -361,8 +372,43 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
 
   Future<void> updateActiveSessionInfo() async {
     if (_playingClip) return;
+    if (_silenceSuspendedForExternal) return;
     if (_keepAlive && !_player.playing) {
       await _startIdleKeepAlive();
+    }
+  }
+
+  /// Round 27 — pause the inaudible silence loop while native scheduled
+  /// playback owns the media stream. Leaves `_keepAlive` / the FG
+  /// binding intent intact so [resumeSilenceAfterExternalPlayback] can
+  /// restore the loop when the native clip ends. Without this, the
+  /// schedule engine's 5-second `ensureForeground` heartbeat restarts
+  /// ExoPlayer mid-clip and the native MediaPlayer pauses.
+  Future<void> suspendSilenceForExternalPlayback() async {
+    _silenceSuspendedForExternal = true;
+    if (_playingClip) return;
+    try {
+      if (_player.playing) {
+        await _player.pause();
+      }
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint('suspendSilence: pause failed: $e\n$st');
+      }
+    }
+    _keepAliveRunning = false;
+  }
+
+  /// Restores the silence keep-alive after native scheduled playback ends.
+  Future<void> resumeSilenceAfterExternalPlayback() async {
+    _silenceSuspendedForExternal = false;
+    if (!_keepAlive || _playingClip) return;
+    try {
+      await _startIdleKeepAlive();
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint('resumeSilence: keep-alive restart failed: $e\n$st');
+      }
     }
   }
 
@@ -372,6 +418,7 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     _playingClip = false;
     _standalonePlayback = false;
     _playlistMode = false;
+    _silenceSuspendedForExternal = false;
     _clipTitle = null;
     // Each call is independently try/caught so the master Active
     // toggle's OFF path never throws a PlatformException out to the

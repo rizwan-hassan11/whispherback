@@ -331,6 +331,14 @@ class AudioPlaybackService {
 
   Future<void> updateActiveSessionInfo() => _handler.updateActiveSessionInfo();
 
+  /// Pause the Dart silence loop while native MediaPlayer owns the clip.
+  Future<void> suspendSilenceForExternalPlayback() =>
+      _handler.suspendSilenceForExternalPlayback();
+
+  /// Restore the Dart silence loop after native MediaPlayer finishes.
+  Future<void> resumeSilenceAfterExternalPlayback() =>
+      _handler.resumeSilenceAfterExternalPlayback();
+
   set onStopClipRequested(void Function()? cb) =>
       _handler.onStopClipRequested = cb;
   set onPlayRequested(void Function()? cb) => _handler.onPlayRequested = cb;

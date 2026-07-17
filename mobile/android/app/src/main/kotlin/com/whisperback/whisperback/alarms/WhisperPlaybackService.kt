@@ -81,6 +81,11 @@ class WhisperPlaybackService : Service() {
         const val KEY_CURRENT_PLAYLIST = "playlist_name"
         const val KEY_CURRENT_SCHEDULE_ID = "schedule_id"
         const val KEY_VOLUME = "playback_volume" // float 0.0–1.0
+        // Round 27 — real clip progress for the Flutter mini-player.
+        // Previously the mini-player read the Dart silence keep-alive's
+        // 10-second duration while native MediaPlayer owned the clip.
+        const val KEY_DURATION_MS = "duration_ms"
+        const val KEY_POSITION_MS = "position_ms"
 
         const val STATE_IDLE = "idle"
         const val STATE_PLAYING = "playing"
@@ -90,18 +95,47 @@ class WhisperPlaybackService : Service() {
         // MainActivity so notification-button presses surface in the
         // coordinator's pause/play snapshot. Null when the app process
         // isn't running, which is fine: state is also mirrored in prefs.
-        @Volatile var stateListener: ((state: String, clipPath: String?, clipTitle: String?, playlistName: String?, scheduleId: String?) -> Unit)? = null
+        @Volatile var stateListener: ((
+            state: String,
+            clipPath: String?,
+            clipTitle: String?,
+            playlistName: String?,
+            scheduleId: String?,
+            durationMs: Long,
+            positionMs: Long,
+        ) -> Unit)? = null
     }
 
     private var mediaPlayer: MediaPlayer? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var audioFocusRequest: AudioFocusRequest? = null
     private var audioManager: AudioManager? = null
+    private var progressHandler: android.os.Handler? = null
+    private var currentDurationMs: Long = 0L
+    private var resumeAfterFocusGain: Boolean = false
 
     private var currentClipPath: String? = null
     private var currentClipTitle: String = "WhisperBack"
     private var currentPlaylistName: String = "Scheduled whisper"
     private var currentScheduleId: String? = null
+
+    private val progressTicker = object : Runnable {
+        override fun run() {
+            try {
+                val player = mediaPlayer
+                if (player != null && player.isPlaying) {
+                    val pos = player.currentPosition.toLong().coerceAtLeast(0L)
+                    writeProgress(pos, currentDurationMs)
+                    // Lightweight progress push so the mini-player scrubber
+                    // stays honest without requiring a full state transition.
+                    notifyListener(STATE_PLAYING)
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "progressTicker failed", t)
+            }
+            progressHandler?.postDelayed(this, 500L)
+        }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -181,7 +215,9 @@ class WhisperPlaybackService : Service() {
                 Log.i(TAG, "pause requested but player not playing")
                 return
             }
+            stopProgressTicker()
             player.pause()
+            writeProgress(player.currentPosition.toLong().coerceAtLeast(0L), currentDurationMs)
             writeState(STATE_PAUSED)
             // Re-post notification with PLAY action visible instead of PAUSE.
             try {
@@ -211,8 +247,12 @@ class WhisperPlaybackService : Service() {
                 Log.i(TAG, "resume requested but player already playing")
                 return
             }
+            if (!requestAudioFocus()) {
+                Log.w(TAG, "audio focus denied on resume; playing anyway")
+            }
             player.start()
             writeState(STATE_PLAYING)
+            startProgressTicker()
             try {
                 val notification = buildNotification(
                     title = currentClipTitle,
@@ -266,7 +306,10 @@ class WhisperPlaybackService : Service() {
 
     private fun playClip(clipPath: String) {
         // Stop any clip already playing — second alarm wins.
+        stopProgressTicker()
         releasePlayer()
+        currentDurationMs = 0L
+        resumeAfterFocusGain = false
         acquireWakeLock()
         if (!requestAudioFocus()) {
             Log.w(TAG, "audio focus denied; playing anyway (best effort)")
@@ -294,8 +337,15 @@ class WhisperPlaybackService : Service() {
                     // so existing installs see no behaviour change.
                     val vol = readUserVolume()
                     mp.setVolume(vol, vol)
+                    currentDurationMs = try {
+                        mp.duration.toLong().coerceAtLeast(0L)
+                    } catch (_: Throwable) {
+                        0L
+                    }
+                    writeProgress(0L, currentDurationMs)
                     mp.start()
                     writeState(STATE_PLAYING)
+                    startProgressTicker()
                     notifyListener(STATE_PLAYING)
                     // Re-post with isPlaying=true so PAUSE action is visible.
                     val notification = buildNotification(
@@ -361,11 +411,14 @@ class WhisperPlaybackService : Service() {
                     .remove(KEY_CURRENT_TITLE)
                     .remove(KEY_CURRENT_PLAYLIST)
                     .remove(KEY_CURRENT_SCHEDULE_ID)
+                    .remove(KEY_DURATION_MS)
+                    .remove(KEY_POSITION_MS)
             } else {
                 editor.putString(KEY_CURRENT_PATH, currentClipPath ?: "")
                     .putString(KEY_CURRENT_TITLE, currentClipTitle)
                     .putString(KEY_CURRENT_PLAYLIST, currentPlaylistName)
                     .putString(KEY_CURRENT_SCHEDULE_ID, currentScheduleId ?: "")
+                    .putLong(KEY_DURATION_MS, currentDurationMs)
             }
             editor.apply()
         } catch (t: Throwable) {
@@ -373,20 +426,62 @@ class WhisperPlaybackService : Service() {
         }
     }
 
+    private fun writeProgress(positionMs: Long, durationMs: Long) {
+        try {
+            getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE).edit()
+                .putLong(KEY_POSITION_MS, positionMs)
+                .putLong(KEY_DURATION_MS, durationMs)
+                .apply()
+        } catch (t: Throwable) {
+            Log.e(TAG, "writeProgress failed", t)
+        }
+    }
+
+    private fun startProgressTicker() {
+        if (progressHandler == null) {
+            progressHandler = android.os.Handler(mainLooper)
+        }
+        progressHandler?.removeCallbacks(progressTicker)
+        progressHandler?.postDelayed(progressTicker, 500L)
+    }
+
+    private fun stopProgressTicker() {
+        progressHandler?.removeCallbacks(progressTicker)
+    }
+
     private fun notifyListener(state: String) {
         try {
+            val pos = try {
+                mediaPlayer?.currentPosition?.toLong()?.coerceAtLeast(0L) ?: 0L
+            } catch (_: Throwable) {
+                0L
+            }
             stateListener?.invoke(
                 state,
                 currentClipPath,
                 currentClipTitle,
                 currentPlaylistName,
                 currentScheduleId,
+                currentDurationMs,
+                pos,
             )
         } catch (t: Throwable) {
             Log.e(TAG, "notifyListener failed (handled)", t)
         }
     }
 
+    /**
+     * Round 27 — permanent media focus for the full clip lifetime.
+     *
+     * The previous `AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` +
+     * `setWillPauseWhenDucked(true)` was wrong for multi-minute whispers:
+     * transient focus is designed for short sounds (notifications), and
+     * several OEMs (Samsung One UI / Xiaomi MIUI / Vivo) reclaim it after
+     * a few seconds — which is exactly the QA report "schedule plays a
+     * few seconds then pauses by itself". Permanent `AUDIOFOCUS_GAIN`
+     * holds for the whole clip, and the focus-change listener pauses /
+     * resumes cleanly when a phone call or other app briefly takes over.
+     */
     private fun requestAudioFocus(): Boolean {
         val mgr = audioManager ?: return false
         return try {
@@ -395,24 +490,73 @@ class WhisperPlaybackService : Service() {
                     .setUsage(AudioAttributes.USAGE_MEDIA)
                     .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
                     .build()
-                val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
                     .setAudioAttributes(attrs)
                     .setAcceptsDelayedFocusGain(false)
-                    .setWillPauseWhenDucked(true)
+                    .setWillPauseWhenDucked(false)
+                    .setOnAudioFocusChangeListener { focusChange ->
+                        onAudioFocusChanged(focusChange)
+                    }
                     .build()
                 audioFocusRequest = req
                 mgr.requestAudioFocus(req) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
             } else {
                 @Suppress("DEPRECATION")
                 mgr.requestAudioFocus(
-                    null,
+                    { focusChange -> onAudioFocusChanged(focusChange) },
                     AudioManager.STREAM_MUSIC,
-                    AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK,
+                    AudioManager.AUDIOFOCUS_GAIN,
                 ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
             }
         } catch (t: Throwable) {
             Log.e(TAG, "requestAudioFocus failed", t)
             false
+        }
+    }
+
+    private fun onAudioFocusChanged(focusChange: Int) {
+        try {
+            when (focusChange) {
+                AudioManager.AUDIOFOCUS_LOSS,
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                    val player = mediaPlayer ?: return
+                    if (player.isPlaying) {
+                        resumeAfterFocusGain = true
+                        stopProgressTicker()
+                        player.pause()
+                        writeProgress(
+                            player.currentPosition.toLong().coerceAtLeast(0L),
+                            currentDurationMs,
+                        )
+                        writeState(STATE_PAUSED)
+                        notifyListener(STATE_PAUSED)
+                    }
+                }
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                    // Soft duck — keep playing at reduced volume.
+                    try {
+                        mediaPlayer?.setVolume(0.3f, 0.3f)
+                    } catch (_: Throwable) {}
+                }
+                AudioManager.AUDIOFOCUS_GAIN -> {
+                    try {
+                        val vol = readUserVolume()
+                        mediaPlayer?.setVolume(vol, vol)
+                    } catch (_: Throwable) {}
+                    if (resumeAfterFocusGain) {
+                        resumeAfterFocusGain = false
+                        val player = mediaPlayer ?: return
+                        if (!player.isPlaying) {
+                            player.start()
+                            writeState(STATE_PLAYING)
+                            startProgressTicker()
+                            notifyListener(STATE_PLAYING)
+                        }
+                    }
+                }
+            }
+        } catch (t: Throwable) {
+            Log.e(TAG, "onAudioFocusChanged failed", t)
         }
     }
 
@@ -468,9 +612,12 @@ class WhisperPlaybackService : Service() {
 
     private fun stopSelfSafely() {
         try {
+            stopProgressTicker()
             releasePlayer()
             abandonAudioFocus()
             releaseWakeLock()
+            currentDurationMs = 0L
+            resumeAfterFocusGain = false
             writeState(STATE_IDLE)
             notifyListener(STATE_IDLE)
             currentClipPath = null
@@ -489,9 +636,12 @@ class WhisperPlaybackService : Service() {
 
     override fun onDestroy() {
         try {
+            stopProgressTicker()
             releasePlayer()
             abandonAudioFocus()
             releaseWakeLock()
+            currentDurationMs = 0L
+            resumeAfterFocusGain = false
             writeState(STATE_IDLE)
             notifyListener(STATE_IDLE)
         } finally {

@@ -13,6 +13,13 @@ import '../../core/theme/app_icons.dart';
 import '../../domain/playback/playback_state.dart';
 import '../../l10n/app_localizations.dart';
 import '../../providers/playback_providers.dart';
+import '../../services/audio/audio_services.dart';
+import '../../services/scheduler/native_alarms_bridge.dart';
+
+bool _useNativeProgress(PlaybackSnapshot snapshot, AudioPlaybackService audio) {
+  return snapshot.state == AppPlaybackState.scheduledPlaying &&
+      audio.currentPath == null;
+}
 
 /// Fires [body] without awaiting and routes any thrown error to the zone
 /// handler instead of letting it crash the app. The buttons in the
@@ -196,10 +203,32 @@ class PlaybackModal extends ConsumerWidget {
                               ),
                               const SizedBox(height: 22),
                               StreamBuilder<Duration?>(
-                                stream: audio.positionStream,
+                                stream: _useNativeProgress(snapshot, audio)
+                                    ? NativeAlarmsBridge.instance.stateStream
+                                        .map<Duration?>((n) => Duration(
+                                            milliseconds: n.positionMs))
+                                    : audio.positionStream,
+                                initialData: _useNativeProgress(snapshot, audio)
+                                    ? Duration(
+                                        milliseconds: NativeAlarmsBridge
+                                            .instance.lastSnapshot.positionMs)
+                                    : null,
                                 builder: (context, posSnap) {
                                   return StreamBuilder<Duration?>(
-                                    stream: audio.durationStream,
+                                    stream: _useNativeProgress(snapshot, audio)
+                                        ? NativeAlarmsBridge
+                                            .instance.stateStream
+                                            .map<Duration?>((n) => Duration(
+                                                milliseconds: n.durationMs))
+                                        : audio.durationStream,
+                                    initialData:
+                                        _useNativeProgress(snapshot, audio)
+                                            ? Duration(
+                                                milliseconds: NativeAlarmsBridge
+                                                    .instance
+                                                    .lastSnapshot
+                                                    .durationMs)
+                                            : null,
                                     builder: (context, durSnap) {
                                       final rawPos =
                                           posSnap.data ?? Duration.zero;
@@ -225,9 +254,18 @@ class PlaybackModal extends ConsumerWidget {
                                           const SizedBox(height: 10),
                                           _SeekBar(
                                             progress: clamped,
-                                            enabled: maxMs > 0,
+                                            enabled: maxMs > 0 &&
+                                                !_useNativeProgress(
+                                                    snapshot, audio),
                                             onSeek: (fraction) {
                                               if (maxMs <= 0) return;
+                                              // Native scheduled playback
+                                              // does not yet expose seek —
+                                              // only Dart clips scrub.
+                                              if (_useNativeProgress(
+                                                  snapshot, audio)) {
+                                                return;
+                                              }
                                               final target = Duration(
                                                 milliseconds:
                                                     (fraction * maxMs).round(),

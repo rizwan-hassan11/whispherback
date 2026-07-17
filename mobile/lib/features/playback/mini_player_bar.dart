@@ -15,6 +15,15 @@ import '../../domain/playback/playback_state.dart';
 import '../../domain/playback/playlist_playback_badge.dart';
 import '../../l10n/app_localizations.dart';
 import '../../providers/playback_providers.dart';
+import '../../services/audio/audio_services.dart';
+import '../../services/scheduler/native_alarms_bridge.dart';
+
+/// True when progress must come from native MediaPlayer (scheduled fire),
+/// not the Dart silence keep-alive's 10-second duration stream.
+bool _useNativeProgress(PlaybackSnapshot snapshot, AudioPlaybackService audio) {
+  return snapshot.state == AppPlaybackState.scheduledPlaying &&
+      audio.currentPath == null;
+}
 
 /// Fires [body] without awaiting; routes any thrown future error to a
 /// logged no-op instead of letting it propagate as an unhandled
@@ -149,10 +158,36 @@ class MiniPlayerBar extends ConsumerWidget {
                             ),
                           ),
                           StreamBuilder<Duration?>(
-                            stream: audio.positionStream,
+                            // Round 27: scheduled clips play on the native
+                            // MediaPlayer, not just_audio. The Dart player's
+                            // durationStream still reports the 10-second
+                            // silence keep-alive file — which made the
+                            // mini-player show "0:03 / 0:10" and restart the
+                            // scrubber every 10s. When we're in a native
+                            // scheduled session (no Dart clip path), drive
+                            // progress from the native bridge instead.
+                            stream: _useNativeProgress(snapshot, audio)
+                                ? NativeAlarmsBridge.instance.stateStream
+                                    .map<Duration?>((n) =>
+                                        Duration(milliseconds: n.positionMs))
+                                : audio.positionStream,
+                            initialData: _useNativeProgress(snapshot, audio)
+                                ? Duration(
+                                    milliseconds: NativeAlarmsBridge
+                                        .instance.lastSnapshot.positionMs)
+                                : null,
                             builder: (context, posSnap) {
                               return StreamBuilder<Duration?>(
-                                stream: audio.durationStream,
+                                stream: _useNativeProgress(snapshot, audio)
+                                    ? NativeAlarmsBridge.instance.stateStream
+                                        .map<Duration?>((n) => Duration(
+                                            milliseconds: n.durationMs))
+                                    : audio.durationStream,
+                                initialData: _useNativeProgress(snapshot, audio)
+                                    ? Duration(
+                                        milliseconds: NativeAlarmsBridge
+                                            .instance.lastSnapshot.durationMs)
+                                    : null,
                                 builder: (context, durSnap) {
                                   final pos = posSnap.data ?? Duration.zero;
                                   final dur = durSnap.data ?? Duration.zero;
