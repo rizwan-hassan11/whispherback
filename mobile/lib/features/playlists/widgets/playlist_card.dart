@@ -269,7 +269,7 @@ class _PlaylistOverflowMenu extends StatelessWidget {
       icon: Icon(AppIcons.moreVertical, size: 20, color: theme.muted),
       padding: EdgeInsets.zero,
       splashRadius: 20,
-      color: theme.surface,
+      color: theme.menu,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       position: PopupMenuPosition.under,
       onSelected: (action) {

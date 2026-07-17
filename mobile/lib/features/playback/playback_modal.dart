@@ -21,6 +21,25 @@ bool _useNativeProgress(PlaybackSnapshot snapshot, AudioPlaybackService audio) {
       audio.currentPath == null;
 }
 
+Duration _resolveModalDuration({
+  required PlaybackSnapshot snapshot,
+  required Duration? streamDuration,
+  required bool useNative,
+}) {
+  final native = useNative ? NativeAlarmsBridge.instance.lastSnapshot : null;
+  final knownMs = snapshot.durationMs > 0
+      ? snapshot.durationMs
+      : (native != null && native.durationMs > 0 ? native.durationMs : 0);
+  final streamMs = streamDuration?.inMilliseconds ?? 0;
+  final looksLikeSilence = streamMs >= 9500 && streamMs <= 10500;
+  if (knownMs > 0 && (streamMs <= 0 || looksLikeSilence)) {
+    return Duration(milliseconds: knownMs);
+  }
+  if (streamMs > 0) return Duration(milliseconds: streamMs);
+  if (knownMs > 0) return Duration(milliseconds: knownMs);
+  return Duration.zero;
+}
+
 /// Fires [body] without awaiting and routes any thrown error to the zone
 /// handler instead of letting it crash the app. The buttons in the
 /// playback modal call into the coordinator which talks to native audio
@@ -232,7 +251,12 @@ class PlaybackModal extends ConsumerWidget {
                                     builder: (context, durSnap) {
                                       final rawPos =
                                           posSnap.data ?? Duration.zero;
-                                      final dur = durSnap.data ?? Duration.zero;
+                                      final dur = _resolveModalDuration(
+                                        snapshot: snapshot,
+                                        streamDuration: durSnap.data,
+                                        useNative:
+                                            _useNativeProgress(snapshot, audio),
+                                      );
                                       final maxMs = dur.inMilliseconds;
                                       final posMs = maxMs > 0
                                           ? rawPos.inMilliseconds

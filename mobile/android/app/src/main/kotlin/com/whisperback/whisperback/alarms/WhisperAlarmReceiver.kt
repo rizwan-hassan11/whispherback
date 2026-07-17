@@ -32,6 +32,7 @@ class WhisperAlarmReceiver : BroadcastReceiver() {
         const val EXTRA_CLIP_PATH = "clip_path"
         const val EXTRA_CLIP_TITLE = "clip_title"
         const val EXTRA_PLAYLIST_NAME = "playlist_name"
+        const val EXTRA_CLIP_QUEUE_JSON = "clip_queue_json"
         const val EXTRA_SLOT_EPOCH_MS = "slot_epoch_ms"
 
         // Round 23 — de-duplication window. On some OEMs (Vivo, Realme)
@@ -85,6 +86,7 @@ class WhisperAlarmReceiver : BroadcastReceiver() {
             val scheduleId = intent.getStringExtra(EXTRA_SCHEDULE_ID)
             val clipTitle = intent.getStringExtra(EXTRA_CLIP_TITLE) ?: "WhisperBack"
             val playlistName = intent.getStringExtra(EXTRA_PLAYLIST_NAME) ?: "Scheduled whisper"
+            val clipQueueJson = intent.getStringExtra(EXTRA_CLIP_QUEUE_JSON)
             val slotEpochMs = intent.getLongExtra(EXTRA_SLOT_EPOCH_MS, 0L)
             Log.i(
                 TAG,
@@ -125,6 +127,9 @@ class WhisperAlarmReceiver : BroadcastReceiver() {
                 putExtra(WhisperPlaybackService.EXTRA_CLIP_TITLE, clipTitle)
                 putExtra(WhisperPlaybackService.EXTRA_PLAYLIST_NAME, playlistName)
                 putExtra(WhisperPlaybackService.EXTRA_SCHEDULE_ID, scheduleId)
+                if (!clipQueueJson.isNullOrBlank()) {
+                    putExtra(WhisperPlaybackService.EXTRA_CLIP_QUEUE_JSON, clipQueueJson)
+                }
             }
 
             try {

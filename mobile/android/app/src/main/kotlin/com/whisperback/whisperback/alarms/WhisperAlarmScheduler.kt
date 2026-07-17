@@ -376,6 +376,7 @@ class WhisperAlarmScheduler private constructor(private val appContext: Context)
             putExtra(WhisperAlarmReceiver.EXTRA_CLIP_PATH, fire.clipPath)
             putExtra(WhisperAlarmReceiver.EXTRA_CLIP_TITLE, fire.clipTitle)
             putExtra(WhisperAlarmReceiver.EXTRA_PLAYLIST_NAME, fire.playlistName)
+            putExtra(WhisperAlarmReceiver.EXTRA_CLIP_QUEUE_JSON, fire.clipQueueJson)
             putExtra(WhisperAlarmReceiver.EXTRA_SLOT_EPOCH_MS, fire.fireEpochMs)
         }
         return PendingIntent.getBroadcast(
@@ -408,6 +409,7 @@ class WhisperAlarmScheduler private constructor(private val appContext: Context)
         val clipTitle: String,
         val playlistName: String,
         val fireEpochMs: Long,
+        val clipQueueJson: String = "",
     )
 
     private fun parseFires(json: String): List<Fire> {
@@ -432,9 +434,10 @@ class WhisperAlarmScheduler private constructor(private val appContext: Context)
             val clipPath = obj.optString("clipPath").takeIf { it.isNotBlank() } ?: return null
             val clipTitle = obj.optString("clipTitle").ifBlank { "WhisperBack" }
             val playlistName = obj.optString("playlistName").ifBlank { "Scheduled whisper" }
+            val clipQueueJson = obj.optString("clipQueueJson", "")
             val fireMs = obj.optLong("fireEpochMs", 0L)
             if (fireMs <= 0L) return null
-            Fire(scheduleId, clipPath, clipTitle, playlistName, fireMs)
+            Fire(scheduleId, clipPath, clipTitle, playlistName, fireMs, clipQueueJson)
         } catch (t: Throwable) {
             Log.e(TAG, "parseFire failed", t)
             null

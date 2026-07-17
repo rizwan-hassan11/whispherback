@@ -25,6 +25,28 @@ bool _useNativeProgress(PlaybackSnapshot snapshot, AudioPlaybackService audio) {
       audio.currentPath == null;
 }
 
+/// Prefer the known clip length from [PlaybackSnapshot.durationMs] so a brief
+/// leak of the 10-second silence keep-alive never flashes in the mini-player
+/// during next/previous source swaps.
+Duration _resolveDisplayDuration({
+  required PlaybackSnapshot snapshot,
+  required Duration? streamDuration,
+  NativePlaybackSnapshot? native,
+}) {
+  final knownMs = snapshot.durationMs > 0
+      ? snapshot.durationMs
+      : (native != null && native.durationMs > 0 ? native.durationMs : 0);
+  final streamMs = streamDuration?.inMilliseconds ?? 0;
+  // Silence keep-alive WAV is ~10s — reject it when we know the real clip.
+  final looksLikeSilence = streamMs >= 9500 && streamMs <= 10500;
+  if (knownMs > 0 && (streamMs <= 0 || looksLikeSilence)) {
+    return Duration(milliseconds: knownMs);
+  }
+  if (streamMs > 0) return Duration(milliseconds: streamMs);
+  if (knownMs > 0) return Duration(milliseconds: knownMs);
+  return Duration.zero;
+}
+
 /// Fires [body] without awaiting; routes any thrown future error to a
 /// logged no-op instead of letting it propagate as an unhandled
 /// future error (which the OS surfaces as "app crashed").
@@ -190,7 +212,14 @@ class MiniPlayerBar extends ConsumerWidget {
                                     : null,
                                 builder: (context, durSnap) {
                                   final pos = posSnap.data ?? Duration.zero;
-                                  final dur = durSnap.data ?? Duration.zero;
+                                  final dur = _resolveDisplayDuration(
+                                    snapshot: snapshot,
+                                    streamDuration: durSnap.data,
+                                    native: _useNativeProgress(snapshot, audio)
+                                        ? NativeAlarmsBridge
+                                            .instance.lastSnapshot
+                                        : null,
+                                  );
                                   final text = dur.inMilliseconds > 0
                                       ? '${_fmt(pos)} / ${_fmt(dur)}'
                                       : snapshot.playlistName ?? '';

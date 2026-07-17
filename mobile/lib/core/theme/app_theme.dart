@@ -282,6 +282,10 @@ class WhisperThemeExtension extends ThemeExtension<WhisperThemeExtension> {
   Color get foreground => isDark ? AppColors.soft : AppColors.lightSoft;
   Color get muted => isDark ? AppColors.muted : AppColors.lightMuted;
   Color get surface => isDark ? AppColors.surface : AppColors.lightSurface;
+
+  /// Opaque sheet/menu fill — NEVER use [surface]/[glass] for popups
+  /// (those are ~10% alpha and look "transparent" over list content).
+  Color get menu => isDark ? AppColors.cardElevated : AppColors.lightCard;
   Color get glass => isDark ? AppColors.glass : AppColors.lightGlass;
   Color get glassBorder =>
       isDark ? AppColors.glassBorder : AppColors.lightGlassBorder;

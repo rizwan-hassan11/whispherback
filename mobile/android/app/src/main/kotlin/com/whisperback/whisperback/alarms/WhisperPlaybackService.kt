@@ -62,6 +62,7 @@ class WhisperPlaybackService : Service() {
         const val EXTRA_CLIP_TITLE = "clip_title"
         const val EXTRA_PLAYLIST_NAME = "playlist_name"
         const val EXTRA_SCHEDULE_ID = "schedule_id"
+        const val EXTRA_CLIP_QUEUE_JSON = "clip_queue_json"
 
         // Distinct from notification_service.dart's _ongoingId (1), the
         // keep-alive service id (0x57424B), and audio_service's IDs.
@@ -70,7 +71,8 @@ class WhisperPlaybackService : Service() {
         private const val CHANNEL_NAME = "WhisperBack scheduled playback"
         private const val WAKE_LOCK_TAG = "WhisperBack:scheduledPlayback"
         // Hard cap so a corrupt clip can never lock the FG service open.
-        private const val MAX_PLAYBACK_MS = 10 * 60 * 1000L
+        // 30 minutes covers a full multi-clip playlist fire.
+        private const val MAX_PLAYBACK_MS = 30 * 60 * 1000L
 
         // Round 22 — single global state pref so the Dart side can poll
         // it on app launch/resume.
@@ -118,6 +120,8 @@ class WhisperPlaybackService : Service() {
     private var currentClipTitle: String = "WhisperBack"
     private var currentPlaylistName: String = "Scheduled whisper"
     private var currentScheduleId: String? = null
+    private var clipQueue: List<Pair<String, String>> = emptyList()
+    private var clipQueueIndex: Int = 0
 
     private val progressTicker = object : Runnable {
         override fun run() {
@@ -203,6 +207,8 @@ class WhisperPlaybackService : Service() {
         currentClipTitle = intent.getStringExtra(EXTRA_CLIP_TITLE) ?: "WhisperBack"
         currentPlaylistName = intent.getStringExtra(EXTRA_PLAYLIST_NAME) ?: "Scheduled whisper"
         currentScheduleId = intent.getStringExtra(EXTRA_SCHEDULE_ID)
+        clipQueue = parseClipQueue(intent.getStringExtra(EXTRA_CLIP_QUEUE_JSON), clipPath, currentClipTitle)
+        clipQueueIndex = 0
         playClip(clipPath)
     }
 
@@ -362,7 +368,21 @@ class WhisperPlaybackService : Service() {
                 }
             }
             player.setOnCompletionListener {
-                Log.i(TAG, "clip complete")
+                Log.i(TAG, "clip complete at queue index $clipQueueIndex / ${clipQueue.size}")
+                // Round 28: advance through the full playlist queue before
+                // tearing down. A multi-clip schedule used to stop after
+                // the first path in the alarm extras.
+                val nextIndex = clipQueueIndex + 1
+                if (nextIndex < clipQueue.size) {
+                    val (nextPath, nextTitle) = clipQueue[nextIndex]
+                    if (File(nextPath).exists()) {
+                        clipQueueIndex = nextIndex
+                        currentClipPath = nextPath
+                        currentClipTitle = nextTitle
+                        playClip(nextPath)
+                        return@setOnCompletionListener
+                    }
+                }
                 stopSelfSafely()
             }
             player.setOnErrorListener { _, what, extra ->
@@ -400,6 +420,29 @@ class WhisperPlaybackService : Service() {
         } catch (t: Throwable) {
             1.0f
         }
+    }
+
+    private fun parseClipQueue(
+        json: String?,
+        fallbackPath: String,
+        fallbackTitle: String,
+    ): List<Pair<String, String>> {
+        if (!json.isNullOrBlank()) {
+            try {
+                val arr = org.json.JSONArray(json)
+                val out = mutableListOf<Pair<String, String>>()
+                for (i in 0 until arr.length()) {
+                    val obj = arr.optJSONObject(i) ?: continue
+                    val path = obj.optString("path").takeIf { it.isNotBlank() } ?: continue
+                    val title = obj.optString("title").ifBlank { "WhisperBack" }
+                    out.add(path to title)
+                }
+                if (out.isNotEmpty()) return out
+            } catch (t: Throwable) {
+                Log.w(TAG, "parseClipQueue failed; using single clip", t)
+            }
+        }
+        return listOf(fallbackPath to fallbackTitle)
     }
 
     private fun writeState(state: String) {
@@ -517,7 +560,22 @@ class WhisperPlaybackService : Service() {
     private fun onAudioFocusChanged(focusChange: Int) {
         try {
             when (focusChange) {
-                AudioManager.AUDIOFOCUS_LOSS,
+                AudioManager.AUDIOFOCUS_LOSS -> {
+                    // Permanent loss (another app took media focus for good).
+                    // Pause and do NOT auto-resume — the user must tap play.
+                    val player = mediaPlayer ?: return
+                    if (player.isPlaying) {
+                        resumeAfterFocusGain = false
+                        stopProgressTicker()
+                        player.pause()
+                        writeProgress(
+                            player.currentPosition.toLong().coerceAtLeast(0L),
+                            currentDurationMs,
+                        )
+                        writeState(STATE_PAUSED)
+                        notifyListener(STATE_PAUSED)
+                    }
+                }
                 AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
                     val player = mediaPlayer ?: return
                     if (player.isPlaying) {

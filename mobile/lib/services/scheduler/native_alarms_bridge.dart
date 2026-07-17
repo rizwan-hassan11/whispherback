@@ -209,42 +209,43 @@ class NativeAlarmsBridge {
       return;
     }
 
-    // ── STAGE 1: resolve the first playable clip for each schedule. This
-    // is the only I/O-bound step; keep it OUTSIDE the fingerprint check
-    // so a fingerprint-hit still returns quickly, but INSIDE the
-    // projection loop so the fires we register point at real files.
-    final resolvedClips = <String, ({String path, String title})>{};
+    // ── STAGE 1: resolve ALL playable clips for each schedule so a
+    // scheduled fire can play the full playlist (not just the first clip).
+    final resolvedQueues = <String, List<({String path, String title})>>{};
     for (final schedule in enabled) {
       try {
         final list = await playlists.getClips(schedule.playlistId);
+        final queue = <({String path, String title})>[];
         for (final clip in list) {
           final path = clip.filePath;
           if (path.isEmpty) continue;
           if (!await File(path).exists()) continue;
-          resolvedClips[schedule.id] = (
+          queue.add((
             path: path,
             title: clip.title.isNotEmpty ? clip.title : 'WhisperBack',
-          );
-          break;
+          ));
+        }
+        if (queue.isNotEmpty) {
+          resolvedQueues[schedule.id] = queue;
         }
       } catch (e, st) {
         if (kDebugMode) {
           print(
-              'NativeAlarmsBridge: resolve clip for ${schedule.id} failed: $e\n$st');
+              'NativeAlarmsBridge: resolve clips for ${schedule.id} failed: $e\n$st');
         }
       }
     }
 
     // ── STAGE 2: structural fingerprint. Only these fields change the
     // alarm TABLE structure: schedule id, days, start/end, interval,
-    // playlist duration (drives `effectiveStepMinutes`), clip path
+    // playlist duration (drives `effectiveStepMinutes`), clip queue
     // (drives what the receiver actually plays), and active state.
     // We intentionally do NOT include `lastFired` — the alarm table
     // is invariant across fires that only shift the projection by
     // sub-second drift.
     final structural =
-        enabled.where((s) => resolvedClips.containsKey(s.id)).map((s) {
-      final clip = resolvedClips[s.id]!;
+        enabled.where((s) => resolvedQueues.containsKey(s.id)).map((s) {
+      final queue = resolvedQueues[s.id]!;
       return [
         s.id,
         s.daysMask,
@@ -252,7 +253,7 @@ class NativeAlarmsBridge {
         (s.endTime?.hour ?? -1) * 60 + (s.endTime?.minute ?? 0),
         s.intervalMinutes,
         s.playlistDurationMs ~/ 1000,
-        clip.path,
+        queue.map((c) => c.path).join(','),
       ].join(':');
     }).toList()
           ..sort();
@@ -280,8 +281,12 @@ class NativeAlarmsBridge {
     final fires = <Map<String, Object?>>[];
     final lastFired = ScheduleLastFiredStore.instance;
     for (final schedule in enabled) {
-      final clip = resolvedClips[schedule.id];
-      if (clip == null) continue;
+      final queue = resolvedQueues[schedule.id];
+      if (queue == null || queue.isEmpty) continue;
+      final first = queue.first;
+      final queueJson = jsonEncode([
+        for (final c in queue) {'path': c.path, 'title': c.title},
+      ]);
       var lastCompletion = lastFired.completion(schedule.id);
       var lastSlot = lastFired.slot(schedule.id);
       var added = 0;
@@ -298,8 +303,9 @@ class NativeAlarmsBridge {
         if (!next.isAfter(now)) break;
         fires.add({
           'scheduleId': schedule.id,
-          'clipPath': clip.path,
-          'clipTitle': clip.title,
+          'clipPath': first.path,
+          'clipTitle': first.title,
+          'clipQueueJson': queueJson,
           'playlistName': schedule.playlistName.isNotEmpty
               ? schedule.playlistName
               : 'WhisperBack',

@@ -299,6 +299,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                     PopupMenuButton<String>(
                       icon:
                           Icon(AppIcons.moreVertical, color: theme.foreground),
+                      color: theme.menu,
                       onSelected: (v) {
                         switch (v) {
                           case 'rename':

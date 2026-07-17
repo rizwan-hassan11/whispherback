@@ -25,6 +25,7 @@ class PlaybackSnapshot extends Equatable {
     this.isPlaying = false,
     this.shuffleEnabled = false,
     this.modalVisible = false,
+    this.durationMs = 0,
   });
 
   final AppPlaybackState state;
@@ -34,6 +35,12 @@ class PlaybackSnapshot extends Equatable {
   final bool isPlaying;
   final bool shuffleEnabled;
   final bool modalVisible;
+
+  /// Known clip length from the DB / native probe. The mini-player prefers
+  /// this over just_audio's durationStream during source swaps, because the
+  /// silence keep-alive is a 10-second WAV and briefly leaks into the
+  /// duration stream between clips (QA: "next flashes 0:10").
+  final int durationMs;
 
   bool get canPlay =>
       state == AppPlaybackState.activeIdle ||
@@ -48,6 +55,7 @@ class PlaybackSnapshot extends Equatable {
     bool? isPlaying,
     bool? shuffleEnabled,
     bool? modalVisible,
+    int? durationMs,
   }) {
     return PlaybackSnapshot(
       state: state ?? this.state,
@@ -57,6 +65,7 @@ class PlaybackSnapshot extends Equatable {
       isPlaying: isPlaying ?? this.isPlaying,
       shuffleEnabled: shuffleEnabled ?? this.shuffleEnabled,
       modalVisible: modalVisible ?? this.modalVisible,
+      durationMs: durationMs ?? this.durationMs,
     );
   }
 
@@ -69,5 +78,6 @@ class PlaybackSnapshot extends Equatable {
         isPlaying,
         shuffleEnabled,
         modalVisible,
+        durationMs,
       ];
 }

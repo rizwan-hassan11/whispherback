@@ -109,6 +109,12 @@ class PlaybackCoordinator {
   /// the user perceived "pause triggered next clip play".
   bool _userInitiatedPause = false;
 
+  /// Bumped on every skip / new `playFile` so a stale `ProcessingState.completed`
+  /// from the previous source (emitted during `setAudioSource` swaps) cannot
+  /// tear down the mini-player or jump ahead an extra track. QA: "tap next on
+  /// last clip hides the bar instead of wrapping to the first".
+  int _playbackGeneration = 0;
+
   /// Suppresses the `_userInitiatedPause = true` assignment inside
   /// `_syncPlayingSnapshot(false)` while a SYSTEM pause (sleep mode,
   /// prayer window, etc.) is going through `_handler.pause()`. Without
@@ -385,6 +391,9 @@ class PlaybackCoordinator {
             isPlaying: true,
             playlistName: native.playlistName ?? _snapshot.playlistName,
             clipTitle: native.clipTitle ?? _snapshot.clipTitle,
+            durationMs: native.durationMs > 0
+                ? native.durationMs
+                : _snapshot.durationMs,
           ));
         }
         return;
@@ -398,6 +407,9 @@ class PlaybackCoordinator {
             isPlaying: false,
             playlistName: native.playlistName ?? _snapshot.playlistName,
             clipTitle: native.clipTitle ?? _snapshot.clipTitle,
+            durationMs: native.durationMs > 0
+                ? native.durationMs
+                : _snapshot.durationMs,
           ));
         }
         return;
@@ -587,6 +599,8 @@ class PlaybackCoordinator {
     // if they had previously tapped pause. Clear the sentinel so the next
     // natural completion in the new clip behaves normally.
     _userInitiatedPause = false;
+    // Invalidate any in-flight completion from the clip we're leaving.
+    _playbackGeneration++;
     final playlistId = _snapshot.playlistId;
     if (playlistId == null) {
       // Library-queue context: walk through the currently shown clip list.
@@ -639,12 +653,24 @@ class PlaybackCoordinator {
     final nextIndex = next
         ? (currentIndex + 1) % clips.length
         : (currentIndex - 1 + clips.length) % clips.length;
-    await _playClipAtIndex(
+    // Walk forward/back from the target so a missing file never leaves the
+    // mini-player stranded mid-skip (which looked like "next hid the bar").
+    final played = await _advanceToNextPlayable(
       playlistId,
       clips,
       nextIndex,
       fromSchedule: fromSchedule,
     );
+    if (played == null && clips.isNotEmpty) {
+      // Absolute fallback: restart the first playable clip so next never
+      // feels like a stop.
+      await _advanceToNextPlayable(
+        playlistId,
+        clips,
+        0,
+        fromSchedule: fromSchedule,
+      );
+    }
   }
 
   Future<void> _playClipAtIndex(
@@ -659,6 +685,7 @@ class PlaybackCoordinator {
     if (!_isPlayablePath(clip.filePath)) return;
 
     final playlist = await _playlists.getById(playlistId);
+    _playbackGeneration++;
 
     try {
       await _audio.playFile(
@@ -686,6 +713,7 @@ class PlaybackCoordinator {
         isPlaying: true,
         shuffleEnabled: playlist?.shuffleEnabled ?? false,
         modalVisible: false,
+        durationMs: clip.durationMs,
       ),
     );
     await refreshScheduleNotifications?.call();
@@ -714,6 +742,10 @@ class PlaybackCoordinator {
   }
 
   Future<void> _onClipCompleted() async {
+    // Capture generation BEFORE yielding so a concurrent skip/next that
+    // bumps `_playbackGeneration` can invalidate this completion.
+    final generationAtStart = _playbackGeneration;
+
     // Race-window mitigation: on slow devices, just_audio's completion
     // event can land 1-2 frames BEFORE the user's pause tap reaches
     // `coordinator.pause()`. The sentinel below would still read false
@@ -724,6 +756,11 @@ class PlaybackCoordinator {
     // fix for the QA "pause triggers next clip" reproduction on Samsung
     // mid-range devices.
     await Future<void>.delayed(Duration.zero);
+
+    if (generationAtStart != _playbackGeneration) {
+      // A skip / new play superseded this completion — do nothing.
+      return;
+    }
 
     // If the user explicitly paused this clip, treat any completion event
     // that lands after the pause-tap as "finished at the paused position"
@@ -743,6 +780,26 @@ class PlaybackCoordinator {
     }
 
     if (_snapshot.state == AppPlaybackState.scheduledPlaying) {
+      // Round 28: play EVERY clip in the playlist for a scheduled fire,
+      // then finish. Previously we called `_finishScheduledClip` after
+      // the first clip — multi-clip schedules stopped after track 1.
+      final playlistId = _snapshot.playlistId;
+      if (playlistId != null) {
+        final clips = await _playlists.getClips(playlistId);
+        if (clips.isNotEmpty) {
+          final lastIndex = _playlistClipIndex ?? 0;
+          final nextIndex = lastIndex + 1;
+          if (nextIndex < clips.length) {
+            final played = await _advanceToNextPlayable(
+              playlistId,
+              clips,
+              nextIndex,
+              fromSchedule: true,
+            );
+            if (played != null) return;
+          }
+        }
+      }
       await _finishScheduledClip();
       return;
     }
@@ -773,11 +830,8 @@ class PlaybackCoordinator {
       return;
     }
 
-    // Sequential playlist: advance to the NEXT clip. The previous code called
-    // playPlaylist(...) which always picked clips.first — so a 3-clip playlist
-    // would replay track 1 forever instead of moving to track 2. This is the
-    // P0 client-visible bug. We also skip over any clip whose file is gone
-    // (sandbox corruption, deleted-on-disk) instead of stalling.
+    // Sequential playlist: advance to the NEXT clip, wrapping to the first
+    // after the last so "next" / natural end never hides the mini-player.
     final lastIndex = _playlistClipIndex ?? 0;
     final startIndex = (lastIndex + 1) % clips.length;
     final endIndex = await _advanceToNextPlayable(
@@ -818,6 +872,7 @@ class PlaybackCoordinator {
       final clip = clips[index];
       if (_isPlayablePath(clip.filePath)) {
         try {
+          _playbackGeneration++;
           await _audio.playFile(
             clip.filePath,
             title: clip.title,
@@ -839,6 +894,7 @@ class PlaybackCoordinator {
               isPlaying: true,
               shuffleEnabled: playlist?.shuffleEnabled ?? false,
               modalVisible: false,
+              durationMs: clip.durationMs,
             ),
           );
           await refreshScheduleNotifications?.call();
@@ -1168,6 +1224,7 @@ class PlaybackCoordinator {
     }
 
     try {
+      _playbackGeneration++;
       await _audio.playFile(
         clip.filePath,
         title: clip.title,
@@ -1204,6 +1261,7 @@ class PlaybackCoordinator {
         clipTitle: clip.title,
         isPlaying: true,
         shuffleEnabled: shuffle,
+        durationMs: clip.durationMs,
         modalVisible: false,
       ),
     );
@@ -1263,12 +1321,14 @@ class PlaybackCoordinator {
 
     // Optimistic: show the now-playing sheet instantly for snappy feedback.
     // playlistId is null so completion stops cleanly.
+    _playbackGeneration++;
     _emit(PlaybackSnapshot(
       state: AppPlaybackState.manualPlaying,
       playlistName: clip.title,
       clipTitle: clip.title,
       isPlaying: true,
       modalVisible: false,
+      durationMs: clip.durationMs,
     ));
 
     try {
