@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Runtime permission status for scheduling on Android 7–16.
 class AndroidSchedulingPermissions {
@@ -79,6 +80,33 @@ Future<AndroidSchedulingPermissions> ensureAndroidSchedulingPermissions({
 Future<bool> requestBatteryExemption() async {
   if (!Platform.isAndroid) return true;
   return _requestBatteryExemption();
+}
+
+/// SharedPreferences key that records we've asked for battery exemption once.
+const _batteryPromptedKey = 'battery_exemption_prompted_v1';
+
+/// Requests battery exemption **at most once** across the app's lifetime.
+///
+/// Requesting `ignoreBatteryOptimizations` opens a system settings screen on
+/// many OEMs — Samsung One UI / Xiaomi MIUI in particular route it to the
+/// "App battery usage" page. On those OEMs the permission status keeps
+/// reading as *denied* even AFTER the user allows background usage, so an
+/// unconditional request on every cold start re-opens that screen. When a
+/// scheduled alarm cold-starts the app, that pops the settings screen
+/// mid-playback and the clip pauses — exactly the QA report
+/// ("schedule plays a few seconds, then jumps to App battery usage, which
+/// already shows background usage ON"). Persisting a one-shot flag guarantees
+/// we only ever ask on the first eligible launch; afterwards the user manages
+/// it from the in-app Battery guide / system settings.
+Future<bool> requestBatteryExemptionOnce() async {
+  if (!Platform.isAndroid) return true;
+  final status = await Permission.ignoreBatteryOptimizations.status;
+  if (status.isGranted) return true;
+  final prefs = await SharedPreferences.getInstance();
+  if (prefs.getBool(_batteryPromptedKey) == true) return false;
+  await prefs.setBool(_batteryPromptedKey, true);
+  final result = await Permission.ignoreBatteryOptimizations.request();
+  return result.isGranted;
 }
 
 Future<bool> _requestBatteryExemption() async {

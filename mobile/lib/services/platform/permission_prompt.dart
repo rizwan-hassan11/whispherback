@@ -273,7 +273,8 @@ Future<void> runSchedulingSetupWizard(BuildContext context) async {
 
   await requestAppPermissionKind(AppPermissionKind.notifications);
   await requestAppPermissionKind(AppPermissionKind.exactAlarms);
-  await requestBatteryExemption();
+  // One-time only: never re-open the OEM battery screen on repeat runs.
+  await requestBatteryExemptionOnce();
 
   if (!context.mounted) return;
 
@@ -295,10 +296,12 @@ Future<void> runSchedulingSetupWizard(BuildContext context) async {
 
   perms = await ensureAndroidSchedulingPermissions();
   if (!perms.batteryUnrestricted && context.mounted) {
-    await ensurePermissionWithUi(
-      context,
-      kind: AppPermissionKind.batteryOptimization,
-    );
+    // One-time, best-effort. We do NOT auto-open the OEM battery screen on
+    // repeat runs — that caused the "toggle keeps jumping to App battery
+    // usage" nag on Samsung / Xiaomi (whose status false-negatives even
+    // after background usage is allowed). If it's still missing, the
+    // summary dialog below offers a single user-initiated "Open Settings".
+    await requestBatteryExemptionOnce();
   }
 
   if (!context.mounted) return;
@@ -317,4 +320,20 @@ Future<void> runSchedulingSetupWizard(BuildContext context) async {
 Future<bool> isSchedulingFullyReady() async {
   final perms = await ensureAndroidSchedulingPermissions();
   return perms.fullyReady;
+}
+
+/// Status-only check (does NOT prompt) of the CORE scheduling permissions:
+/// notifications + exact alarms.
+///
+/// Deliberately EXCLUDES battery optimization: its status reads as *denied*
+/// on several OEMs (Samsung / Xiaomi) even when the user has allowed
+/// background usage, so gating the Active-toggle flow on it would nag the
+/// user with the setup wizard (and the battery-settings redirect) on every
+/// single toggle. Battery is handled once at first launch and via the in-app
+/// Battery guide screen.
+Future<bool> isCoreSchedulingReady() async {
+  if (!Platform.isAndroid) return true;
+  final notif = await Permission.notification.status;
+  final alarm = await Permission.scheduleExactAlarm.status;
+  return notif.isGranted && (alarm.isGranted || alarm.isLimited);
 }

@@ -100,25 +100,40 @@ class _WhisperBackAppState extends ConsumerState<WhisperBackApp>
 
   Future<void> _initNotifications() async {
     await NotificationService.instance.init();
-    // Eager permission requests on cold start so the user is asked
+
+    // Detect an alarm-triggered cold start BEFORE requesting anything.
+    // Round 26: when a scheduled alarm cold-starts the app, a clip is about
+    // to play in the background and the user probably isn't even looking at
+    // the screen. We must NOT pop any permission/settings dialog here — doing
+    // so (especially the OEM battery-optimization screen) interrupts playback
+    // and yanks the user into system settings. This was the QA report
+    // "schedule plays a few seconds then pauses and redirects me to App
+    // battery usage". On alarm launches we skip all prompts and go straight
+    // to firing the schedule.
+    final fromAlarm =
+        await NotificationService.instance.launchedFromScheduleAlarm();
+
+    // Eager permission requests on a NORMAL cold start so the user is asked
     // ONCE up front instead of being routed through a manual "Finish
     // setup" chip. Each call is best-effort: a denial is fine — the
     // setup chip remains visible so the user can grant later. Order
     // matters: notification first (so the rest can post status), then
-    // exact alarms (Android 14+ requires user nav to Settings), then
-    // microphone (recording), and finally battery exemption (deep
-    // link to the OEM whitelist). Wrapped in try/catch so a buggy
-    // OEM permission handler can never block the app from rendering.
-    try {
-      await NotificationService.instance.requestPermissions();
-    } catch (_) {}
-    try {
-      await requestAppPermissionKind(AppPermissionKind.microphone);
-    } catch (_) {}
-    try {
-      await requestBatteryExemption();
-    } catch (_) {}
-    await ensureAndroidSchedulingPermissions();
+    // microphone (recording), and finally battery exemption — which is
+    // requested AT MOST ONCE ever (see requestBatteryExemptionOnce) so we
+    // never re-open the OEM battery screen on later launches.
+    if (!fromAlarm) {
+      try {
+        await NotificationService.instance.requestPermissions();
+      } catch (_) {}
+      try {
+        await requestAppPermissionKind(AppPermissionKind.microphone);
+      } catch (_) {}
+      try {
+        await requestBatteryExemptionOnce();
+      } catch (_) {}
+      await ensureAndroidSchedulingPermissions();
+    }
+
     await syncWhisperNotifications(
       appState: ref.read(appStateRepositoryProvider),
       schedules: ref.read(scheduleRepositoryProvider),
@@ -130,8 +145,6 @@ class _WhisperBackAppState extends ConsumerState<WhisperBackApp>
     // user who taps the alarm 3-10 minutes after it rang (because
     // their device was in their pocket) would see the engine
     // silently skip the slot and feel like nothing happened.
-    final fromAlarm =
-        await NotificationService.instance.launchedFromScheduleAlarm();
     await ScheduleEngineBinding.instance.fireNow(force: fromAlarm);
 
     // POST_NOTIFICATIONS is asked asynchronously by the OS dialog; the

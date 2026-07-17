@@ -258,8 +258,8 @@ void main() {
   group('Round 11 — eager permission requests on app launch', () {
     test(
         '`_initNotifications` proactively asks for microphone + battery + '
-        'exact-alarm permissions on cold start (was: only when the user '
-        'tapped the Finish-setup chip)', () {
+        'exact-alarm permissions on a NORMAL cold start (was: only when the '
+        'user tapped the Finish-setup chip)', () {
       final src = _readFile('lib/app.dart');
       expect(
         src,
@@ -268,17 +268,39 @@ void main() {
         reason: 'Microphone permission must be requested up front so the '
             'recorder works on the user\'s very first attempt.',
       );
+      // Round 26: battery exemption is now requested AT MOST ONCE (see
+      // requestBatteryExemptionOnce). The old unconditional
+      // `requestBatteryExemption()` on every cold start re-opened the OEM
+      // "App battery usage" screen — and when a scheduled alarm cold-started
+      // the app it popped mid-playback (the QA "schedule pauses and jumps to
+      // battery usage" bug). Pin the one-shot variant instead.
       expect(
         src,
-        contains('await requestBatteryExemption()'),
-        reason: 'Battery exemption must be asked at launch so background '
-            'scheduling has the best possible chance of surviving OEM '
+        contains('await requestBatteryExemptionOnce()'),
+        reason: 'Battery exemption must be asked ONCE at launch (not on every '
+            'cold start) so we never re-open the OEM battery screen — while '
+            'still giving background scheduling its best chance to survive '
             'doze enforcement.',
+      );
+      expect(
+        src,
+        isNot(contains('await requestBatteryExemption()')),
+        reason: 'The unconditional per-launch battery request must be gone — '
+            'it caused the repeated App-battery-usage redirect.',
       );
       expect(
         src,
         contains('await NotificationService.instance.requestPermissions()'),
         reason: 'Notification + exact-alarm requests must run at launch.',
+      );
+      // Round 26: on an alarm-triggered cold start we must NOT prompt at all
+      // (it interrupts background playback). Confirm the guard exists.
+      expect(
+        src,
+        contains('if (!fromAlarm) {'),
+        reason: 'Permission prompts must be skipped when the app is '
+            'cold-started by a scheduled alarm so playback is not interrupted '
+            'by a settings redirect.',
       );
     });
   });

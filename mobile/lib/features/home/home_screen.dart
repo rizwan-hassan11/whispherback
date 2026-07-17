@@ -164,19 +164,28 @@ class HomeScreen extends ConsumerWidget {
                                   final nowActive = await appState.isActive();
 
                                   if (nowActive && context.mounted) {
-                                    // CRITICAL: run the permission wizard
-                                    // FIRST so POST_NOTIFICATIONS and exact-
-                                    // alarm are granted BEFORE we attempt to
-                                    // post the persistent "active" status
-                                    // notification. Previously the sync ran
-                                    // first, the OS silently dropped the
-                                    // notification because the runtime
-                                    // permission was denied, and the user
-                                    // saw no notification bar even after
-                                    // granting the permission via the
-                                    // wizard a moment later — there was no
-                                    // re-sync afterwards.
-                                    await runSchedulingSetupWizard(context);
+                                    // Round 26: only run the guided permission
+                                    // wizard when a CORE scheduling permission
+                                    // (notifications / exact alarms) is
+                                    // actually missing. When everything is
+                                    // already granted this keeps the toggle
+                                    // instant — no intro snackbar, no
+                                    // permission round-trips, no OEM battery
+                                    // redirect — which is what makes repeated
+                                    // ON/OFF feel snappy. We deliberately do
+                                    // NOT gate on battery optimization, whose
+                                    // status false-negatives on Samsung /
+                                    // Xiaomi (see isCoreSchedulingReady).
+                                    //
+                                    // Running the wizard FIRST (when needed)
+                                    // still guarantees POST_NOTIFICATIONS and
+                                    // exact-alarm are granted BEFORE we post
+                                    // the persistent "active" status card.
+                                    final coreReady =
+                                        await isCoreSchedulingReady();
+                                    if (!coreReady && context.mounted) {
+                                      await runSchedulingSetupWizard(context);
+                                    }
                                     if (context.mounted &&
                                         !whisperAudioServiceBound) {
                                       await showAudioServiceUnavailableDialog(
