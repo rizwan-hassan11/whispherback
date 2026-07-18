@@ -1004,9 +1004,11 @@ class PlaybackCoordinator {
   /// fire so an OS-reclaimed FG service can't silently swallow the play.
   Future<void> ensureForegroundForSchedule() async {
     if (!await _appState.isActive()) return;
-    // Round 27/29: while native MediaPlayer owns the scheduled clip, the
-    // engine's 5-second heartbeat must NOT restart the Dart silence
-    // keep-alive — that restart was interrupting native audio mid-clip.
+    // Round 30: always re-poll prefs before the heartbeat may restart
+    // silence — lastSnapshot can lag Kotlin's KEY_NATIVE_ACTIVE write.
+    try {
+      await NativeAlarmsBridge.instance.fetchPlaybackState();
+    } catch (_) {}
     if (_nativeOwnsPlayback) return;
     try {
       await _audio.enterForeground();
@@ -1882,12 +1884,17 @@ class PlaybackCoordinator {
     if (kAdhanFeatureEnabled) {
       // Adhan voice is decoupled from the master Active toggle so users still
       // hear the call to prayer even when WhisperBack whispers are off.
-      final prayer = await _prayer.getCurrentPrayerWindow();
-      if (prayer != null && await _prayer.adhanEnabled()) {
-        final key = '${prayer.name}-${prayer.start.toIso8601String()}';
-        if (_lastAdhanWindowKey != key) {
-          _lastAdhanWindowKey = key;
-          unawaited(AdhanPlayer.instance.playFor(key));
+      // Round 30: never start Adhan over an in-flight scheduled whisper —
+      // AudioSession.setActive would steal focus and look like auto-pause.
+      final nativeOwns = _nativeOwnsPlayback;
+      if (!nativeOwns) {
+        final prayer = await _prayer.getCurrentPrayerWindow();
+        if (prayer != null && await _prayer.adhanEnabled()) {
+          final key = '${prayer.name}-${prayer.start.toIso8601String()}';
+          if (_lastAdhanWindowKey != key) {
+            _lastAdhanWindowKey = key;
+            unawaited(AdhanPlayer.instance.playFor(key));
+          }
         }
       }
     }
@@ -1901,23 +1908,10 @@ class PlaybackCoordinator {
 
     final sleep = await _sleep.getActive();
     if (_sleep.isSleepActive(sleep)) {
-      if (nativeOwns) {
-        // Pause native MediaPlayer but keep scheduledPlaying so the
-        // mini-player stays visible (sleepPaused hid the bar while
-        // audio was still owned by the FG service).
-        try {
-          await NativeAlarmsBridge.instance.pauseNative();
-        } catch (e, st) {
-          if (kDebugMode) {
-            debugPrint('refreshModeState: native sleep pause failed: $e\n$st');
-          }
-        }
-        _emit(_snapshot.copyWith(
-          state: AppPlaybackState.scheduledPlaying,
-          isPlaying: false,
-        ));
-        return;
-      }
+      // Round 30: never auto-pause an in-flight scheduled clip for sleep.
+      // Product contract — schedules only stop on completion or explicit
+      // user pause. Sleep still pauses Dart-side manual playback.
+      if (nativeOwns) return;
       await _systemPause();
       _emit(_snapshot.copyWith(
           state: AppPlaybackState.sleepPaused, isPlaying: false));
@@ -1927,20 +1921,7 @@ class PlaybackCoordinator {
     final prayer =
         kAdhanFeatureEnabled ? await _prayer.getCurrentPrayerWindow() : null;
     if (prayer != null) {
-      if (nativeOwns) {
-        try {
-          await NativeAlarmsBridge.instance.pauseNative();
-        } catch (e, st) {
-          if (kDebugMode) {
-            debugPrint('refreshModeState: native prayer pause failed: $e\n$st');
-          }
-        }
-        _emit(_snapshot.copyWith(
-          state: AppPlaybackState.scheduledPlaying,
-          isPlaying: false,
-        ));
-        return;
-      }
+      if (nativeOwns) return;
       await _systemPause();
       _emit(_snapshot.copyWith(
           state: AppPlaybackState.prayerPaused, isPlaying: false));

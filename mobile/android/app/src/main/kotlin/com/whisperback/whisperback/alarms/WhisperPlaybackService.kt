@@ -71,8 +71,9 @@ class WhisperPlaybackService : Service() {
         private const val CHANNEL_NAME = "WhisperBack scheduled playback"
         private const val WAKE_LOCK_TAG = "WhisperBack:scheduledPlayback"
         // Hard cap so a corrupt clip can never lock the FG service open.
-        // 30 minutes covers a full multi-clip playlist fire.
-        private const val MAX_PLAYBACK_MS = 30 * 60 * 1000L
+        // 2 hours covers long multi-clip playlist fires on slow devices.
+        private const val MAX_PLAYBACK_MS = 2 * 60 * 60 * 1000L
+        private const val WATCHDOG_INTERVAL_MS = 2_000L
 
         // Round 22 — single global state pref so the Dart side can poll
         // it on app launch/resume.
@@ -119,12 +120,23 @@ class WhisperPlaybackService : Service() {
     private var currentDurationMs: Long = 0L
     private var resumeAfterFocusGain: Boolean = false
 
+    /// True ONLY after an explicit user pause (notification / mini-player /
+    /// Dart pauseNative). Focus-loss, OEM ducking, and silence keep-alive
+    /// must NEVER set this — Round 30 anti-auto-pause contract.
+    private var userPaused: Boolean = false
+
+    /// True while we intend the clip to be audible (between prepare/start
+    /// and completion / user pause / stop). Watchdog uses this to restart
+    /// MediaPlayer if an OEM silently stops it.
+    private var wantPlaying: Boolean = false
+
     private var currentClipPath: String? = null
     private var currentClipTitle: String = "WhisperBack"
     private var currentPlaylistName: String = "Scheduled whisper"
     private var currentScheduleId: String? = null
     private var clipQueue: List<Pair<String, String>> = emptyList()
     private var clipQueueIndex: Int = 0
+    private var errorRestarts: Int = 0
 
     private val progressTicker = object : Runnable {
         override fun run() {
@@ -136,11 +148,23 @@ class WhisperPlaybackService : Service() {
                     // Lightweight progress push so the mini-player scrubber
                     // stays honest without requiring a full state transition.
                     notifyListener(STATE_PLAYING)
+                    renewWakeLockIfNeeded()
                 }
             } catch (t: Throwable) {
                 Log.w(TAG, "progressTicker failed", t)
             }
             progressHandler?.postDelayed(this, 500L)
+        }
+    }
+
+    private val playbackWatchdog = object : Runnable {
+        override fun run() {
+            try {
+                ensureStillPlaying("watchdog")
+            } catch (t: Throwable) {
+                Log.w(TAG, "playbackWatchdog failed", t)
+            }
+            progressHandler?.postDelayed(this, WATCHDOG_INTERVAL_MS)
         }
     }
 
@@ -180,15 +204,29 @@ class WhisperPlaybackService : Service() {
                     stopSelfSafely()
                 }
                 else -> {
-                    Log.w(TAG, "unknown action ${intent?.action}; stopping")
-                    stopSelfSafely()
+                    // Round 30: null/unknown action must NOT tear down an
+                    // in-flight clip. OEMs redeliver the service with a
+                    // null Intent after process reclaim — stopping here
+                    // was one auto-pause / silent-kill path.
+                    if (mediaPlayer != null) {
+                        Log.w(
+                            TAG,
+                            "unknown action ${intent?.action}; keeping current playback",
+                        )
+                        ensureStillPlaying("onStartCommand-null")
+                    } else {
+                        Log.w(TAG, "unknown action ${intent?.action}; no player")
+                    }
                 }
             }
         } catch (t: Throwable) {
             Log.e(TAG, "onStartCommand failed", t)
-            stopSelfSafely()
+            // Don't stopSelf if we still have a live player — preserve audio.
+            if (mediaPlayer == null) {
+                stopSelfSafely()
+            }
         }
-        return START_NOT_STICKY
+        return START_STICKY
     }
 
     private fun handlePlayCommand(intent: Intent) {
@@ -214,32 +252,35 @@ class WhisperPlaybackService : Service() {
         clipQueueIndex = 0
         // Stamp native-active BEFORE prepareAsync so a concurrent Dart
         // enterForeground / heartbeat cannot restart silence in the gap.
+        userPaused = false
+        wantPlaying = true
+        errorRestarts = 0
         writeState(STATE_PLAYING)
         playClip(clipPath)
     }
 
     private fun handlePauseCommand() {
         try {
+            // Explicit user pause — the ONLY path that may leave the
+            // player paused without the watchdog restarting it.
+            userPaused = true
+            wantPlaying = false
+            resumeAfterFocusGain = false
             val player = mediaPlayer
             if (player == null) {
                 Log.w(TAG, "pause requested with no active player")
-                // Still flip the notification so the shade never shows a
-                // dead Pause action after focus-loss already paused us.
                 postPlaybackNotification(isPlaying = false)
                 writeState(STATE_PAUSED)
                 notifyListener(STATE_PAUSED)
                 return
             }
             stopProgressTicker()
+            stopWatchdog()
             if (player.isPlaying) {
                 player.pause()
             }
             writeProgress(player.currentPosition.toLong().coerceAtLeast(0L), currentDurationMs)
             writeState(STATE_PAUSED)
-            // Idempotent: always rebuild the shade with Resume, even if
-            // the player was already paused by audio-focus loss. Without
-            // this the QA "notification Pause does nothing" reproduced —
-            // shade still showed Pause while MediaPlayer was already paused.
             postPlaybackNotification(isPlaying = false)
             notifyListener(STATE_PAUSED)
         } catch (t: Throwable) {
@@ -249,14 +290,16 @@ class WhisperPlaybackService : Service() {
 
     private fun handleResumeCommand() {
         try {
+            userPaused = false
+            wantPlaying = true
             val player = mediaPlayer ?: return run {
                 Log.w(TAG, "resume requested with no active player")
             }
             if (player.isPlaying) {
-                // Already playing — still ensure the shade shows Pause.
                 postPlaybackNotification(isPlaying = true)
                 writeState(STATE_PLAYING)
                 notifyListener(STATE_PLAYING)
+                startWatchdog()
                 return
             }
             if (!requestAudioFocus()) {
@@ -265,6 +308,7 @@ class WhisperPlaybackService : Service() {
             player.start()
             writeState(STATE_PLAYING)
             startProgressTicker()
+            startWatchdog()
             postPlaybackNotification(isPlaying = true)
             notifyListener(STATE_PLAYING)
         } catch (t: Throwable) {
@@ -323,9 +367,12 @@ class WhisperPlaybackService : Service() {
     private fun playClip(clipPath: String) {
         // Stop any clip already playing — second alarm wins.
         stopProgressTicker()
+        stopWatchdog()
         releasePlayer()
         currentDurationMs = 0L
         resumeAfterFocusGain = false
+        userPaused = false
+        wantPlaying = true
         acquireWakeLock()
         if (!requestAudioFocus()) {
             Log.w(TAG, "audio focus denied; playing anyway (best effort)")
@@ -334,23 +381,25 @@ class WhisperPlaybackService : Service() {
         val player = MediaPlayer()
         try {
             // Round 22 — USAGE_MEDIA + CONTENT_TYPE_MUSIC + STREAM_MUSIC.
-            // The user reported "schedule plays at full volume although
-            // I set my volume low" — alarm-class audio bypasses the
-            // media volume slider and uses the alarm stream (typically
-            // 100 %). Whispers are music, not an alarm sound, so they
-            // must follow the user's media volume just like any other
-            // playback.
             player.setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_MEDIA)
                     .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
                     .build(),
             )
+            // Round 30: MediaPlayer-owned wake mode + service wake lock.
+            try {
+                player.setWakeMode(applicationContext, PowerManager.PARTIAL_WAKE_LOCK)
+            } catch (t: Throwable) {
+                Log.w(TAG, "setWakeMode failed", t)
+            }
             player.setDataSource(this, Uri.fromFile(File(clipPath)))
             player.setOnPreparedListener { mp ->
                 try {
-                    // Apply user volume on every prepare; defaults to 1.0
-                    // so existing installs see no behaviour change.
+                    if (userPaused) {
+                        Log.i(TAG, "prepared but user already paused; not starting")
+                        return@setOnPreparedListener
+                    }
                     val vol = readUserVolume()
                     mp.setVolume(vol, vol)
                     currentDurationMs = try {
@@ -359,11 +408,12 @@ class WhisperPlaybackService : Service() {
                         0L
                     }
                     writeProgress(0L, currentDurationMs)
+                    wantPlaying = true
                     mp.start()
                     writeState(STATE_PLAYING)
                     startProgressTicker()
+                    startWatchdog()
                     notifyListener(STATE_PLAYING)
-                    // Re-post with isPlaying=true so PAUSE action is visible.
                     val notification = buildNotification(
                         title = currentClipTitle,
                         playlistName = currentPlaylistName,
@@ -379,9 +429,6 @@ class WhisperPlaybackService : Service() {
             }
             player.setOnCompletionListener {
                 Log.i(TAG, "clip complete at queue index $clipQueueIndex / ${clipQueue.size}")
-                // Round 28: advance through the full playlist queue before
-                // tearing down. A multi-clip schedule used to stop after
-                // the first path in the alarm extras.
                 val nextIndex = clipQueueIndex + 1
                 if (nextIndex < clipQueue.size) {
                     val (nextPath, nextTitle) = clipQueue[nextIndex]
@@ -393,28 +440,27 @@ class WhisperPlaybackService : Service() {
                         return@setOnCompletionListener
                     }
                 }
+                wantPlaying = false
                 stopSelfSafely()
             }
             player.setOnErrorListener { _, what, extra ->
                 Log.e(TAG, "MediaPlayer error what=$what extra=$extra")
+                if (!userPaused && wantPlaying && errorRestarts < 1) {
+                    errorRestarts++
+                    try {
+                        Log.w(TAG, "restarting clip after MediaPlayer error")
+                        playClip(clipPath)
+                        return@setOnErrorListener true
+                    } catch (t: Throwable) {
+                        Log.e(TAG, "error-path restart failed", t)
+                    }
+                }
+                wantPlaying = false
                 stopSelfSafely()
                 true
             }
             player.prepareAsync()
             mediaPlayer = player
-
-            // Safety timeout: tear down if a corrupt clip runs >10 minutes.
-            android.os.Handler(mainLooper).postDelayed(
-                {
-                    try {
-                        if (mediaPlayer === player && player.isPlaying) {
-                            Log.w(TAG, "MAX_PLAYBACK_MS reached; stopping")
-                            stopSelfSafely()
-                        }
-                    } catch (_: Throwable) {}
-                },
-                MAX_PLAYBACK_MS,
-            )
         } catch (t: Throwable) {
             Log.e(TAG, "playClip setup failed", t)
             try { player.release() } catch (_: Throwable) {}
@@ -530,16 +576,14 @@ class WhisperPlaybackService : Service() {
     }
 
     /**
-     * Round 27 — permanent media focus for the full clip lifetime.
+     * Round 30 — scheduled whispers must NOT pause on audio-focus loss.
      *
-     * The previous `AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` +
-     * `setWillPauseWhenDucked(true)` was wrong for multi-minute whispers:
-     * transient focus is designed for short sounds (notifications), and
-     * several OEMs (Samsung One UI / Xiaomi MIUI / Vivo) reclaim it after
-     * a few seconds — which is exactly the QA report "schedule plays a
-     * few seconds then pauses by itself". Permanent `AUDIOFOCUS_GAIN`
-     * holds for the whole clip, and the focus-change listener pauses /
-     * resumes cleanly when a phone call or other app briefly takes over.
+     * Samsung / Xiaomi / Vivo fire AUDIOFOCUS_LOSS_TRANSIENT for
+     * notifications, assistant blips, and even our own silence keep-alive.
+     * Pausing there left the clip stuck paused when GAIN never arrived —
+     * the exact "auto pause" QA report. Product contract: only stop on
+     * clip completion or an explicit user pause/stop. Focus changes only
+     * duck volume; the watchdog restarts if an OEM still mutes the player.
      */
     private fun requestAudioFocus(): Boolean {
         val mgr = audioManager ?: return false
@@ -576,64 +620,82 @@ class WhisperPlaybackService : Service() {
     private fun onAudioFocusChanged(focusChange: Int) {
         try {
             when (focusChange) {
-                AudioManager.AUDIOFOCUS_LOSS -> {
-                    // Permanent loss (another app took media focus for good).
-                    // Pause and do NOT auto-resume — the user must tap play.
-                    val player = mediaPlayer ?: return
-                    if (player.isPlaying) {
-                        resumeAfterFocusGain = false
-                        stopProgressTicker()
-                        player.pause()
-                        writeProgress(
-                            player.currentPosition.toLong().coerceAtLeast(0L),
-                            currentDurationMs,
-                        )
-                        writeState(STATE_PAUSED)
-                        postPlaybackNotification(isPlaying = false)
-                        notifyListener(STATE_PAUSED)
-                    }
-                }
-                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                    val player = mediaPlayer ?: return
-                    if (player.isPlaying) {
-                        resumeAfterFocusGain = true
-                        stopProgressTicker()
-                        player.pause()
-                        writeProgress(
-                            player.currentPosition.toLong().coerceAtLeast(0L),
-                            currentDurationMs,
-                        )
-                        writeState(STATE_PAUSED)
-                        postPlaybackNotification(isPlaying = false)
-                        notifyListener(STATE_PAUSED)
-                    }
-                }
-                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                    // Soft duck — keep playing at reduced volume.
+                AudioManager.AUDIOFOCUS_LOSS,
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK,
+                -> {
+                    // Duck only — NEVER pause. Auto-pause on focus loss was
+                    // the #1 cause of mid-schedule silence on OEM devices.
+                    Log.i(TAG, "audio focus change=$focusChange; ducking (no pause)")
                     try {
-                        mediaPlayer?.setVolume(0.3f, 0.3f)
+                        mediaPlayer?.setVolume(0.35f, 0.35f)
                     } catch (_: Throwable) {}
+                    // Kick the watchdog so if the OEM still stopped the
+                    // player underneath us we restart within 2s.
+                    ensureStillPlaying("focus-loss-$focusChange")
                 }
                 AudioManager.AUDIOFOCUS_GAIN -> {
                     try {
                         val vol = readUserVolume()
                         mediaPlayer?.setVolume(vol, vol)
                     } catch (_: Throwable) {}
-                    if (resumeAfterFocusGain) {
-                        resumeAfterFocusGain = false
-                        val player = mediaPlayer ?: return
-                        if (!player.isPlaying) {
-                            player.start()
-                            writeState(STATE_PLAYING)
-                            startProgressTicker()
-                            postPlaybackNotification(isPlaying = true)
-                            notifyListener(STATE_PLAYING)
-                        }
-                    }
+                    resumeAfterFocusGain = false
+                    ensureStillPlaying("focus-gain")
                 }
             }
         } catch (t: Throwable) {
             Log.e(TAG, "onAudioFocusChanged failed", t)
+        }
+    }
+
+    private fun startWatchdog() {
+        if (progressHandler == null) {
+            progressHandler = android.os.Handler(mainLooper)
+        }
+        progressHandler?.removeCallbacks(playbackWatchdog)
+        progressHandler?.postDelayed(playbackWatchdog, WATCHDOG_INTERVAL_MS)
+    }
+
+    private fun stopWatchdog() {
+        progressHandler?.removeCallbacks(playbackWatchdog)
+    }
+
+    /**
+     * If we intend to be playing and the user did not pause, but
+     * MediaPlayer is not playing, restart it. Covers OEM silent stops,
+     * focus races with Dart silence, and Doze quirks.
+     */
+    private fun ensureStillPlaying(reason: String) {
+        if (userPaused || !wantPlaying) return
+        val player = mediaPlayer ?: return
+        try {
+            if (player.isPlaying) return
+            Log.w(TAG, "ensureStillPlaying($reason): restarting MediaPlayer")
+            if (!requestAudioFocus()) {
+                Log.w(TAG, "ensureStillPlaying: focus denied; starting anyway")
+            }
+            try {
+                val vol = readUserVolume()
+                player.setVolume(vol, vol)
+            } catch (_: Throwable) {}
+            player.start()
+            writeState(STATE_PLAYING)
+            startProgressTicker()
+            postPlaybackNotification(isPlaying = true)
+            notifyListener(STATE_PLAYING)
+        } catch (t: Throwable) {
+            Log.e(TAG, "ensureStillPlaying($reason) failed", t)
+        }
+    }
+
+    private fun renewWakeLockIfNeeded() {
+        try {
+            val lock = wakeLock
+            if (lock == null || !lock.isHeld) {
+                acquireWakeLock()
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "renewWakeLockIfNeeded failed", t)
         }
     }
 
@@ -689,7 +751,10 @@ class WhisperPlaybackService : Service() {
 
     private fun stopSelfSafely() {
         try {
+            wantPlaying = false
+            userPaused = false
             stopProgressTicker()
+            stopWatchdog()
             releasePlayer()
             abandonAudioFocus()
             releaseWakeLock()
@@ -713,7 +778,9 @@ class WhisperPlaybackService : Service() {
 
     override fun onDestroy() {
         try {
+            wantPlaying = false
             stopProgressTicker()
+            stopWatchdog()
             releasePlayer()
             abandonAudioFocus()
             releaseWakeLock()
@@ -775,7 +842,9 @@ class WhisperPlaybackService : Service() {
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setDeleteIntent(stopPI)
+            // Round 30: do NOT attach a deleteIntent that STOPs playback.
+            // Some OEMs auto-dismiss / recreate ongoing notifications and
+            // were killing the MediaPlayer mid-clip.
         if (isPlaying) {
             builder.addAction(
                 NotificationCompat.Action(

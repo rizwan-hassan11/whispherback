@@ -1038,6 +1038,11 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   /// schedule engine was dead inside 60 s of the user swiping the app.
   @override
   Future<void> onTaskRemoved() async {
+    // Round 30: never restart ExoPlayer silence under native MediaPlayer.
+    if (_silenceSuspendedForExternal ||
+        NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
+      return;
+    }
     if (_keepAlive && !_playingClip) {
       try {
         playbackState.add(
@@ -1071,6 +1076,10 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   ///     so the service tears down cleanly.
   @override
   Future<void> onNotificationDeleted() async {
+    if (_silenceSuspendedForExternal ||
+        NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
+      return;
+    }
     if (_keepAlive) {
       try {
         await _startIdleKeepAlive();
