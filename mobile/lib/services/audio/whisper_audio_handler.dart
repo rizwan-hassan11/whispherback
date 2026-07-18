@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 
 import '../../l10n/runtime_copy.dart';
+import '../scheduler/native_alarms_bridge.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -267,6 +268,12 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     // Round 27: native scheduled playback owns the media stream —
     // do NOT restart the silence loop underneath it.
     if (_silenceSuspendedForExternal) return;
+    // Round 29: prefs / last bridge snapshot may say native is active
+    // before Dart's suspendSilence flag flips (cold start race).
+    if (NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
+      _silenceSuspendedForExternal = true;
+      return;
+    }
     // Round 15: idempotent — skip the silence-loop rebuild when the
     // loop is ALREADY running. Without this guard, the engine's 5-
     // second heartbeat (Round 14) would re-run `setAudioSource(silence)`
@@ -289,6 +296,10 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> _startIdleKeepAlive() async {
     if (_playingClip) return;
     if (_silenceSuspendedForExternal) return;
+    if (NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
+      _silenceSuspendedForExternal = true;
+      return;
+    }
     // Up to 3 attempts with a short backoff between each. The first
     // attempt sometimes lands BEFORE the system audio focus grant
     // completes on cold start (Samsung Exynos firmware in particular),
@@ -373,6 +384,10 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> updateActiveSessionInfo() async {
     if (_playingClip) return;
     if (_silenceSuspendedForExternal) return;
+    if (NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
+      _silenceSuspendedForExternal = true;
+      return;
+    }
     if (_keepAlive && !_player.playing) {
       await _startIdleKeepAlive();
     }

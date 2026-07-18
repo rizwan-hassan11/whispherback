@@ -279,13 +279,19 @@ void main() {
       final src = _readFile('lib/services/audio/whisper_audio_handler.dart');
       final idx = src.indexOf('Future<void> enterForeground()');
       expect(idx, greaterThan(0));
-      final body = src.substring(idx, idx + 800);
+      final body = src.substring(idx, idx + 1600);
       expect(
         body,
         contains('_keepAliveRunning && _player.playing'),
         reason: 'enterForeground must skip the silence-loop rebuild '
             'when the loop is already running, so the engine\'s 5-'
             'second heartbeat does not thrash the audio session.',
+      );
+      expect(
+        body,
+        contains('lastSnapshot.isNativeActive'),
+        reason: 'Round 29: enterForeground must refuse silence while '
+            'native MediaPlayer owns a scheduled clip.',
       );
     });
   });

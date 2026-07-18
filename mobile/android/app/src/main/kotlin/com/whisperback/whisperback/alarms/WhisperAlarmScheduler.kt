@@ -243,6 +243,7 @@ class WhisperAlarmScheduler private constructor(private val appContext: Context)
                             clipTitle = last.clipTitle,
                             playlistName = last.playlistName,
                             fireEpochMs = next,
+                            clipQueueJson = last.clipQueueJson,
                         )
                     )
                     added++
@@ -262,6 +263,9 @@ class WhisperAlarmScheduler private constructor(private val appContext: Context)
                     .put("clipTitle", f.clipTitle)
                     .put("playlistName", f.playlistName)
                     .put("fireEpochMs", f.fireEpochMs)
+                if (f.clipQueueJson.isNotBlank()) {
+                    obj.put("clipQueueJson", f.clipQueueJson)
+                }
                 arr.put(obj)
             }
             arr.toString()
@@ -279,7 +283,11 @@ class WhisperAlarmScheduler private constructor(private val appContext: Context)
         val ids = mutableListOf<Int>()
         for (fire in fires) {
             if (registered >= MAX_ALARMS) break
-            if (fire.fireEpochMs <= now) continue
+            // Round 29: allow fires up to 2 minutes in the past so a
+            // grace-window "now" slot still gets a PendingIntent (the OS
+            // delivers it immediately). Previously `<= now` silently
+            // dropped the current slot when Active was toggled mid-minute.
+            if (fire.fireEpochMs < now - 2 * 60 * 1000L) continue
             val requestId = REQUEST_ID_BASE + registered
             val ok = registerOne(requestId, fire)
             if (ok) {

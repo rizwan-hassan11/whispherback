@@ -59,13 +59,16 @@ class _WhisperBackAppState extends ConsumerState<WhisperBackApp>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       ScheduleEngineBinding.instance.fireNow();
-      // Round 22 — when the user opens the app, ask the native
-      // playback service whether a scheduled clip is mid-flight so the
-      // mini-player lights up immediately (rather than waiting for the
-      // next state transition).
-      unawaited(NativeAlarmsBridge.instance.fetchPlaybackState());
-      // Re-request permissions if the user changed them in Settings.
-      unawaited(_refreshPermissionsAndSync());
+      // Round 29: await native playback poll BEFORE re-syncing the
+      // keep-alive / schedule card. Parallel fetch+sync used to restart
+      // silence under an in-flight MediaPlayer and hide the mini-player.
+      unawaited(() async {
+        try {
+          await NativeAlarmsBridge.instance.fetchPlaybackState();
+        } catch (_) {}
+        if (!mounted) return;
+        await _refreshPermissionsAndSync();
+      }());
     }
   }
 

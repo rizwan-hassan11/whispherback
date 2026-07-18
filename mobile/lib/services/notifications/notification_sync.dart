@@ -113,11 +113,17 @@ Future<void> syncWhisperNotifications({
     if (active) {
       // Refresh the silent keep-alive (best-effort — failures must not
       // block the visible notification below).
-      try {
-        await handler.updateActiveSessionInfo();
-      } catch (e) {
-        if (kDebugMode) {
-          debugPrint('updateActiveSessionInfo failed (handled): $e');
+      // Round 29: never restart silence while native MediaPlayer owns
+      // the scheduled clip — that race auto-paused schedules.
+      final nativeActive =
+          NativeAlarmsBridge.instance.lastSnapshot.isNativeActive;
+      if (!nativeActive) {
+        try {
+          await handler.updateActiveSessionInfo();
+        } catch (e) {
+          if (kDebugMode) {
+            debugPrint('updateActiveSessionInfo failed (handled): $e');
+          }
         }
       }
       // Round 21: ALWAYS publish the WhisperBack ongoing schedule card

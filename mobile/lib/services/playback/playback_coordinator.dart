@@ -285,15 +285,6 @@ class PlaybackCoordinator {
         modalVisible: false,
       ),
     );
-    // Restore the foreground keep-alive after a cold start if Active.
-    if (active) {
-      // Round 18: ALSO restart the native keep-alive service. If the
-      // process was killed and the user just relaunched the app from
-      // the launcher, the native service is no longer running — we
-      // need to bring it back so background scheduling works.
-      await KeepAliveService.start();
-      await _audio.enterForeground();
-    }
     _playerSub = _audio.playerStateStream.listen(
       _onPlayerState,
       onError: (Object e, StackTrace st) {
@@ -319,12 +310,51 @@ class PlaybackCoordinator {
         }
       },
     );
-    // Cold-start poll: if a scheduled clip is mid-flight (the user opened
-    // the app while it was playing), pull the snapshot now so we don't
-    // have to wait for the next transition event.
-    unawaited(NativeAlarmsBridge.instance.fetchPlaybackState());
+    // Round 29: poll native BEFORE starting silence keep-alive. Cold-start
+    // used to call enterForeground first, which briefly grabbed focus and
+    // paused the in-flight MediaPlayer — then the mini-player never lit
+    // because scheduledPlaying was overwritten by activeIdle.
+    NativePlaybackSnapshot? native;
+    try {
+      native = await NativeAlarmsBridge.instance.fetchPlaybackState();
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint('initialize: fetchPlaybackState failed: $e\n$st');
+      }
+    }
+    if (native != null && native.isNativeActive) {
+      _nativeScheduledActive = true;
+      _nativeActiveScheduleId = native.scheduleId;
+      try {
+        await _audio.suspendSilenceForExternalPlayback();
+      } catch (e, st) {
+        if (kDebugMode) {
+          debugPrint('initialize: suspendSilence failed: $e\n$st');
+        }
+      }
+      _emit(PlaybackSnapshot(
+        state: AppPlaybackState.scheduledPlaying,
+        isPlaying: native.isPlaying,
+        playlistName: native.playlistName ?? 'WhisperBack',
+        clipTitle: native.clipTitle ?? 'Scheduled whisper',
+        durationMs: native.durationMs,
+        modalVisible: false,
+      ));
+    } else if (active) {
+      // Round 18: ALSO restart the native keep-alive service. If the
+      // process was killed and the user just relaunched the app from
+      // the launcher, the native service is no longer running — we
+      // need to bring it back so background scheduling works.
+      await KeepAliveService.start();
+      await _audio.enterForeground();
+    }
     startModeMonitoring();
   }
+
+  /// Native FG MediaPlayer owns the session (playing or paused).
+  bool get _nativeOwnsPlayback =>
+      _nativeScheduledActive ||
+      NativeAlarmsBridge.instance.lastSnapshot.isNativeActive;
 
   /// Schedule id native is currently playing. Cached so the idle
   /// transition can stamp the completion into the right store bucket
@@ -389,8 +419,12 @@ class PlaybackCoordinator {
           _emit(_snapshot.copyWith(
             state: AppPlaybackState.scheduledPlaying,
             isPlaying: true,
-            playlistName: native.playlistName ?? _snapshot.playlistName,
-            clipTitle: native.clipTitle ?? _snapshot.clipTitle,
+            playlistName: native.playlistName ??
+                _snapshot.playlistName ??
+                'WhisperBack',
+            clipTitle: native.clipTitle ??
+                _snapshot.clipTitle ??
+                'Scheduled whisper',
             durationMs: native.durationMs > 0
                 ? native.durationMs
                 : _snapshot.durationMs,
@@ -405,8 +439,12 @@ class PlaybackCoordinator {
           _emit(_snapshot.copyWith(
             state: AppPlaybackState.scheduledPlaying,
             isPlaying: false,
-            playlistName: native.playlistName ?? _snapshot.playlistName,
-            clipTitle: native.clipTitle ?? _snapshot.clipTitle,
+            playlistName: native.playlistName ??
+                _snapshot.playlistName ??
+                'WhisperBack',
+            clipTitle: native.clipTitle ??
+                _snapshot.clipTitle ??
+                'Scheduled whisper',
             durationMs: native.durationMs > 0
                 ? native.durationMs
                 : _snapshot.durationMs,
@@ -970,10 +1008,10 @@ class PlaybackCoordinator {
   /// fire so an OS-reclaimed FG service can't silently swallow the play.
   Future<void> ensureForegroundForSchedule() async {
     if (!await _appState.isActive()) return;
-    // Round 27: while native MediaPlayer owns the scheduled clip, the
+    // Round 27/29: while native MediaPlayer owns the scheduled clip, the
     // engine's 5-second heartbeat must NOT restart the Dart silence
     // keep-alive — that restart was interrupting native audio mid-clip.
-    if (_nativeScheduledActive) return;
+    if (_nativeOwnsPlayback) return;
     try {
       await _audio.enterForeground();
     } catch (e, st) {
@@ -1454,7 +1492,8 @@ class PlaybackCoordinator {
       // FG service (not just_audio), `_audio.pause()` is a no-op. Route
       // the pause request through the native bridge so the actual
       // audio actually stops.
-      if (_nativeScheduledActive) {
+      if (_nativeOwnsPlayback) {
+        _nativeScheduledActive = true;
         try {
           await NativeAlarmsBridge.instance.pauseNative();
         } catch (e, st) {
@@ -1560,7 +1599,7 @@ class PlaybackCoordinator {
       // while the mini-player UI claims it stopped, which was one of
       // the user's reported symptoms ("it does not stop even though I
       // open the app and click the pause/resume in notification bar").
-      if (_nativeScheduledActive) {
+      if (_nativeOwnsPlayback) {
         _nativeScheduledActive = false;
         try {
           await NativeAlarmsBridge.instance.stopNative();
@@ -1635,7 +1674,8 @@ class PlaybackCoordinator {
       // the native FG service, the resume tap must go back to native so
       // the MediaPlayer actually resumes. just_audio's resume would be a
       // no-op (nothing was queued in it).
-      if (_nativeScheduledActive) {
+      if (_nativeOwnsPlayback) {
+        _nativeScheduledActive = true;
         try {
           await NativeAlarmsBridge.instance.resumeNative();
         } catch (e, st) {
@@ -1723,7 +1763,7 @@ class PlaybackCoordinator {
     // Round 22 — if native scheduled playback is the active source,
     // tear it down too. Otherwise the alarm-clock FG service keeps
     // emitting audio after stop().
-    if (_nativeScheduledActive) {
+    if (_nativeOwnsPlayback) {
       _nativeScheduledActive = false;
       try {
         await NativeAlarmsBridge.instance.stopNative();
@@ -1861,8 +1901,27 @@ class PlaybackCoordinator {
       return;
     }
 
+    final nativeOwns = _nativeOwnsPlayback;
+
     final sleep = await _sleep.getActive();
     if (_sleep.isSleepActive(sleep)) {
+      if (nativeOwns) {
+        // Pause native MediaPlayer but keep scheduledPlaying so the
+        // mini-player stays visible (sleepPaused hid the bar while
+        // audio was still owned by the FG service).
+        try {
+          await NativeAlarmsBridge.instance.pauseNative();
+        } catch (e, st) {
+          if (kDebugMode) {
+            debugPrint('refreshModeState: native sleep pause failed: $e\n$st');
+          }
+        }
+        _emit(_snapshot.copyWith(
+          state: AppPlaybackState.scheduledPlaying,
+          isPlaying: false,
+        ));
+        return;
+      }
       await _systemPause();
       _emit(_snapshot.copyWith(
           state: AppPlaybackState.sleepPaused, isPlaying: false));
@@ -1872,11 +1931,30 @@ class PlaybackCoordinator {
     final prayer =
         kAdhanFeatureEnabled ? await _prayer.getCurrentPrayerWindow() : null;
     if (prayer != null) {
+      if (nativeOwns) {
+        try {
+          await NativeAlarmsBridge.instance.pauseNative();
+        } catch (e, st) {
+          if (kDebugMode) {
+            debugPrint(
+                'refreshModeState: native prayer pause failed: $e\n$st');
+          }
+        }
+        _emit(_snapshot.copyWith(
+          state: AppPlaybackState.scheduledPlaying,
+          isPlaying: false,
+        ));
+        return;
+      }
       await _systemPause();
       _emit(_snapshot.copyWith(
           state: AppPlaybackState.prayerPaused, isPlaying: false));
       return;
     }
+
+    // Round 29: never overwrite an in-flight scheduled session with
+    // activeIdle — the 15s mode timer was blanking the mini-player.
+    if (nativeOwns) return;
 
     if (_snapshot.state == AppPlaybackState.sleepPaused ||
         _snapshot.state == AppPlaybackState.prayerPaused) {

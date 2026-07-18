@@ -34,6 +34,7 @@ class NativePlaybackSnapshot {
     this.scheduleId,
     this.durationMs = 0,
     this.positionMs = 0,
+    this.nativeActive = false,
   });
 
   factory NativePlaybackSnapshot.idle() => const NativePlaybackSnapshot(
@@ -48,11 +49,18 @@ class NativePlaybackSnapshot {
   final int durationMs;
   final int positionMs;
 
+  /// Prefs flag from Kotlin (`KEY_NATIVE_ACTIVE`). Survives brief races
+  /// where state string and Dart keep-alive disagree.
+  final bool nativeActive;
+
   bool get isPlaying => state == NativePlaybackState.playing;
   bool get isPaused => state == NativePlaybackState.paused;
   bool get isIdle => state == NativePlaybackState.idle;
   bool get hasClip => (clipPath ?? '').isNotEmpty;
   bool get hasProgress => durationMs > 0;
+
+  /// True when native MediaPlayer owns the stream (playing OR paused).
+  bool get isNativeActive => nativeActive || isPlaying || isPaused;
 }
 
 /// Round 21 — bridge to the native Android alarm-clock scheduler.
@@ -159,6 +167,7 @@ class NativeAlarmsBridge {
           scheduleId: args['scheduleId'] as String?,
           durationMs: _asIntMs(args['durationMs']),
           positionMs: _asIntMs(args['positionMs']),
+          nativeActive: args['nativeActive'] as bool? ?? false,
         );
         _lastSnapshot = snapshot;
         if (!_stateController.isClosed) {
@@ -297,10 +306,18 @@ class NativeAlarmsBridge {
           cursor,
           lastFired: lastCompletion,
           lastSlot: lastSlot,
-          forDisplay: true,
+        forDisplay: false,
         );
         if (next == null) break;
-        if (!next.isAfter(now)) break;
+        // Round 29: with forDisplay:false, next may be a grace-window
+        // "now" slot slightly in the past. Register it anyway — AlarmManager
+        // delivers immediately — so enabling Active mid-slot no longer
+        // silently skips the current whisper. Only drop slots that are
+        // older than the engine's lateness cap.
+        if (next.isBefore(now.subtract(ScheduleFireHelper.maxLateness))) {
+          cursor = next.add(const Duration(seconds: 1));
+          continue;
+        }
         fires.add({
           'scheduleId': schedule.id,
           'clipPath': first.path,
@@ -428,6 +445,7 @@ class NativeAlarmsBridge {
         scheduleId: raw['scheduleId'] as String?,
         durationMs: _asIntMs(raw['durationMs']),
         positionMs: _asIntMs(raw['positionMs']),
+        nativeActive: raw['nativeActive'] as bool? ?? false,
       );
       _lastSnapshot = snapshot;
       if (!_stateController.isClosed) {

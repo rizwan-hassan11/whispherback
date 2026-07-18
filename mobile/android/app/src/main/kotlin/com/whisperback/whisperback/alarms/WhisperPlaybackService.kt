@@ -88,6 +88,9 @@ class WhisperPlaybackService : Service() {
         // 10-second duration while native MediaPlayer owned the clip.
         const val KEY_DURATION_MS = "duration_ms"
         const val KEY_POSITION_MS = "position_ms"
+        /// Set true while MediaPlayer owns the stream so Dart/Kotlin
+        /// keep-alive can refuse to restart ExoPlayer silence underneath.
+        const val KEY_NATIVE_ACTIVE = "native_playback_active"
 
         const val STATE_IDLE = "idle"
         const val STATE_PLAYING = "playing"
@@ -209,35 +212,35 @@ class WhisperPlaybackService : Service() {
         currentScheduleId = intent.getStringExtra(EXTRA_SCHEDULE_ID)
         clipQueue = parseClipQueue(intent.getStringExtra(EXTRA_CLIP_QUEUE_JSON), clipPath, currentClipTitle)
         clipQueueIndex = 0
+        // Stamp native-active BEFORE prepareAsync so a concurrent Dart
+        // enterForeground / heartbeat cannot restart silence in the gap.
+        writeState(STATE_PLAYING)
         playClip(clipPath)
     }
 
     private fun handlePauseCommand() {
         try {
-            val player = mediaPlayer ?: return run {
+            val player = mediaPlayer
+            if (player == null) {
                 Log.w(TAG, "pause requested with no active player")
-            }
-            if (!player.isPlaying) {
-                Log.i(TAG, "pause requested but player not playing")
+                // Still flip the notification so the shade never shows a
+                // dead Pause action after focus-loss already paused us.
+                postPlaybackNotification(isPlaying = false)
+                writeState(STATE_PAUSED)
+                notifyListener(STATE_PAUSED)
                 return
             }
             stopProgressTicker()
-            player.pause()
+            if (player.isPlaying) {
+                player.pause()
+            }
             writeProgress(player.currentPosition.toLong().coerceAtLeast(0L), currentDurationMs)
             writeState(STATE_PAUSED)
-            // Re-post notification with PLAY action visible instead of PAUSE.
-            try {
-                val notification = buildNotification(
-                    title = currentClipTitle,
-                    playlistName = currentPlaylistName,
-                    isPlaying = false,
-                )
-                val mgr =
-                    getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-                mgr?.notify(NOTIFICATION_ID, notification)
-            } catch (t: Throwable) {
-                Log.e(TAG, "pause notify failed", t)
-            }
+            // Idempotent: always rebuild the shade with Resume, even if
+            // the player was already paused by audio-focus loss. Without
+            // this the QA "notification Pause does nothing" reproduced —
+            // shade still showed Pause while MediaPlayer was already paused.
+            postPlaybackNotification(isPlaying = false)
             notifyListener(STATE_PAUSED)
         } catch (t: Throwable) {
             Log.e(TAG, "handlePauseCommand failed", t)
@@ -250,7 +253,10 @@ class WhisperPlaybackService : Service() {
                 Log.w(TAG, "resume requested with no active player")
             }
             if (player.isPlaying) {
-                Log.i(TAG, "resume requested but player already playing")
+                // Already playing — still ensure the shade shows Pause.
+                postPlaybackNotification(isPlaying = true)
+                writeState(STATE_PLAYING)
+                notifyListener(STATE_PLAYING)
                 return
             }
             if (!requestAudioFocus()) {
@@ -259,21 +265,25 @@ class WhisperPlaybackService : Service() {
             player.start()
             writeState(STATE_PLAYING)
             startProgressTicker()
-            try {
-                val notification = buildNotification(
-                    title = currentClipTitle,
-                    playlistName = currentPlaylistName,
-                    isPlaying = true,
-                )
-                val mgr =
-                    getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-                mgr?.notify(NOTIFICATION_ID, notification)
-            } catch (t: Throwable) {
-                Log.e(TAG, "resume notify failed", t)
-            }
+            postPlaybackNotification(isPlaying = true)
             notifyListener(STATE_PLAYING)
         } catch (t: Throwable) {
             Log.e(TAG, "handleResumeCommand failed", t)
+        }
+    }
+
+    private fun postPlaybackNotification(isPlaying: Boolean) {
+        try {
+            val notification = buildNotification(
+                title = currentClipTitle,
+                playlistName = currentPlaylistName,
+                isPlaying = isPlaying,
+            )
+            val mgr =
+                getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            mgr?.notify(NOTIFICATION_ID, notification)
+        } catch (t: Throwable) {
+            Log.e(TAG, "postPlaybackNotification failed", t)
         }
     }
 
@@ -449,6 +459,12 @@ class WhisperPlaybackService : Service() {
         try {
             val editor = getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE).edit()
                 .putString(KEY_STATE, state)
+            // Round 29: advertise "native owns the stream" the instant we
+            // leave idle so Dart can refuse to start ExoPlayer silence
+            // underneath us — even before the Flutter engine receives the
+            // method-channel event (cold start / process reclaim race).
+            val nativeActive = state == STATE_PLAYING || state == STATE_PAUSED
+            editor.putBoolean(KEY_NATIVE_ACTIVE, nativeActive)
             if (state == STATE_IDLE) {
                 editor.remove(KEY_CURRENT_PATH)
                     .remove(KEY_CURRENT_TITLE)
@@ -573,6 +589,7 @@ class WhisperPlaybackService : Service() {
                             currentDurationMs,
                         )
                         writeState(STATE_PAUSED)
+                        postPlaybackNotification(isPlaying = false)
                         notifyListener(STATE_PAUSED)
                     }
                 }
@@ -587,6 +604,7 @@ class WhisperPlaybackService : Service() {
                             currentDurationMs,
                         )
                         writeState(STATE_PAUSED)
+                        postPlaybackNotification(isPlaying = false)
                         notifyListener(STATE_PAUSED)
                     }
                 }
@@ -608,6 +626,7 @@ class WhisperPlaybackService : Service() {
                             player.start()
                             writeState(STATE_PLAYING)
                             startProgressTicker()
+                            postPlaybackNotification(isPlaying = true)
                             notifyListener(STATE_PLAYING)
                         }
                     }

@@ -89,18 +89,29 @@ class MiniPlayerBar extends ConsumerWidget {
     if (snapshot == null || snapshot.modalVisible) {
       return const SizedBox.shrink();
     }
+    final nativeLive =
+        NativeAlarmsBridge.instance.lastSnapshot.isNativeActive;
     final inPlayContext = snapshot.state == AppPlaybackState.manualPlaying ||
-        snapshot.state == AppPlaybackState.scheduledPlaying;
+        snapshot.state == AppPlaybackState.scheduledPlaying ||
+        // Round 29: native may own audio before Dart emits scheduledPlaying.
+        nativeLive;
     final clipActuallyPlaying = audio.currentPath != null && audio.isPlaying;
     if (!inPlayContext && !clipActuallyPlaying) {
       return const SizedBox.shrink();
     }
     // Defensive: even if state is a play context, suppress when there
-    // is literally no clip metadata to render. Without this the bar
-    // could render an empty row mid-transition between states.
-    if (snapshot.playlistName == null && snapshot.clipTitle == null) {
+    // is literally no clip metadata to render — unless native is live,
+    // in which case fall back to brand titles so the bar never vanishes
+    // mid-schedule.
+    final title = snapshot.clipTitle ??
+        NativeAlarmsBridge.instance.lastSnapshot.clipTitle;
+    final subtitle = snapshot.playlistName ??
+        NativeAlarmsBridge.instance.lastSnapshot.playlistName;
+    if (title == null && subtitle == null && !nativeLive) {
       return const SizedBox.shrink();
     }
+    final displayTitle = title ?? subtitle ?? 'Scheduled whisper';
+    final displaySubtitle = subtitle ?? 'WhisperBack';
     final l10n = context.l10n;
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
@@ -153,7 +164,9 @@ class MiniPlayerBar extends ConsumerWidget {
             child: Row(
               children: [
                 _MiniCover(
-                  isPlaying: snapshot.isPlaying,
+                  isPlaying: snapshot.isPlaying ||
+                      (nativeLive &&
+                          NativeAlarmsBridge.instance.lastSnapshot.isPlaying),
                   onTap: coordinator.showModal,
                   colors: coverColors,
                   hasSchedule: hasSchedule,
@@ -170,7 +183,7 @@ class MiniPlayerBar extends ConsumerWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            snapshot.clipTitle ?? snapshot.playlistName ?? '',
+                            displayTitle,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: GoogleFonts.fraunces(
@@ -188,41 +201,50 @@ class MiniPlayerBar extends ConsumerWidget {
                             // scrubber every 10s. When we're in a native
                             // scheduled session (no Dart clip path), drive
                             // progress from the native bridge instead.
-                            stream: _useNativeProgress(snapshot, audio)
+                            stream: _useNativeProgress(snapshot, audio) ||
+                                    nativeLive
                                 ? NativeAlarmsBridge.instance.stateStream
                                     .map<Duration?>((n) =>
                                         Duration(milliseconds: n.positionMs))
                                 : audio.positionStream,
-                            initialData: _useNativeProgress(snapshot, audio)
+                            initialData: _useNativeProgress(snapshot, audio) ||
+                                    nativeLive
                                 ? Duration(
                                     milliseconds: NativeAlarmsBridge
                                         .instance.lastSnapshot.positionMs)
                                 : null,
                             builder: (context, posSnap) {
                               return StreamBuilder<Duration?>(
-                                stream: _useNativeProgress(snapshot, audio)
+                                stream: _useNativeProgress(snapshot, audio) ||
+                                        nativeLive
                                     ? NativeAlarmsBridge.instance.stateStream
                                         .map<Duration?>((n) => Duration(
                                             milliseconds: n.durationMs))
                                     : audio.durationStream,
-                                initialData: _useNativeProgress(snapshot, audio)
-                                    ? Duration(
-                                        milliseconds: NativeAlarmsBridge
-                                            .instance.lastSnapshot.durationMs)
-                                    : null,
+                                initialData:
+                                    _useNativeProgress(snapshot, audio) ||
+                                            nativeLive
+                                        ? Duration(
+                                            milliseconds: NativeAlarmsBridge
+                                                .instance
+                                                .lastSnapshot
+                                                .durationMs)
+                                        : null,
                                 builder: (context, durSnap) {
                                   final pos = posSnap.data ?? Duration.zero;
                                   final dur = _resolveDisplayDuration(
                                     snapshot: snapshot,
                                     streamDuration: durSnap.data,
-                                    native: _useNativeProgress(snapshot, audio)
+                                    native: _useNativeProgress(
+                                                snapshot, audio) ||
+                                            nativeLive
                                         ? NativeAlarmsBridge
                                             .instance.lastSnapshot
                                         : null,
                                   );
                                   final text = dur.inMilliseconds > 0
                                       ? '${_fmt(pos)} / ${_fmt(dur)}'
-                                      : snapshot.playlistName ?? '';
+                                      : displaySubtitle;
                                   return Text(
                                     text,
                                     maxLines: 1,
@@ -255,9 +277,15 @@ class MiniPlayerBar extends ConsumerWidget {
                         _safeCall(coordinator.skipPrevious, 'skipPrevious'),
                   ),
                 _MiniPlayPauseButton(
-                  isPlaying: snapshot.isPlaying,
+                  isPlaying: snapshot.isPlaying ||
+                      (nativeLive &&
+                          NativeAlarmsBridge.instance.lastSnapshot.isPlaying),
                   onTap: () {
-                    if (snapshot.isPlaying) {
+                    final playing = snapshot.isPlaying ||
+                        (nativeLive &&
+                            NativeAlarmsBridge
+                                .instance.lastSnapshot.isPlaying);
+                    if (playing) {
                       _safeCall(coordinator.pause, 'pause');
                     } else {
                       _safeCall(coordinator.resume, 'resume');

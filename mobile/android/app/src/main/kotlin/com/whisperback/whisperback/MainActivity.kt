@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import androidx.core.view.WindowCompat
 import com.ryanheise.audioservice.AudioServiceActivity
 import com.whisperback.whisperback.alarms.WhisperAlarmScheduler
@@ -161,6 +162,7 @@ class MainActivity : AudioServiceActivity() {
                             "scheduleId" to prefs.getString(WhisperPlaybackService.KEY_CURRENT_SCHEDULE_ID, null),
                             "durationMs" to prefs.getLong(WhisperPlaybackService.KEY_DURATION_MS, 0L),
                             "positionMs" to prefs.getLong(WhisperPlaybackService.KEY_POSITION_MS, 0L),
+                            "nativeActive" to prefs.getBoolean(WhisperPlaybackService.KEY_NATIVE_ACTIVE, false),
                         )
                         result.success(map)
                     }
@@ -196,6 +198,10 @@ class MainActivity : AudioServiceActivity() {
                                     "scheduleId" to scheduleId,
                                     "durationMs" to durationMs,
                                     "positionMs" to positionMs,
+                                    "nativeActive" to (
+                                        state == WhisperPlaybackService.STATE_PLAYING ||
+                                            state == WhisperPlaybackService.STATE_PAUSED
+                                        ),
                                 ),
                             )
                         } catch (_: Throwable) {
@@ -238,16 +244,24 @@ class MainActivity : AudioServiceActivity() {
         val intent = Intent(applicationContext, WhisperPlaybackService::class.java).apply {
             this.action = action
         }
+        // Round 29: prefer startService when the playback service is already
+        // a running FG service — startForegroundService from a backgrounded
+        // Activity throws ForegroundServiceStartNotAllowedException on
+        // Android 12+ and silently dropped pause/resume from the mini-player.
+        try {
+            applicationContext.startService(intent)
+            return
+        } catch (t: Throwable) {
+            Log.w("WhisperMain", "startService($action) failed, retrying FG: ${t.message}")
+        }
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 applicationContext.startForegroundService(intent)
             } else {
                 applicationContext.startService(intent)
             }
-        } catch (_: Throwable) {
-            // ForegroundServiceStartNotAllowedException can hit on Android
-            // 12+ if the service was killed and we have no FG grant. The
-            // mirrored-prefs state + the next alarm cycle will recover.
+        } catch (t: Throwable) {
+            Log.e("WhisperMain", "sendCommandToService($action) failed", t)
         }
     }
 }
