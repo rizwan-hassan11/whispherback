@@ -89,8 +89,7 @@ class MiniPlayerBar extends ConsumerWidget {
     if (snapshot == null || snapshot.modalVisible) {
       return const SizedBox.shrink();
     }
-    final nativeLive =
-        NativeAlarmsBridge.instance.lastSnapshot.isNativeActive;
+    final nativeLive = NativeAlarmsBridge.instance.lastSnapshot.isNativeActive;
     final inPlayContext = snapshot.state == AppPlaybackState.manualPlaying ||
         snapshot.state == AppPlaybackState.scheduledPlaying ||
         // Round 29: native may own audio before Dart emits scheduledPlaying.
@@ -235,12 +234,12 @@ class MiniPlayerBar extends ConsumerWidget {
                                   final dur = _resolveDisplayDuration(
                                     snapshot: snapshot,
                                     streamDuration: durSnap.data,
-                                    native: _useNativeProgress(
-                                                snapshot, audio) ||
-                                            nativeLive
-                                        ? NativeAlarmsBridge
-                                            .instance.lastSnapshot
-                                        : null,
+                                    native:
+                                        _useNativeProgress(snapshot, audio) ||
+                                                nativeLive
+                                            ? NativeAlarmsBridge
+                                                .instance.lastSnapshot
+                                            : null,
                                   );
                                   final text = dur.inMilliseconds > 0
                                       ? '${_fmt(pos)} / ${_fmt(dur)}'
@@ -283,8 +282,7 @@ class MiniPlayerBar extends ConsumerWidget {
                   onTap: () {
                     final playing = snapshot.isPlaying ||
                         (nativeLive &&
-                            NativeAlarmsBridge
-                                .instance.lastSnapshot.isPlaying);
+                            NativeAlarmsBridge.instance.lastSnapshot.isPlaying);
                     if (playing) {
                       _safeCall(coordinator.pause, 'pause');
                     } else {

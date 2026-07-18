@@ -419,12 +419,10 @@ class PlaybackCoordinator {
           _emit(_snapshot.copyWith(
             state: AppPlaybackState.scheduledPlaying,
             isPlaying: true,
-            playlistName: native.playlistName ??
-                _snapshot.playlistName ??
-                'WhisperBack',
-            clipTitle: native.clipTitle ??
-                _snapshot.clipTitle ??
-                'Scheduled whisper',
+            playlistName:
+                native.playlistName ?? _snapshot.playlistName ?? 'WhisperBack',
+            clipTitle:
+                native.clipTitle ?? _snapshot.clipTitle ?? 'Scheduled whisper',
             durationMs: native.durationMs > 0
                 ? native.durationMs
                 : _snapshot.durationMs,
@@ -439,12 +437,10 @@ class PlaybackCoordinator {
           _emit(_snapshot.copyWith(
             state: AppPlaybackState.scheduledPlaying,
             isPlaying: false,
-            playlistName: native.playlistName ??
-                _snapshot.playlistName ??
-                'WhisperBack',
-            clipTitle: native.clipTitle ??
-                _snapshot.clipTitle ??
-                'Scheduled whisper',
+            playlistName:
+                native.playlistName ?? _snapshot.playlistName ?? 'WhisperBack',
+            clipTitle:
+                native.clipTitle ?? _snapshot.clipTitle ?? 'Scheduled whisper',
             durationMs: native.durationMs > 0
                 ? native.durationMs
                 : _snapshot.durationMs,
@@ -1936,8 +1932,7 @@ class PlaybackCoordinator {
           await NativeAlarmsBridge.instance.pauseNative();
         } catch (e, st) {
           if (kDebugMode) {
-            debugPrint(
-                'refreshModeState: native prayer pause failed: $e\n$st');
+            debugPrint('refreshModeState: native prayer pause failed: $e\n$st');
           }
         }
         _emit(_snapshot.copyWith(

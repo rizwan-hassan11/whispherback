@@ -306,7 +306,7 @@ class NativeAlarmsBridge {
           cursor,
           lastFired: lastCompletion,
           lastSlot: lastSlot,
-        forDisplay: false,
+          forDisplay: false,
         );
         if (next == null) break;
         // Round 29: with forDisplay:false, next may be a grace-window
