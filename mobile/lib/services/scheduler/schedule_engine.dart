@@ -256,9 +256,11 @@ class ScheduleEngine {
     // notification disappears"). `enterForeground` is idempotent and
     // returns immediately if a clip is already playing.
     //
-    // Round 31: if native MediaPlayer owns a schedule, skip the entire
+    // Round 31/32: if native MediaPlayer owns a schedule, skip the entire
     // heartbeat path (including notification sync silence refresh) so
-    // ExoPlayer cannot steal focus mid-clip.
+    // ExoPlayer cannot steal focus mid-clip. On poll FAILURE, also skip
+    // enterForeground — restarting silence when ownership is unknown was
+    // still causing OEM auto-pause.
     try {
       final native = await NativeAlarmsBridge.instance.fetchPlaybackState();
       if (native.isNativeActive) {
@@ -268,6 +270,11 @@ class ScheduleEngine {
     } catch (e, st) {
       if (kDebugMode) {
         debugPrint('ScheduleEngine: native poll failed: $e\n$st');
+      }
+      // Prefer keeping native audio undisturbed over restarting silence.
+      if (_coordinator.snapshot.state == AppPlaybackState.scheduledPlaying ||
+          NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
+        return;
       }
     }
     try {

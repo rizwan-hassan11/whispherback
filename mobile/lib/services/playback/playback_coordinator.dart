@@ -762,12 +762,29 @@ class PlaybackCoordinator {
 
   Future<void> _deactivateFromNotification() async {
     await _appState.setActive(false);
+    // Round 32: Stop the native MediaPlayer too — otherwise the ongoing
+    // card "Stop" left scheduled audio playing with no UI (QA: cannot pause).
+    if (_nativeOwnsPlayback) {
+      try {
+        await NativeAlarmsBridge.instance.stopNative();
+      } catch (e, st) {
+        if (kDebugMode) {
+          debugPrint('deactivateFromNotification: stopNative failed: $e\n$st');
+        }
+      }
+      _nativeScheduledActive = false;
+    }
     await _audio.exitForeground();
     await AdhanPlayer.instance.stop();
     _emit(const PlaybackSnapshot(state: AppPlaybackState.inactive));
   }
 
   void _onPlayerState(PlayerState state) {
+    // Round 32: while native MediaPlayer owns scheduled audio, ignore
+    // just_audio silence keep-alive events — they were flipping
+    // isPlaying=false and made the mini-player look auto-paused.
+    if (_nativeOwnsPlayback) return;
+
     if (_snapshot.state == AppPlaybackState.manualPlaying ||
         _snapshot.state == AppPlaybackState.scheduledPlaying) {
       final playing = state.playing;

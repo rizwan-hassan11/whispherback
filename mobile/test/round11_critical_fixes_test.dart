@@ -257,16 +257,16 @@ void main() {
 
   group('Round 11 — eager permission requests on app launch', () {
     test(
-        '`_initNotifications` proactively asks for microphone + battery + '
-        'exact-alarm permissions on a NORMAL cold start (was: only when the '
-        'user tapped the Finish-setup chip)', () {
+        '`_initNotifications` asks for notifications, exact alarms, and '
+        'battery on a NORMAL cold start; microphone is deferred to Record', () {
       final src = _readFile('lib/app.dart');
+      // Round 32: mic is not required for schedules — asked on Record only.
       expect(
         src,
-        contains(
-            'await requestAppPermissionKind(AppPermissionKind.microphone)'),
-        reason: 'Microphone permission must be requested up front so the '
-            'recorder works on the user\'s very first attempt.',
+        isNot(contains(
+            'await requestAppPermissionKind(AppPermissionKind.microphone)')),
+        reason: 'Microphone must not block first-open scheduling setup; '
+            'Record screen asks when the user actually records.',
       );
       // Round 26: battery exemption is now requested AT MOST ONCE (see
       // requestBatteryExemptionOnce). The old unconditional
@@ -291,7 +291,14 @@ void main() {
       expect(
         src,
         contains('await NotificationService.instance.requestPermissions()'),
-        reason: 'Notification + exact-alarm requests must run at launch.',
+        reason:
+            'Notification + full-screen intent requests must run at launch.',
+      );
+      expect(
+        src,
+        contains('ensureAndroidSchedulingPermissions'),
+        reason:
+            'Exact alarms / Alarms & reminders must be requested at launch.',
       );
       // Round 26: on an alarm-triggered cold start we must NOT prompt at all
       // (it interrupts background playback). Confirm the guard exists.

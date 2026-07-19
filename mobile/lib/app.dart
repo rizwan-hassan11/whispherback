@@ -117,23 +117,28 @@ class _WhisperBackAppState extends ConsumerState<WhisperBackApp>
         await NotificationService.instance.launchedFromScheduleAlarm();
 
     // Eager permission requests on a NORMAL cold start so the user is asked
-    // ONCE up front instead of being routed through a manual "Finish
-    // setup" chip. Each call is best-effort: a denial is fine — the
-    // setup chip remains visible so the user can grant later. Order
-    // matters: notification first (so the rest can post status), then
-    // microphone (recording), and finally battery exemption — which is
-    // requested AT MOST ONCE ever (see requestBatteryExemptionOnce) so we
-    // never re-open the OEM battery screen on later launches.
+    // ONCE up front for everything schedules need: notifications, exact
+    // alarms (Alarms & reminders), full-screen intent, and battery
+    // exemption (at most once). Microphone is deferred to the Record
+    // screen — it is not required for scheduled playback.
+    //
+    // Each call is best-effort: a denial is fine — the setup chip remains
+    // visible so the user can grant later. Alarm cold-starts still skip
+    // ALL prompts so we never interrupt in-flight MediaPlayer audio.
     if (!fromAlarm) {
       try {
+        // Notifications + full-screen intent (Android 14+).
         await NotificationService.instance.requestPermissions();
       } catch (_) {}
       try {
-        await requestAppPermissionKind(AppPermissionKind.microphone);
+        // Exact alarms / Alarms & reminders (Android 12+).
+        await ensureAndroidSchedulingPermissions(requestBattery: false);
       } catch (_) {}
       try {
+        // Battery exemption — at most once ever across installs/sessions.
         await requestBatteryExemptionOnce();
       } catch (_) {}
+      // Re-probe after battery so Active sync sees final status.
       await ensureAndroidSchedulingPermissions();
     }
 

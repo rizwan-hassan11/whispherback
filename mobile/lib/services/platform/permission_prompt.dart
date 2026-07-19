@@ -8,6 +8,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../core/widgets/permission_required_dialog.dart';
 import '../../core/layout/shell_messenger.dart';
 import '../../l10n/app_localizations.dart';
+import '../notifications/notification_service.dart';
 import 'android_runtime_permissions.dart';
 
 enum PermissionPromptOutcome { granted, denied, permanentlyDenied }
@@ -271,6 +272,12 @@ Future<void> runSchedulingSetupWizard(BuildContext context) async {
     duration: const Duration(seconds: 4),
   );
 
+  // Round 32: ask every scheduling permission in one guided pass —
+  // notifications + full-screen intent, exact alarms, then battery
+  // (once). Microphone stays on the Record screen.
+  try {
+    await NotificationService.instance.requestPermissions();
+  } catch (_) {}
   await requestAppPermissionKind(AppPermissionKind.notifications);
   await requestAppPermissionKind(AppPermissionKind.exactAlarms);
   // One-time only: never re-open the OEM battery screen on repeat runs.

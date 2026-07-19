@@ -204,7 +204,7 @@ void main() {
   group('Round 14-F — engine heartbeat keeps FG service alive', () {
     test(
         'ScheduleEngine._runTick re-enters the foreground binding every '
-        'tick while Active is on', () {
+        'tick while Active is on (skips when native owns audio)', () {
       final src = _readFile('lib/services/scheduler/schedule_engine.dart');
       // Find the _runTick body and confirm it ensures the foreground
       // BEFORE the early-return-on-mid-play branch.
@@ -215,20 +215,26 @@ void main() {
       if (idx < 0) idx = src.indexOf('Future<void> _runTick()');
       expect(idx, greaterThan(0),
           reason: '_runTick must exist with either the old or new shape.');
-      final body = src.substring(idx, idx + 3500);
-      // The heartbeat ensureForeground appears BEFORE the "skip if
-      // already scheduledPlaying" early-return so the silence keep-
-      // alive can be re-bound even when no slot is firing this tick.
+      final body = src.substring(idx, idx + 4500);
+      // Round 32: native ownership poll must short-circuit the heartbeat
+      // so ExoPlayer silence cannot auto-pause MediaPlayer.
+      expect(body, contains('fetchPlaybackState()'),
+          reason: 'Heartbeat must poll native prefs before restarting silence.');
+      expect(body, contains('isNativeActive'),
+          reason: 'Heartbeat must skip silence restart while native owns audio.');
       final heartbeatIdx = body.indexOf('ensureForegroundForSchedule');
-      final scheduledIdx = body.indexOf('AppPlaybackState.scheduledPlaying');
+      // Mid-play early return (Dart scheduledPlaying + isPlaying) — not the
+      // earlier Round-32 scheduledPlaying mention in the poll-failure guard.
+      final midPlayIdx = body.indexOf(
+          'snapshot.state == AppPlaybackState.scheduledPlaying &&');
       expect(heartbeatIdx, greaterThan(0));
-      expect(scheduledIdx, greaterThan(0));
+      expect(midPlayIdx, greaterThan(0));
       expect(
         heartbeatIdx,
-        lessThan(scheduledIdx),
+        lessThan(midPlayIdx),
         reason: 'The heartbeat must run BEFORE the mid-play early '
             'return so the silence keep-alive is refreshed even '
-            'when no slot is firing.',
+            'when no slot is firing (and native is idle).',
       );
     });
   });
