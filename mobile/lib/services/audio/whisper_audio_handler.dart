@@ -265,6 +265,12 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> enterForeground() async {
     _keepAlive = true;
     if (_playingClip) return;
+    // Round 33: on Android, Active mode must NEVER run ExoPlayer silence —
+    // native KeepAliveService + AlarmManager own process survival.
+    if (Platform.isAndroid) {
+      _silenceSuspendedForExternal = true;
+      return;
+    }
     // Round 27: native scheduled playback owns the media stream —
     // do NOT restart the silence loop underneath it.
     if (_silenceSuspendedForExternal) return;
@@ -275,12 +281,7 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
       return;
     }
     // Round 15: idempotent — skip the silence-loop rebuild when the
-    // loop is ALREADY running. Without this guard, the engine's 5-
-    // second heartbeat (Round 14) would re-run `setAudioSource(silence)`
-    // every tick, which on Samsung One UI 6 throws transient
-    // PlatformExceptions ("MediaSource currently in use") and on
-    // Vivo Funtouch occasionally crashes the audio_service binding
-    // outright. Only re-bind when we know the loop is dead.
+    // loop is ALREADY running.
     if (_keepAliveRunning && _player.playing) return;
     await _startIdleKeepAlive();
   }
@@ -294,6 +295,10 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   bool get isKeepAliveRunning => _keepAliveRunning;
 
   Future<void> _startIdleKeepAlive() async {
+    if (Platform.isAndroid) {
+      _silenceSuspendedForExternal = true;
+      return;
+    }
     if (_playingClip) return;
     if (_silenceSuspendedForExternal) return;
     if (NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
@@ -382,6 +387,7 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   Future<void> updateActiveSessionInfo() async {
+    if (Platform.isAndroid) return;
     if (_playingClip) return;
     if (_silenceSuspendedForExternal) return;
     if (NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {

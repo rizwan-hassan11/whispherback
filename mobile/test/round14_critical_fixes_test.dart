@@ -219,14 +219,16 @@ void main() {
       // Round 32: native ownership poll must short-circuit the heartbeat
       // so ExoPlayer silence cannot auto-pause MediaPlayer.
       expect(body, contains('fetchPlaybackState()'),
-          reason: 'Heartbeat must poll native prefs before restarting silence.');
+          reason:
+              'Heartbeat must poll native prefs before restarting silence.');
       expect(body, contains('isNativeActive'),
-          reason: 'Heartbeat must skip silence restart while native owns audio.');
+          reason:
+              'Heartbeat must skip silence restart while native owns audio.');
       final heartbeatIdx = body.indexOf('ensureForegroundForSchedule');
       // Mid-play early return (Dart scheduledPlaying + isPlaying) — not the
       // earlier Round-32 scheduledPlaying mention in the poll-failure guard.
-      final midPlayIdx = body.indexOf(
-          'snapshot.state == AppPlaybackState.scheduledPlaying &&');
+      final midPlayIdx = body
+          .indexOf('snapshot.state == AppPlaybackState.scheduledPlaying &&');
       expect(heartbeatIdx, greaterThan(0));
       expect(midPlayIdx, greaterThan(0));
       expect(

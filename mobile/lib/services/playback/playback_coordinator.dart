@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
@@ -341,12 +342,18 @@ class PlaybackCoordinator {
         modalVisible: false,
       ));
     } else if (active) {
-      // Round 18: ALSO restart the native keep-alive service. If the
-      // process was killed and the user just relaunched the app from
-      // the launcher, the native service is no longer running — we
-      // need to bring it back so background scheduling works.
+      // Round 33 (Android): NEVER start ExoPlayer silence for scheduling —
+      // native AlarmManager + WhisperKeepAliveService keep the process
+      // alive. ExoPlayer silence was racing MediaPlayer and causing
+      // intermittent auto-pause / missed fires on Samsung / Xiaomi / Vivo.
       await KeepAliveService.start();
-      await _audio.enterForeground();
+      if (!Platform.isAndroid) {
+        await _audio.enterForeground();
+      } else {
+        try {
+          await _audio.suspendSilenceForExternalPlayback();
+        } catch (_) {}
+      }
     }
     startModeMonitoring();
   }
@@ -472,17 +479,20 @@ class PlaybackCoordinator {
         final scheduleId = _nativeActiveScheduleId ?? native.scheduleId;
         _nativeActiveScheduleId = null;
         _stampNativeFireCompletion(scheduleId, endedAt);
-        // Round 27 — restore the silence keep-alive now that native
-        // MediaPlayer has released the media stream.
-        unawaited(() async {
-          try {
-            await _audio.resumeSilenceAfterExternalPlayback();
-          } catch (e, st) {
-            if (kDebugMode) {
-              debugPrint('resumeSilence after native idle failed: $e\n$st');
+        // Round 33: on Android never restore ExoPlayer silence after a
+        // native clip — KeepAliveService is enough and silence caused
+        // the next schedule to auto-pause.
+        if (!Platform.isAndroid) {
+          unawaited(() async {
+            try {
+              await _audio.resumeSilenceAfterExternalPlayback();
+            } catch (e, st) {
+              if (kDebugMode) {
+                debugPrint('resumeSilence after native idle failed: $e\n$st');
+              }
             }
-          }
-        }());
+          }());
+        }
         // Don't blow away the snapshot if the Dart side has since started
         // its own clip (e.g. user tapped Play); we only roll back our own
         // scheduledPlaying frame.
@@ -1028,11 +1038,20 @@ class PlaybackCoordinator {
   /// fire so an OS-reclaimed FG service can't silently swallow the play.
   Future<void> ensureForegroundForSchedule() async {
     if (!await _appState.isActive()) return;
-    // Round 30: always re-poll prefs before the heartbeat may restart
-    // silence — lastSnapshot can lag Kotlin's KEY_NATIVE_ACTIVE write.
-    try {
-      await NativeAlarmsBridge.instance.fetchPlaybackState();
-    } catch (_) {}
+    // Round 33: Android schedules are native-only. Restarting ExoPlayer
+    // silence here was the #1 intermittent auto-pause root cause.
+    if (Platform.isAndroid) {
+      await KeepAliveService.start();
+      try {
+        await NativeAlarmsBridge.instance.fetchPlaybackState();
+      } catch (_) {}
+      if (_nativeOwnsPlayback) {
+        try {
+          await _audio.suspendSilenceForExternalPlayback();
+        } catch (_) {}
+      }
+      return;
+    }
     if (_nativeOwnsPlayback) return;
     try {
       await _audio.enterForeground();
@@ -1182,12 +1201,21 @@ class PlaybackCoordinator {
             '_activateInBackground: initial notif refresh failed: $e\n$st');
       }
     }
-    try {
-      await _audio.enterForeground();
-    } catch (e, st) {
-      if (kDebugMode) {
-        debugPrint('_activateInBackground: enterForeground failed: $e\n$st');
+    // Round 33: on Android do NOT start ExoPlayer silence — KeepAlive
+    // native FG + AlarmManager are enough. Silence was fighting scheduled
+    // MediaPlayer and causing intermittent auto-pause.
+    if (!Platform.isAndroid) {
+      try {
+        await _audio.enterForeground();
+      } catch (e, st) {
+        if (kDebugMode) {
+          debugPrint('_activateInBackground: enterForeground failed: $e\n$st');
+        }
       }
+    } else {
+      try {
+        await _audio.suspendSilenceForExternalPlayback();
+      } catch (_) {}
     }
     try {
       await refreshModeState();
@@ -1196,8 +1224,6 @@ class PlaybackCoordinator {
         debugPrint('_activateInBackground: refreshModeState failed: $e\n$st');
       }
     }
-    // Re-sync notifications AFTER keep-alive so the status card reflects
-    // whichever path actually succeeded.
     try {
       await refreshScheduleNotifications?.call();
     } catch (e, st) {

@@ -73,7 +73,8 @@ class WhisperPlaybackService : Service() {
         // Hard cap so a corrupt clip can never lock the FG service open.
         // 2 hours covers long multi-clip playlist fires on slow devices.
         private const val MAX_PLAYBACK_MS = 2 * 60 * 60 * 1000L
-        private const val WATCHDOG_INTERVAL_MS = 2_000L
+        // Round 33: 500ms watchdog — OEM silent stops recover within 1s.
+        private const val WATCHDOG_INTERVAL_MS = 500L
 
         // Round 22 — single global state pref so the Dart side can poll
         // it on app launch/resume.
@@ -541,7 +542,10 @@ class WhisperPlaybackService : Service() {
                     .putString(KEY_CURRENT_SCHEDULE_ID, currentScheduleId ?: "")
                     .putLong(KEY_DURATION_MS, currentDurationMs)
             }
-            editor.apply()
+            // Round 33: commit synchronously so Dart's getPlaybackState
+            // cannot read a stale nativeActive=false while MediaPlayer
+            // is already audible (apply() is async and caused silence races).
+            editor.commit()
         } catch (t: Throwable) {
             Log.e(TAG, "writeState failed", t)
         }
@@ -683,7 +687,15 @@ class WhisperPlaybackService : Service() {
      */
     private fun ensureStillPlaying(reason: String) {
         if (userPaused || !wantPlaying) return
-        val player = mediaPlayer ?: return
+        val player = mediaPlayer
+        if (player == null) {
+            val path = currentClipPath
+            if (!path.isNullOrBlank() && File(path).exists()) {
+                Log.w(TAG, "ensureStillPlaying($reason): player null; re-preparing")
+                playClip(path)
+            }
+            return
+        }
         try {
             if (player.isPlaying) return
             Log.w(TAG, "ensureStillPlaying($reason): restarting MediaPlayer")
@@ -697,10 +709,15 @@ class WhisperPlaybackService : Service() {
             player.start()
             writeState(STATE_PLAYING)
             startProgressTicker()
+            startWatchdog()
             postPlaybackNotification(isPlaying = true)
             notifyListener(STATE_PLAYING)
         } catch (t: Throwable) {
-            Log.e(TAG, "ensureStillPlaying($reason) failed", t)
+            Log.e(TAG, "ensureStillPlaying($reason) failed; re-preparing", t)
+            val path = currentClipPath
+            if (!path.isNullOrBlank() && File(path).exists()) {
+                playClip(path)
+            }
         }
     }
 

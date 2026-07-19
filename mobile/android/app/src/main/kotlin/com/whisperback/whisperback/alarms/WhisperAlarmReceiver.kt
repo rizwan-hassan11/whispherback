@@ -66,12 +66,25 @@ class WhisperAlarmReceiver : BroadcastReceiver() {
                 Log.w(TAG, "duplicate fire for $scheduleId slot=$slotEpochMs (last=$lastSlot dt=$delta ms)")
                 true
             } else {
-                prefs.edit().putLong(key, slotEpochMs).apply()
+                // Round 33: do NOT stamp here — stamp only after the
+                // FG service actually starts, otherwise a failed start
+                // blocks the OS retry within 60s (missed schedule).
                 false
             }
         } catch (t: Throwable) {
             Log.e(TAG, "dedup check failed (allowing fire)", t)
             false
+        }
+    }
+
+    private fun markFireDelivered(context: Context, scheduleId: String, slotEpochMs: Long) {
+        if (scheduleId.isBlank() || slotEpochMs <= 0L) return
+        try {
+            dedupPrefs(context).edit()
+                .putLong("$DEDUP_KEY_PREFIX$scheduleId", slotEpochMs)
+                .commit()
+        } catch (t: Throwable) {
+            Log.e(TAG, "markFireDelivered failed", t)
         }
     }
 
@@ -107,14 +120,17 @@ class WhisperAlarmReceiver : BroadcastReceiver() {
                 return
             }
 
-            // Tight grace window — if this fire is more than 5 minutes
-            // late we silently skip. Prevents the "alarm I missed an
-            // hour ago fired the moment I unplugged" surprise.
+            // Round 33: play even if late (up to 15 min). Skipping at 5 min
+            // caused "schedule never played" when allowWhileIdle / Doze
+            // delayed delivery past the old gate.
             if (slotEpochMs > 0) {
                 val deltaMs = System.currentTimeMillis() - slotEpochMs
-                if (deltaMs > 5 * 60 * 1000L) {
-                    Log.w(TAG, "alarm is ${deltaMs}ms late, skipping")
+                if (deltaMs > 15 * 60 * 1000L) {
+                    Log.w(TAG, "alarm is ${deltaMs}ms late (>15m); skipping")
                     return
+                }
+                if (deltaMs > 60_000L) {
+                    Log.w(TAG, "alarm is ${deltaMs}ms late; still playing")
                 }
             }
 
@@ -132,17 +148,22 @@ class WhisperAlarmReceiver : BroadcastReceiver() {
                 }
             }
 
+            var started = false
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     context.startForegroundService(serviceIntent)
                 } else {
                     context.startService(serviceIntent)
                 }
+                started = true
             } catch (t: Throwable) {
                 // ForegroundServiceStartNotAllowedException can land here
                 // if the OS decided this alarm doesn't count as a user
                 // wake-up (e.g. duplicate firing during a Doze unbox).
                 Log.e(TAG, "startForegroundService failed", t)
+            }
+            if (started && !scheduleId.isNullOrBlank()) {
+                markFireDelivered(context, scheduleId, slotEpochMs)
             }
 
             // Round 24 — after handing off to the FG service, top up the

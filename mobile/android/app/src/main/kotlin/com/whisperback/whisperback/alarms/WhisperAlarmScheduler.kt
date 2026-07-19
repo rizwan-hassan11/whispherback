@@ -5,7 +5,6 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
-import android.os.Build
 import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
@@ -116,10 +115,12 @@ class WhisperAlarmScheduler private constructor(private val appContext: Context)
      */
     fun setSnapshot(snapshotJson: String): Int {
         return try {
-            cancelAllInternal()
-            prefs.edit().putString(KEY_SNAPSHOT_JSON, snapshotJson).apply()
-            val registered = registerFromJson(snapshotJson)
-            Log.i(TAG, "snapshot applied: registered=$registered fires")
+            // Round 33: persist then DIFF-sync. Never cancelAll first —
+            // that dropped the next PendingIntent mid-delivery window
+            // (QA: intermittent missed / late fires).
+            prefs.edit().putString(KEY_SNAPSHOT_JSON, snapshotJson).commit()
+            val registered = syncFromJson(snapshotJson)
+            Log.i(TAG, "snapshot applied: armed=$registered fires")
             registered
         } catch (t: Throwable) {
             Log.e(TAG, "setSnapshot failed", t)
@@ -282,57 +283,94 @@ class WhisperAlarmScheduler private constructor(private val appContext: Context)
         }
     }
 
-    private fun registerFromJson(json: String, replaceAll: Boolean = true): Int {
+    /**
+     * Round 33 — diff-sync alarm table: cancel removed epochs, keep
+     * overlapping ones, append new. Never wipe the whole table first.
+     */
+    private fun syncFromJson(json: String): Int {
         val now = System.currentTimeMillis()
-        val existingEpochs = linkedSetOf<Long>()
-        val existingIds = mutableListOf<Int>()
-        if (replaceAll) {
-            cancelAllInternal()
-        } else {
-            // Preserve already-armed alarms; only append new epochs.
-            try {
-                val epochRaw = prefs.getString(KEY_FIRE_EPOCHS, null)
-                if (epochRaw != null) {
-                    val arr = JSONArray(epochRaw)
-                    for (i in 0 until arr.length()) {
-                        existingEpochs.add(arr.optLong(i))
-                    }
-                }
-                val idRaw = prefs.getString(KEY_REQ_IDS, null)
-                if (idRaw != null) {
-                    val arr = JSONArray(idRaw)
-                    for (i in 0 until arr.length()) {
-                        existingIds.add(arr.optInt(i))
-                    }
-                }
-            } catch (t: Throwable) {
-                Log.e(TAG, "registerFromJson: load existing failed", t)
+        val desired = parseFires(json)
+            .filter { it.fireEpochMs > now }
+            .take(MAX_ALARMS)
+        val desiredEpochs = desired.map { it.fireEpochMs }.toSet()
+
+        val existing = loadEpochRequestMap()
+        // Cancel epochs no longer in the snapshot (schedule deleted/disabled).
+        for ((epoch, rid) in existing) {
+            if (epoch !in desiredEpochs) {
+                cancelRequestId(rid)
             }
         }
-        val fires = parseFires(json)
-        var registered = 0
-        val ids = existingIds.toMutableList()
-        val epochs = existingEpochs.toMutableSet()
-        var nextId = (ids.maxOrNull() ?: (REQUEST_ID_BASE - 1)) + 1
-        for (fire in fires) {
-            if (ids.size >= MAX_ALARMS) break
-            // Round 31: only FUTURE fires. Past/grace slots used to register
-            // and deliver immediately — QA heard "early" schedules.
-            if (fire.fireEpochMs <= now) continue
-            if (epochs.contains(fire.fireEpochMs)) continue
-            val requestId = if (replaceAll) REQUEST_ID_BASE + registered else nextId++
-            val ok = registerOne(requestId, fire)
-            if (ok) {
-                ids.add(requestId)
-                epochs.add(fire.fireEpochMs)
-                registered++
+        val kept = existing.filterKeys { it in desiredEpochs }.toMutableMap()
+        var nextId = (kept.values.maxOrNull() ?: (REQUEST_ID_BASE - 1)) + 1
+        var added = 0
+        for (fire in desired) {
+            if (kept.containsKey(fire.fireEpochMs)) continue
+            if (kept.size >= MAX_ALARMS) break
+            val rid = nextId++
+            if (registerOne(rid, fire)) {
+                kept[fire.fireEpochMs] = rid
+                added++
             }
+        }
+        saveEpochRequestMap(kept)
+        Log.i(TAG, "syncFromJson: kept=${kept.size} added=$added removed=${existing.size - kept.size + added}")
+        return kept.size
+    }
+
+    private fun loadEpochRequestMap(): MutableMap<Long, Int> {
+        val out = linkedMapOf<Long, Int>()
+        try {
+            val epochRaw = prefs.getString(KEY_FIRE_EPOCHS, null) ?: return out
+            val idRaw = prefs.getString(KEY_REQ_IDS, null) ?: return out
+            val epochs = JSONArray(epochRaw)
+            val ids = JSONArray(idRaw)
+            val n = minOf(epochs.length(), ids.length())
+            for (i in 0 until n) {
+                out[epochs.optLong(i)] = ids.optInt(i)
+            }
+        } catch (t: Throwable) {
+            Log.e(TAG, "loadEpochRequestMap failed", t)
+        }
+        return out
+    }
+
+    private fun saveEpochRequestMap(map: Map<Long, Int>) {
+        val epochs = JSONArray()
+        val ids = JSONArray()
+        for ((epoch, rid) in map) {
+            epochs.put(epoch)
+            ids.put(rid)
         }
         prefs.edit()
-            .putString(KEY_REQ_IDS, JSONArray(ids).toString())
-            .putString(KEY_FIRE_EPOCHS, JSONArray(epochs.toList()).toString())
-            .apply()
-        return registered
+            .putString(KEY_FIRE_EPOCHS, epochs.toString())
+            .putString(KEY_REQ_IDS, ids.toString())
+            .commit()
+    }
+
+    private fun cancelRequestId(requestId: Int) {
+        val mgr = alarmManager ?: return
+        try {
+            val pi = PendingIntent.getBroadcast(
+                appContext,
+                requestId,
+                templateIntent(),
+                PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE,
+            )
+            if (pi != null) {
+                mgr.cancel(pi)
+                pi.cancel()
+            }
+        } catch (t: Throwable) {
+            Log.e(TAG, "cancelRequestId($requestId) failed", t)
+        }
+    }
+
+    private fun registerFromJson(json: String, replaceAll: Boolean = true): Int {
+        if (replaceAll) {
+            cancelAllInternal()
+        }
+        return syncFromJson(json)
     }
 
     /** Cancel every alarm we currently track. */
@@ -343,7 +381,7 @@ class WhisperAlarmScheduler private constructor(private val appContext: Context)
                 .remove(KEY_REQ_IDS)
                 .remove(KEY_FIRE_EPOCHS)
                 .remove(KEY_SNAPSHOT_JSON)
-                .apply()
+                .commit()
         } catch (t: Throwable) {
             Log.e(TAG, "cancelAll failed", t)
         }
@@ -357,38 +395,20 @@ class WhisperAlarmScheduler private constructor(private val appContext: Context)
             for (i in 0 until arr.length()) {
                 val rid = arr.optInt(i, Int.MIN_VALUE)
                 if (rid == Int.MIN_VALUE) continue
-                try {
-                    val pi = PendingIntent.getBroadcast(
-                        appContext,
-                        rid,
-                        templateIntent(),
-                        PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE,
-                    )
-                    if (pi != null) {
-                        mgr.cancel(pi)
-                        pi.cancel()
-                    }
-                } catch (t: Throwable) {
-                    Log.e(TAG, "cancel rid=$rid failed", t)
-                }
+                cancelRequestId(rid)
             }
         } catch (t: Throwable) {
             Log.e(TAG, "cancelAllInternal parse failed", t)
         }
-        prefs.edit().remove(KEY_REQ_IDS).remove(KEY_FIRE_EPOCHS).apply()
+        prefs.edit().remove(KEY_REQ_IDS).remove(KEY_FIRE_EPOCHS).commit()
     }
 
     private fun registerOne(requestId: Int, fire: Fire): Boolean {
         val mgr = alarmManager ?: return false
-        // Android 12+ require canScheduleExactAlarms() before
-        // setAlarmClock(). If denied we fall back to
-        // setExactAndAllowWhileIdle (less reliable but still scheduled).
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (!mgr.canScheduleExactAlarms()) {
-                Log.w(TAG, "exact alarms denied; falling back to allowWhileIdle")
-                return registerAllowWhileIdle(requestId, fire)
-            }
-        }
+        // Round 33: ALWAYS prefer setAlarmClock (Doze-exempt, exact).
+        // Only fall back to allowWhileIdle if setAlarmClock throws —
+        // never silently prefer the throttled path when the permission
+        // check is flaky on OEMs.
         return try {
             val pi = buildPendingIntent(requestId, fire)
             val showIntent = openAppPendingIntent(requestId)

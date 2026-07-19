@@ -182,15 +182,18 @@ void main() {
               'Defense-in-depth: the service must check Active=ON before playing so a stale alarm can never surprise the user after they turned the toggle off.');
     });
 
-    test('WhisperAlarmReceiver enforces 5-minute lateness window', () {
+    test('WhisperAlarmReceiver enforces 15-minute lateness window', () {
       final src = _read(
           'android/app/src/main/kotlin/com/whisperback/whisperback/alarms/WhisperAlarmReceiver.kt');
-      expect(src, contains('5 * 60 * 1000L'),
+      expect(src, contains('15 * 60 * 1000L'),
           reason:
-              'A fire that is more than 5 minutes late must be skipped — otherwise a phone that was off all morning would dump every backlog whisper at once.');
+              'Round 33: play late alarms up to 15 minutes (Doze delay) instead of silently dropping at 5 minutes.');
       expect(src, contains('startForegroundService'),
           reason:
               'The receiver must use startForegroundService (Android 8+) so we have the FG-start grant.');
+      expect(src, contains('markFireDelivered'),
+          reason:
+              'Dedup must stamp only AFTER a successful FG start so a failed start can retry.');
     });
 
     test(
@@ -201,12 +204,12 @@ void main() {
       expect(src, contains('setAlarmClock'),
           reason:
               'setAlarmClock is the highest-reliability alarm class and the only one Doze-exempts.');
-      expect(src, contains('canScheduleExactAlarms'),
+      expect(src, contains('syncFromJson'),
           reason:
-              'On Android 12+ we must check the runtime grant before calling setAlarmClock or we crash.');
+              'Round 33: diff-sync must exist so setSnapshot never cancelAll mid-delivery.');
       expect(src, contains('setExactAndAllowWhileIdle'),
           reason:
-              'If exact alarms are denied (user revoked SCHEDULE_EXACT_ALARM) we must fall back so the user still gets near-on-time alarms.');
+              'If setAlarmClock throws SecurityException we fall back so the user still gets near-on-time alarms.');
       expect(src, contains('FLAG_IMMUTABLE'),
           reason:
               'Android 12+ requires immutable PendingIntents — without this flag setAlarmClock throws on launch.');
