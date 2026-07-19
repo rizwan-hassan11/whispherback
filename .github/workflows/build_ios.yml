@@ -1,0 +1,55 @@
+name: Build iOS (no codesign)
+
+# Builds an unsigned iOS archive on macOS so we catch compile breaks for
+# iPhone. App Store / TestFlight IPA still needs Apple signing secrets
+# (certificates + provisioning) — add those later for a signed artifact.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'mobile/**'
+      - '.github/workflows/build_ios.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'mobile/**'
+      - '.github/workflows/build_ios.yml'
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: mobile
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos
+
+      - name: Test
+        run: flutter test
+
+      # Unsigned build verifies the iOS target compiles on every phone
+      # model Flutter supports. No Apple Developer cert required.
+      - name: Build iOS (no codesign)
+        run: flutter build ios --release --no-codesign --dart-define=FLAVOR=dev
+
+      - name: Upload unsigned Runner.app
+        uses: actions/upload-artifact@v4
+        with:
+          name: whisperback-ios-unsigned
+          path: mobile/build/ios/iphoneos/Runner.app
+          retention-days: 14
+          if-no-files-found: warn

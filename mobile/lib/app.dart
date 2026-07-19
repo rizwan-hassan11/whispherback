@@ -13,7 +13,6 @@ import 'providers/settings_provider.dart';
 import 'services/notifications/notification_service.dart';
 import 'services/notifications/notification_sync.dart';
 import 'services/platform/android_runtime_permissions.dart';
-import 'services/platform/permission_prompt.dart';
 import 'services/scheduler/native_alarms_bridge.dart';
 import 'services/scheduler/schedule_engine.dart';
 import 'services/scheduler/schedule_engine_binding.dart';

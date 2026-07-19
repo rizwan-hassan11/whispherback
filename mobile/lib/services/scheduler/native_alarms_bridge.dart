@@ -131,12 +131,6 @@ class NativeAlarmsBridge {
   /// MUST NOT touch the alarm table.
   String? _lastStructuralFingerprint;
 
-  /// Round 24 — millis at which we last actually re-registered the
-  /// alarm table. Used by `refreshTail` to decide whether the tail
-  /// might have dried up (e.g. after ~24 h since last register we
-  /// should proactively re-register the tail regardless of structure).
-  DateTime? _lastRegisteredAt;
-
   /// Broadcasts every native playback state transition to the Dart side.
   /// The `PlaybackCoordinator` subscribes so it can light up the mini-
   /// player when a scheduled clip starts, flip the play/pause icon when
@@ -152,7 +146,6 @@ class NativeAlarmsBridge {
   @visibleForTesting
   void debugResetFingerprint() {
     _lastStructuralFingerprint = null;
-    _lastRegisteredAt = null;
   }
 
   Future<void> _onMethodCall(MethodCall call) async {
@@ -272,7 +265,6 @@ class NativeAlarmsBridge {
     // append-only refill keeps the tail alive; Dart rebuilds only when
     // schedule STRUCTURE changes (or the caller passes forceRebuild).
     final now = DateTime.now();
-    const needsPeriodicRefill = false;
 
     if (!forceRebuild && structuralFingerprint == _lastStructuralFingerprint) {
       if (kDebugMode) {
@@ -283,7 +275,7 @@ class NativeAlarmsBridge {
     }
 
     // ── STAGE 3: project fires. Only reached when the structure changed
-    // OR the periodic refill window elapsed OR the caller forced it.
+    // or the caller forced it.
     final fires = <Map<String, Object?>>[];
     final lastFired = ScheduleLastFiredStore.instance;
     for (final schedule in enabled) {
@@ -341,7 +333,6 @@ class NativeAlarmsBridge {
     final json = jsonEncode(trimmed);
 
     _lastStructuralFingerprint = structuralFingerprint;
-    _lastRegisteredAt = now;
     try {
       final registered = await _channel.invokeMethod<int>('setSnapshot', {
         'snapshot': json,
@@ -349,7 +340,7 @@ class NativeAlarmsBridge {
       });
       if (kDebugMode) {
         print('NativeAlarmsBridge: native registered $registered alarms '
-            '(structural=${forceRebuild ? "force" : needsPeriodicRefill ? "refill" : "change"})');
+            '(structural=${forceRebuild ? "force" : "change"})');
       }
     } on MissingPluginException {
       if (kDebugMode) {
@@ -365,7 +356,6 @@ class NativeAlarmsBridge {
   Future<void> cancelAll() async {
     if (!Platform.isAndroid) return;
     _lastStructuralFingerprint = null;
-    _lastRegisteredAt = null;
     try {
       await _channel.invokeMethod<void>('cancelAll');
     } on MissingPluginException {

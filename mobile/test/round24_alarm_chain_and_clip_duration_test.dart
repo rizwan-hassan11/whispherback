@@ -117,24 +117,24 @@ void main() {
     });
 
     test(
-        'NativeAlarmsBridge.applySnapshot disables timer-based cancel+rebuild '
+        'NativeAlarmsBridge.applySnapshot only rebuilds on structural change '
         '(Round 31: native append-only refill owns the tail)', () {
       final src = _read('lib/services/scheduler/native_alarms_bridge.dart');
-      expect(src, contains('_lastRegisteredAt'),
-          reason: 'A wall-clock stamp of the last real register call must '
-              'exist so logs / force paths can still use it.');
-      expect(src, contains('needsPeriodicRefill'),
-          reason: 'The refill decision must be named so the log line at the '
-              'bottom is meaningful ("structural=refill").');
-      expect(src, contains('const needsPeriodicRefill = false'),
-          reason: 'Round 31: timer-forced cancel+rebuild caused early/late '
-              'fires; native append-only refill owns the tail instead.');
+      expect(src, contains('_lastStructuralFingerprint'),
+          reason: 'Structural fingerprint must still gate cancel+rebuild.');
+      expect(src, contains('forceRebuild'),
+          reason: 'Callers must still be able to force a full rebuild.');
+      expect(src, isNot(contains('_lastRegisteredAt')),
+          reason: 'Timer-based 12h rebuild stamp was removed — it caused '
+              'cancel+rebuild churn and analyze unused_field warnings.');
+      expect(src, isNot(contains('needsPeriodicRefill')),
+          reason: 'Periodic refill flag was removed with the timer rebuild.');
     });
 
     test(
-        'NativeAlarmsBridge.cancelAll invalidates BOTH the structural '
-        'fingerprint AND the last-registered stamp so a subsequent '
-        'applySnapshot is guaranteed to re-register from scratch', () {
+        'NativeAlarmsBridge.cancelAll invalidates the structural '
+        'fingerprint so a subsequent applySnapshot re-registers from scratch',
+        () {
       final src = _read('lib/services/scheduler/native_alarms_bridge.dart');
       final cancelIdx = src.indexOf('Future<void> cancelAll()');
       expect(cancelIdx, greaterThanOrEqualTo(0));
@@ -143,9 +143,6 @@ void main() {
           reason: 'The fingerprint must be reset on cancel; otherwise the '
               'next applySnapshot might no-op because the fingerprint '
               'still matches an ALREADY-CANCELLED table.');
-      expect(cancelBody, contains('_lastRegisteredAt = null'),
-          reason: 'The last-registered stamp must be reset so the next '
-              'applySnapshot after cancel re-registers from scratch.');
     });
 
     test(
