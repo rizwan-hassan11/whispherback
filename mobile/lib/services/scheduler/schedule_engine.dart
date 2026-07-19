@@ -12,6 +12,7 @@ import '../../providers/playback_providers.dart';
 import '../../providers/repository_providers.dart';
 import '../notifications/notification_sync.dart';
 import '../playback/playback_coordinator.dart';
+import 'native_alarms_bridge.dart';
 import 'schedule_engine_binding.dart';
 import 'schedule_fire_helper.dart';
 import 'schedule_last_fired_store.dart';
@@ -254,6 +255,21 @@ class ScheduleEngine {
     // exact QA report ("when I close the app it stops playing,
     // notification disappears"). `enterForeground` is idempotent and
     // returns immediately if a clip is already playing.
+    //
+    // Round 31: if native MediaPlayer owns a schedule, skip the entire
+    // heartbeat path (including notification sync silence refresh) so
+    // ExoPlayer cannot steal focus mid-clip.
+    try {
+      final native = await NativeAlarmsBridge.instance.fetchPlaybackState();
+      if (native.isNativeActive) {
+        _coordinator.applyNativePlaybackSnapshot(native);
+        return;
+      }
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint('ScheduleEngine: native poll failed: $e\n$st');
+      }
+    }
     try {
       await _coordinator.ensureForegroundForSchedule();
     } catch (e, st) {

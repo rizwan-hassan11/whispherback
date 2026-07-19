@@ -117,18 +117,18 @@ void main() {
     });
 
     test(
-        'NativeAlarmsBridge.applySnapshot has a periodic-refill window so '
-        'the alarm table cannot silently dry up on multi-day sessions', () {
+        'NativeAlarmsBridge.applySnapshot disables timer-based cancel+rebuild '
+        '(Round 31: native append-only refill owns the tail)', () {
       final src = _read('lib/services/scheduler/native_alarms_bridge.dart');
       expect(src, contains('_lastRegisteredAt'),
           reason: 'A wall-clock stamp of the last real register call must '
-              'exist so the refill window can be computed.');
-      expect(src, contains('const Duration(hours: 12)'),
-          reason: '12 h refill window keeps the tail warm without churning '
-              'AlarmManager every minute.');
+              'exist so logs / force paths can still use it.');
       expect(src, contains('needsPeriodicRefill'),
           reason: 'The refill decision must be named so the log line at the '
               'bottom is meaningful ("structural=refill").');
+      expect(src, contains('const needsPeriodicRefill = false'),
+          reason: 'Round 31: timer-forced cancel+rebuild caused early/late '
+              'fires; native append-only refill owns the tail instead.');
     });
 
     test(
@@ -144,9 +144,8 @@ void main() {
               'next applySnapshot might no-op because the fingerprint '
               'still matches an ALREADY-CANCELLED table.');
       expect(cancelBody, contains('_lastRegisteredAt = null'),
-          reason: 'The last-registered stamp must be reset so the periodic '
-              'refill fires immediately on the next applySnapshot instead '
-              'of waiting 12 h.');
+          reason: 'The last-registered stamp must be reset so the next '
+              'applySnapshot after cancel re-registers from scratch.');
     });
 
     test(

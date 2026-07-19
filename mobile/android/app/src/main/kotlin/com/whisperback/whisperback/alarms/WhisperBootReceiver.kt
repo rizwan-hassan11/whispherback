@@ -22,7 +22,9 @@ import android.util.Log
 class WhisperBootReceiver : BroadcastReceiver() {
     companion object {
         private const val TAG = "WhisperBootRcv"
+        /** @deprecated Round 31 — use WhisperAlarmScheduler prefs/key only. */
         const val SNAPSHOT_PREFS = "whisperback.alarms.snapshot"
+        /** @deprecated Round 31 — migrated to snapshot_json_v2. */
         const val KEY_SNAPSHOT_JSON = "snapshot_json"
     }
 
@@ -37,9 +39,24 @@ class WhisperBootReceiver : BroadcastReceiver() {
                 return
             }
             Log.i(TAG, "boot action=$action; replaying snapshot")
-            val prefs = context.getSharedPreferences(SNAPSHOT_PREFS, Context.MODE_PRIVATE)
-            val json = prefs.getString(KEY_SNAPSHOT_JSON, null) ?: return
-            if (json.isBlank()) return
+            // Round 31: read the SAME prefs/key as WhisperAlarmScheduler.
+            // Boot previously read snapshot_json from a different file than
+            // setSnapshot wrote (v2) — after reboot the alarm table was empty
+            // or stale until the user opened the app (QA: late/missed fires).
+            val schedulerPrefs =
+                context.getSharedPreferences(WhisperAlarmScheduler.PREFS, Context.MODE_PRIVATE)
+            var json = schedulerPrefs.getString(WhisperAlarmScheduler.KEY_SNAPSHOT_JSON, null)
+            if (json.isNullOrBlank()) {
+                val legacy = context.getSharedPreferences(SNAPSHOT_PREFS, Context.MODE_PRIVATE)
+                json = legacy.getString(KEY_SNAPSHOT_JSON, null)
+                if (!json.isNullOrBlank()) {
+                    schedulerPrefs.edit()
+                        .putString(WhisperAlarmScheduler.KEY_SNAPSHOT_JSON, json)
+                        .apply()
+                    Log.i(TAG, "migrated legacy boot snapshot to v2")
+                }
+            }
+            if (json.isNullOrBlank()) return
             val count = WhisperAlarmScheduler.get(context).setSnapshot(json)
             Log.i(TAG, "re-armed $count alarms after $action")
         } catch (t: Throwable) {

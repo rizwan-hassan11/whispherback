@@ -45,8 +45,12 @@ import org.json.JSONObject
 class WhisperAlarmScheduler private constructor(private val appContext: Context) {
     companion object {
         private const val TAG = "WhisperAlarmSched"
-        private const val PREFS = "whisperback.alarms"
+        /** Same prefs file boot receiver + MainActivity must use. */
+        const val PREFS = "whisperback.alarms"
         private const val KEY_REQ_IDS = "registered_request_ids"
+        // Round 31: fire epochs currently armed — used for append-only refill
+        // so we never cancelAll on the hot path mid-delivery.
+        private const val KEY_FIRE_EPOCHS = "registered_fire_epochs"
         // Round 24 — persist the full projected snapshot so the receiver
         // can re-arm the tail on every fire without needing Dart alive.
         // The prior Round-23 model relied on the coordinator refreshing
@@ -192,7 +196,10 @@ class WhisperAlarmScheduler private constructor(private val appContext: Context)
             // has been reaped by the OEM.
             val extended = extendSnapshot(json, targetSize = MAX_ALARMS / 2) ?: json
             prefs.edit().putString(KEY_SNAPSHOT_JSON, extended).apply()
-            val registered = registerFromJson(extended)
+            // Round 31: APPEND new PendingIntents only — never cancelAll on
+            // the receiver hot path. Cancel+re-register was shifting/dropping
+            // the next alarm mid-delivery (QA: early/late/inconsistent fires).
+            val registered = registerFromJson(extended, replaceAll = false)
             Log.i(TAG, "refill applied: registered=$registered (was $remaining, extended=${extended !== json})")
             registered
         } catch (t: Throwable) {
@@ -275,27 +282,56 @@ class WhisperAlarmScheduler private constructor(private val appContext: Context)
         }
     }
 
-    private fun registerFromJson(json: String): Int {
-        cancelAllInternal()
-        val fires = parseFires(json)
+    private fun registerFromJson(json: String, replaceAll: Boolean = true): Int {
         val now = System.currentTimeMillis()
+        val existingEpochs = linkedSetOf<Long>()
+        val existingIds = mutableListOf<Int>()
+        if (replaceAll) {
+            cancelAllInternal()
+        } else {
+            // Preserve already-armed alarms; only append new epochs.
+            try {
+                val epochRaw = prefs.getString(KEY_FIRE_EPOCHS, null)
+                if (epochRaw != null) {
+                    val arr = JSONArray(epochRaw)
+                    for (i in 0 until arr.length()) {
+                        existingEpochs.add(arr.optLong(i))
+                    }
+                }
+                val idRaw = prefs.getString(KEY_REQ_IDS, null)
+                if (idRaw != null) {
+                    val arr = JSONArray(idRaw)
+                    for (i in 0 until arr.length()) {
+                        existingIds.add(arr.optInt(i))
+                    }
+                }
+            } catch (t: Throwable) {
+                Log.e(TAG, "registerFromJson: load existing failed", t)
+            }
+        }
+        val fires = parseFires(json)
         var registered = 0
-        val ids = mutableListOf<Int>()
+        val ids = existingIds.toMutableList()
+        val epochs = existingEpochs.toMutableSet()
+        var nextId = (ids.maxOrNull() ?: (REQUEST_ID_BASE - 1)) + 1
         for (fire in fires) {
-            if (registered >= MAX_ALARMS) break
-            // Round 29: allow fires up to 2 minutes in the past so a
-            // grace-window "now" slot still gets a PendingIntent (the OS
-            // delivers it immediately). Previously `<= now` silently
-            // dropped the current slot when Active was toggled mid-minute.
-            if (fire.fireEpochMs < now - 2 * 60 * 1000L) continue
-            val requestId = REQUEST_ID_BASE + registered
+            if (ids.size >= MAX_ALARMS) break
+            // Round 31: only FUTURE fires. Past/grace slots used to register
+            // and deliver immediately — QA heard "early" schedules.
+            if (fire.fireEpochMs <= now) continue
+            if (epochs.contains(fire.fireEpochMs)) continue
+            val requestId = if (replaceAll) REQUEST_ID_BASE + registered else nextId++
             val ok = registerOne(requestId, fire)
             if (ok) {
                 ids.add(requestId)
+                epochs.add(fire.fireEpochMs)
                 registered++
             }
         }
-        prefs.edit().putString(KEY_REQ_IDS, JSONArray(ids).toString()).apply()
+        prefs.edit()
+            .putString(KEY_REQ_IDS, JSONArray(ids).toString())
+            .putString(KEY_FIRE_EPOCHS, JSONArray(epochs.toList()).toString())
+            .apply()
         return registered
     }
 
@@ -305,6 +341,7 @@ class WhisperAlarmScheduler private constructor(private val appContext: Context)
             cancelAllInternal()
             prefs.edit()
                 .remove(KEY_REQ_IDS)
+                .remove(KEY_FIRE_EPOCHS)
                 .remove(KEY_SNAPSHOT_JSON)
                 .apply()
         } catch (t: Throwable) {
@@ -338,6 +375,7 @@ class WhisperAlarmScheduler private constructor(private val appContext: Context)
         } catch (t: Throwable) {
             Log.e(TAG, "cancelAllInternal parse failed", t)
         }
+        prefs.edit().remove(KEY_REQ_IDS).remove(KEY_FIRE_EPOCHS).apply()
     }
 
     private fun registerOne(requestId: Int, fire: Fire): Boolean {

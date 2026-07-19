@@ -244,6 +244,22 @@ class WhisperPlaybackService : Service() {
             return
         }
 
+        // Round 31: if this exact clip is already playing, ignore the
+        // duplicate PLAY_CLIP (OEM redelivery / overlapping schedule)
+        // instead of releasePlayer() which sounded like auto-pause.
+        val alreadySame = mediaPlayer != null &&
+            wantPlaying &&
+            !userPaused &&
+            currentClipPath == clipPath &&
+            (mediaPlayer?.isPlaying == true)
+        if (alreadySame) {
+            Log.i(TAG, "duplicate PLAY_CLIP for same path; keeping current player")
+            writeState(STATE_PLAYING)
+            postPlaybackNotification(isPlaying = true)
+            notifyListener(STATE_PLAYING)
+            return
+        }
+
         currentClipPath = clipPath
         currentClipTitle = intent.getStringExtra(EXTRA_CLIP_TITLE) ?: "WhisperBack"
         currentPlaylistName = intent.getStringExtra(EXTRA_PLAYLIST_NAME) ?: "Scheduled whisper"

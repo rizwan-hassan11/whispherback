@@ -21,7 +21,8 @@ import '../../services/scheduler/native_alarms_bridge.dart';
 /// True when progress must come from native MediaPlayer (scheduled fire),
 /// not the Dart silence keep-alive's 10-second duration stream.
 bool _useNativeProgress(PlaybackSnapshot snapshot, AudioPlaybackService audio) {
-  return snapshot.state == AppPlaybackState.scheduledPlaying &&
+  return (snapshot.state == AppPlaybackState.scheduledPlaying ||
+          NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) &&
       audio.currentPath == null;
 }
 
@@ -73,39 +74,35 @@ class MiniPlayerBar extends ConsumerWidget {
     final snapshot = playback.valueOrNull;
     final coordinator = ref.read(playbackCoordinatorProvider);
     final audio = ref.read(audioPlaybackServiceProvider);
+    // Round 31: MUST watch the native provider so the bar rebuilds when
+    // AlarmManager starts MediaPlayer (prefs update → stateStream).
+    final nativeAsync = ref.watch(nativePlaybackProvider);
+    final native =
+        nativeAsync.valueOrNull ?? NativeAlarmsBridge.instance.lastSnapshot;
+
+    // Keep coordinator / pause routing in sync with native reality.
+    ref.listen<AsyncValue<NativePlaybackSnapshot>>(nativePlaybackProvider,
+        (prev, next) {
+      final n = next.valueOrNull;
+      if (n == null) return;
+      coordinator.applyNativePlaybackSnapshot(n);
+    });
 
     // Round 15: visibility contract — "IF audio is being played the bar
-    // MUST be visible. There is no edge case where audio is playing
-    // and the bar is hidden." (verbatim from QA)
-    //
-    // Visible IF:
-    //   • the snapshot is in a play context (`manualPlaying` /
-    //     `scheduledPlaying`) and the modal isn't covering it, OR
-    //   • a real CLIP is currently loaded in the handler and the
-    //     player is playing it (defensive: catches any race between
-    //     a state transition and the player's actual state). We use
-    //     `currentPath != null` so the silence keep-alive can never
-    //     mistakenly trigger the bar.
+    // MUST be visible."
     if (snapshot == null || snapshot.modalVisible) {
       return const SizedBox.shrink();
     }
-    final nativeLive = NativeAlarmsBridge.instance.lastSnapshot.isNativeActive;
+    final nativeLive = native.isNativeActive;
     final inPlayContext = snapshot.state == AppPlaybackState.manualPlaying ||
         snapshot.state == AppPlaybackState.scheduledPlaying ||
-        // Round 29: native may own audio before Dart emits scheduledPlaying.
         nativeLive;
     final clipActuallyPlaying = audio.currentPath != null && audio.isPlaying;
     if (!inPlayContext && !clipActuallyPlaying) {
       return const SizedBox.shrink();
     }
-    // Defensive: even if state is a play context, suppress when there
-    // is literally no clip metadata to render — unless native is live,
-    // in which case fall back to brand titles so the bar never vanishes
-    // mid-schedule.
-    final title = snapshot.clipTitle ??
-        NativeAlarmsBridge.instance.lastSnapshot.clipTitle;
-    final subtitle = snapshot.playlistName ??
-        NativeAlarmsBridge.instance.lastSnapshot.playlistName;
+    final title = snapshot.clipTitle ?? native.clipTitle;
+    final subtitle = snapshot.playlistName ?? native.playlistName;
     if (title == null && subtitle == null && !nativeLive) {
       return const SizedBox.shrink();
     }
@@ -163,9 +160,8 @@ class MiniPlayerBar extends ConsumerWidget {
             child: Row(
               children: [
                 _MiniCover(
-                  isPlaying: snapshot.isPlaying ||
-                      (nativeLive &&
-                          NativeAlarmsBridge.instance.lastSnapshot.isPlaying),
+                  isPlaying:
+                      snapshot.isPlaying || (nativeLive && native.isPlaying),
                   onTap: coordinator.showModal,
                   colors: coverColors,
                   hasSchedule: hasSchedule,
@@ -276,13 +272,11 @@ class MiniPlayerBar extends ConsumerWidget {
                         _safeCall(coordinator.skipPrevious, 'skipPrevious'),
                   ),
                 _MiniPlayPauseButton(
-                  isPlaying: snapshot.isPlaying ||
-                      (nativeLive &&
-                          NativeAlarmsBridge.instance.lastSnapshot.isPlaying),
+                  isPlaying:
+                      snapshot.isPlaying || (nativeLive && native.isPlaying),
                   onTap: () {
-                    final playing = snapshot.isPlaying ||
-                        (nativeLive &&
-                            NativeAlarmsBridge.instance.lastSnapshot.isPlaying);
+                    final playing =
+                        snapshot.isPlaying || (nativeLive && native.isPlaying);
                     if (playing) {
                       _safeCall(coordinator.pause, 'pause');
                     } else {

@@ -268,16 +268,13 @@ class NativeAlarmsBridge {
           ..sort();
     final structuralFingerprint = '$active|${structural.join('|')}';
 
-    // Refill window — if the last register was >12 h ago, force a
-    // rebuild even if the fingerprint matches, so the tail of the
-    // alarm table doesn't dry up on marathon (multi-day) sessions.
+    // Round 31: never force a full cancel+rebuild on a timer. Native
+    // append-only refill keeps the tail alive; Dart rebuilds only when
+    // schedule STRUCTURE changes (or the caller passes forceRebuild).
     final now = DateTime.now();
-    final needsPeriodicRefill = _lastRegisteredAt == null ||
-        now.difference(_lastRegisteredAt!) > const Duration(hours: 12);
+    const needsPeriodicRefill = false;
 
-    if (!forceRebuild &&
-        !needsPeriodicRefill &&
-        structuralFingerprint == _lastStructuralFingerprint) {
+    if (!forceRebuild && structuralFingerprint == _lastStructuralFingerprint) {
       if (kDebugMode) {
         print('NativeAlarmsBridge: structural fingerprint unchanged, '
             'alarm table left as-is (${enabled.length} schedules)');
@@ -309,12 +306,12 @@ class NativeAlarmsBridge {
           forDisplay: false,
         );
         if (next == null) break;
-        // Round 29: with forDisplay:false, next may be a grace-window
-        // "now" slot slightly in the past. Register it anyway — AlarmManager
-        // delivers immediately — so enabling Active mid-slot no longer
-        // silently skips the current whisper. Only drop slots that are
-        // older than the engine's lateness cap.
-        if (next.isBefore(now.subtract(ScheduleFireHelper.maxLateness))) {
+        // Round 31: only register FUTURE slots. Past/grace "now" slots
+        // used to arm immediate AlarmManager deliveries that QA heard as
+        // "schedule played early". Missed slots within lateness are
+        // recovered by the receiver when a correctly-timed alarm is late,
+        // not by projecting past times into the table.
+        if (!next.isAfter(now)) {
           cursor = next.add(const Duration(seconds: 1));
           continue;
         }

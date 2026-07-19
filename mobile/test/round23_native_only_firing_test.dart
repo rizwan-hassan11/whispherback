@@ -190,7 +190,7 @@ void main() {
               'card would stay stuck on the just-fired slot. In Round 24 the '
               'refresh is safe: the underlying `applySnapshot` is guarded by '
               'a structural fingerprint and only touches the alarm table when '
-              'the structure or the periodic-refill window (12 h) demands it.');
+              'the structure changes (Round 31: no 12h timer rebuild).');
       expect(handlerBody, contains('_stampNativeFireCompletion'),
           reason:
               'Completion stamp must be inside `_onNativePlaybackState` so the same handler both stamps AND refreshes.');

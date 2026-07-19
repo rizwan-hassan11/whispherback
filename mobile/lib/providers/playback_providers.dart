@@ -7,6 +7,7 @@ import '../services/audio/whisper_audio_handler.dart';
 import '../services/notifications/notification_sync.dart';
 import '../services/playback/playback_coordinator.dart';
 import '../services/prayer/prayer_service.dart';
+import '../services/scheduler/native_alarms_bridge.dart';
 import 'repository_providers.dart';
 
 final audioPlaybackServiceProvider = Provider<AudioPlaybackService>((ref) {
@@ -53,6 +54,16 @@ final playbackCoordinatorProvider = Provider<PlaybackCoordinator>((ref) {
 
 final playbackSnapshotProvider = StreamProvider<PlaybackSnapshot>((ref) {
   return ref.watch(playbackCoordinatorProvider).snapshotStream;
+});
+
+/// Round 31 — drives mini-player visibility from native prefs/stream.
+/// Reading `NativeAlarmsBridge.lastSnapshot` without watching a provider
+/// never rebuilt the bar when a schedule started with Flutter cold —
+/// audio played but the Spotify bar stayed hidden (QA blocker).
+final nativePlaybackProvider =
+    StreamProvider<NativePlaybackSnapshot>((ref) async* {
+  yield await NativeAlarmsBridge.instance.fetchPlaybackState();
+  yield* NativeAlarmsBridge.instance.stateStream;
 });
 
 final isAppActiveProvider = FutureProvider<bool>((ref) {

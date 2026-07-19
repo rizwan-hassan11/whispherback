@@ -351,6 +351,13 @@ class PlaybackCoordinator {
     startModeMonitoring();
   }
 
+  /// Round 31 — public entry so UI / providers can force the coordinator
+  /// to mirror native prefs even when the method-channel listener was
+  /// null (app cold-started after AlarmManager already started audio).
+  void applyNativePlaybackSnapshot(NativePlaybackSnapshot native) {
+    _onNativePlaybackState(native);
+  }
+
   /// Native FG MediaPlayer owns the session (playing or paused).
   bool get _nativeOwnsPlayback =>
       _nativeScheduledActive ||
