@@ -8,7 +8,9 @@ plugins {
 }
 
 // Pinned for CI clarity — keep in sync with Flutter stable (3.38+ uses API 36).
-// minSdk 24 = Android 7.0 (2016+). target/compile 36 = Android 16.
+// minSdk 24 = Android 7.0+ (includes Android 11 / API 30 and all current
+// Samsung / Xiaomi / OnePlus / Pixel phones). target/compile 36 = Android 16.
+// Exact-alarm + mediaPlayback FGS paths are hardened for Android 12+.
 // Use literals here: `compileSdkVersion` inside `android {}` is an AGP String? property.
 android {
     namespace = "com.whisperback.whisperback"
