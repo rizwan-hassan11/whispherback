@@ -77,6 +77,11 @@ class WhisperAlarmScheduler private constructor(private val appContext: Context)
         // filtered out. This keeps the alarm table topped up
         // indefinitely even if Flutter has been killed by the OEM.
         const val REFILL_THRESHOLD = 8
+        // Round 34 — never cancel an alarm that is about to fire. A structural
+        // rebuild (duration backfill / force realign after fire #1) used to
+        // drop the next PendingIntent in the delivery window, which QA heard
+        // as "later schedules early/late/missed".
+        private const val CANCEL_GRACE_MS = 90_000L
 
         @Volatile private var instance: WhisperAlarmScheduler? = null
 
@@ -230,17 +235,21 @@ class WhisperAlarmScheduler private constructor(private val appContext: Context)
             val grouped = fires.groupBy { it.scheduleId }
             val extras = mutableListOf<Fire>()
             for ((scheduleId, list) in grouped) {
-                if (list.size < 2) continue
                 val sorted = list.sortedBy { it.fireEpochMs }
-                val deltas = mutableListOf<Long>()
-                for (i in 1 until sorted.size) {
-                    deltas.add(sorted[i].fireEpochMs - sorted[i - 1].fireEpochMs)
-                }
-                val medianDelta = deltas.sorted()[deltas.size / 2]
-                if (medianDelta <= 0L) continue
                 val last = sorted.last()
+                // Round 34: prefer Dart-supplied effectiveStepMs so native
+                // refill matches NEXT SCHEDULES math (not a noisy median).
+                var stepMs = last.effectiveStepMs
+                if (stepMs <= 0L && sorted.size >= 2) {
+                    val deltas = mutableListOf<Long>()
+                    for (i in 1 until sorted.size) {
+                        deltas.add(sorted[i].fireEpochMs - sorted[i - 1].fireEpochMs)
+                    }
+                    stepMs = deltas.sorted()[deltas.size / 2]
+                }
+                if (stepMs <= 0L) continue
                 val futureCount = list.count { it.fireEpochMs > now }
-                var next = last.fireEpochMs + medianDelta
+                var next = last.fireEpochMs + stepMs
                 var added = 0
                 while (futureCount + added < targetSize) {
                     if (added > MAX_ALARMS) break
@@ -252,12 +261,13 @@ class WhisperAlarmScheduler private constructor(private val appContext: Context)
                             playlistName = last.playlistName,
                             fireEpochMs = next,
                             clipQueueJson = last.clipQueueJson,
+                            effectiveStepMs = stepMs,
                         )
                     )
                     added++
-                    next += medianDelta
+                    next += stepMs
                 }
-                Log.d(TAG, "extendSnapshot: scheduleId=$scheduleId added=$added medianDelta=${medianDelta}ms")
+                Log.d(TAG, "extendSnapshot: scheduleId=$scheduleId added=$added stepMs=${stepMs}ms")
             }
             if (extras.isEmpty()) return null
             fires.addAll(extras)
@@ -273,6 +283,9 @@ class WhisperAlarmScheduler private constructor(private val appContext: Context)
                     .put("fireEpochMs", f.fireEpochMs)
                 if (f.clipQueueJson.isNotBlank()) {
                     obj.put("clipQueueJson", f.clipQueueJson)
+                }
+                if (f.effectiveStepMs > 0L) {
+                    obj.put("effectiveStepMs", f.effectiveStepMs)
                 }
                 arr.put(obj)
             }
@@ -295,13 +308,21 @@ class WhisperAlarmScheduler private constructor(private val appContext: Context)
         val desiredEpochs = desired.map { it.fireEpochMs }.toSet()
 
         val existing = loadEpochRequestMap()
-        // Cancel epochs no longer in the snapshot (schedule deleted/disabled).
+        // Cancel epochs no longer in the snapshot (schedule deleted/disabled),
+        // but NEVER touch one inside the grace window — that PendingIntent
+        // may already be in OS delivery.
+        val graceUntil = now + CANCEL_GRACE_MS
         for ((epoch, rid) in existing) {
-            if (epoch !in desiredEpochs) {
-                cancelRequestId(rid)
+            if (epoch in desiredEpochs) continue
+            if (epoch in (now + 1)..graceUntil) {
+                Log.i(TAG, "syncFromJson: preserving imminent epoch=$epoch (grace)")
+                continue
             }
+            cancelRequestId(rid)
         }
-        val kept = existing.filterKeys { it in desiredEpochs }.toMutableMap()
+        val kept = existing.filterKeys { epoch ->
+            epoch in desiredEpochs || epoch in (now + 1)..graceUntil
+        }.toMutableMap()
         var nextId = (kept.values.maxOrNull() ?: (REQUEST_ID_BASE - 1)) + 1
         var added = 0
         for (fire in desired) {
@@ -476,6 +497,7 @@ class WhisperAlarmScheduler private constructor(private val appContext: Context)
         val playlistName: String,
         val fireEpochMs: Long,
         val clipQueueJson: String = "",
+        val effectiveStepMs: Long = 0L,
     )
 
     private fun parseFires(json: String): List<Fire> {
@@ -502,8 +524,9 @@ class WhisperAlarmScheduler private constructor(private val appContext: Context)
             val playlistName = obj.optString("playlistName").ifBlank { "Scheduled whisper" }
             val clipQueueJson = obj.optString("clipQueueJson", "")
             val fireMs = obj.optLong("fireEpochMs", 0L)
+            val stepMs = obj.optLong("effectiveStepMs", 0L)
             if (fireMs <= 0L) return null
-            Fire(scheduleId, clipPath, clipTitle, playlistName, fireMs, clipQueueJson)
+            Fire(scheduleId, clipPath, clipTitle, playlistName, fireMs, clipQueueJson, stepMs)
         } catch (t: Throwable) {
             Log.e(TAG, "parseFire failed", t)
             null

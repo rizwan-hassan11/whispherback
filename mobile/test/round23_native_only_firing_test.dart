@@ -184,13 +184,11 @@ void main() {
       final handlerEnd = src.indexOf('\n  }', handlerIdx);
       expect(handlerEnd, greaterThan(handlerIdx));
       final handlerBody = src.substring(handlerIdx, handlerEnd);
-      expect(handlerBody, contains('refreshScheduleNotifications?.call()'),
+      expect(handlerBody, contains('forceAlarmRebuild: true'),
           reason:
-              'Without a refresh on completion, the "next in ..." notification '
-              'card would stay stuck on the just-fired slot. In Round 24 the '
-              'refresh is safe: the underlying `applySnapshot` is guarded by '
-              'a structural fingerprint and only touches the alarm table when '
-              'the structure changes (Round 31: no 12h timer rebuild).');
+              'Round 34: after each native fire we MUST realign AlarmManager '
+              'to the actual completion cursor so later fires match NEXT '
+              'SCHEDULES (diff-sync + grace window make this safe).');
       expect(handlerBody, contains('_stampNativeFireCompletion'),
           reason:
               'Completion stamp must be inside `_onNativePlaybackState` so the same handler both stamps AND refreshes.');

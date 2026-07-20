@@ -441,6 +441,19 @@ class PlaybackCoordinator {
                 ? native.durationMs
                 : _snapshot.durationMs,
           ));
+        } else if (native.durationMs > 0 &&
+            native.durationMs != _snapshot.durationMs) {
+          // Progress-only tick: keep duration fresh so the mini-player
+          // scrubber does not stick at 0:00 after prepare.
+          _emit(_snapshot.copyWith(
+            state: AppPlaybackState.scheduledPlaying,
+            isPlaying: true,
+            durationMs: native.durationMs,
+            playlistName:
+                native.playlistName ?? _snapshot.playlistName ?? 'WhisperBack',
+            clipTitle:
+                native.clipTitle ?? _snapshot.clipTitle ?? 'Scheduled whisper',
+          ));
         }
         return;
       }
@@ -503,18 +516,18 @@ class PlaybackCoordinator {
             modalVisible: false,
           ));
         }
-        // Refresh only the LOCAL notification card so "next in 5 min"
-        // updates. This is `flutter_local_notifications` land, NOT
-        // AlarmManager; the tail-refill decision is now the sole
-        // responsibility of `applySnapshot`'s periodic-refill window
-        // (default 12 h) and the schedule editor CRUD path.
+        // Round 34: REALIGN AlarmManager to the actual completion cursor.
+        // Pre-registered epochs used estimated playlistDuration; UI
+        // NEXT SCHEDULES uses real completion + interval. Without a
+        // forced rebuild after fire #1, later fires drifted early/late
+        // by 1–2 minutes. Diff-sync + grace window make this safe.
         unawaited(() async {
           try {
-            await refreshScheduleNotifications?.call();
+            await refreshScheduleNotifications?.call(forceAlarmRebuild: true);
           } catch (e, st) {
             if (kDebugMode) {
               debugPrint(
-                  'coordinator refresh after native fire failed: $e\n$st');
+                  'coordinator realign after native fire failed: $e\n$st');
             }
           }
         }());
@@ -1540,7 +1553,8 @@ class PlaybackCoordinator {
       // FG service (not just_audio), `_audio.pause()` is a no-op. Route
       // the pause request through the native bridge so the actual
       // audio actually stops.
-      if (_nativeOwnsPlayback) {
+      if (_nativeOwnsPlayback ||
+          NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
         _nativeScheduledActive = true;
         try {
           await NativeAlarmsBridge.instance.pauseNative();
@@ -1722,7 +1736,8 @@ class PlaybackCoordinator {
       // the native FG service, the resume tap must go back to native so
       // the MediaPlayer actually resumes. just_audio's resume would be a
       // no-op (nothing was queued in it).
-      if (_nativeOwnsPlayback) {
+      if (_nativeOwnsPlayback ||
+          NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
         _nativeScheduledActive = true;
         try {
           await NativeAlarmsBridge.instance.resumeNative();

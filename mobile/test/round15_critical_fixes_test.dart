@@ -164,7 +164,7 @@ void main() {
       expect(ScheduleFireHelper.effectiveStepMinutes(schedule), 16);
     });
 
-    test('effectiveStepMinutes falls back to interval when duration is 0', () {
+    test('effectiveStepMinutes uses 60s duration floor when duration is 0', () {
       final schedule = PlaybackSchedule(
         id: 's1',
         playlistId: 'p1',
@@ -175,10 +175,14 @@ void main() {
       );
       expect(
         ScheduleFireHelper.effectiveStepMinutes(schedule),
-        10,
-        reason: 'When the playlist has no clips yet, the helper must '
-            'gracefully degrade to interval-only timing instead of '
-            'returning 0 and crashing the engine loop.',
+        11,
+        reason: 'Round 34: unknown playlist length must NOT collapse to '
+            'interval-only (that made later alarms fire early). Use a '
+            '60s floor → 10m + 1m = 11m.',
+      );
+      expect(
+        ScheduleFireHelper.effectiveStep(schedule),
+        const Duration(minutes: 11),
       );
     });
 

@@ -164,27 +164,33 @@ abstract final class ScheduleFireHelper {
           //     treat case 2 — project end.
           DateTime projectedEnd;
           const placeholderTolerance = Duration(seconds: 5);
-          if (lastFired != null &&
-              lastSlot != null &&
-              lastFired.difference(lastSlot) > placeholderTolerance) {
+          // Round 34: if only `lastFired` is provided (no lastSlot), treat it
+          // as a real completion — that is how the engine and tests stamp
+          // end-of-clip. Applying the unknown-duration floor here added an
+          // extra 60s and made NEXT SCHEDULES drift.
+          final completionKnown = lastFired != null &&
+              (lastSlot == null ||
+                  lastFired.difference(lastSlot) > placeholderTolerance);
+          if (completionKnown) {
             // Case 1: real completion known.
-            projectedEnd = lastFired;
+            projectedEnd = lastFired!;
           } else {
             // Case 2: still playing or only the slot stamp exists.
             final base = referenceFired;
-            projectedEnd = base.add(
-              Duration(milliseconds: schedule.playlistDurationMs),
-            );
+            final durationMs = schedule.playlistDurationMs > 0
+                ? schedule.playlistDurationMs
+                : 60 * 1000;
+            projectedEnd = base.add(Duration(milliseconds: durationMs));
           }
           slot = projectedEnd.add(Duration(minutes: schedule.intervalMinutes));
         }
       }
 
-      // Round 15: step between grid slots = playlistDuration + interval.
-      // This is the same effective step used by `intervalAlarmSlots`
-      // so the engine, alarm scheduler, and display all agree on what
-      // the next grid line is.
-      final stepDuration = Duration(minutes: effectiveStepMinutes(schedule));
+      // Round 15 / Round 34: step between grid slots must match
+      // interval-from-end math in milliseconds — minute-rounding of
+      // playlist duration made later fires drift 1–2 minutes vs the
+      // NEXT SCHEDULES UI (which uses actual completion + interval).
+      final stepDuration = effectiveStep(schedule);
 
       while (true) {
         if (end != null && slot.isAfter(end)) break;
@@ -346,7 +352,7 @@ abstract final class ScheduleFireHelper {
           when: slot,
           playlistName: s.playlistName.isEmpty ? 'WhisperBack' : s.playlistName,
         ));
-        final step = Duration(minutes: effectiveStepMinutes(s));
+        final step = effectiveStep(s);
         slot = slot.add(step);
         final end = _endOnDay(s, slot);
         if (end != null && slot.isAfter(end)) break;
@@ -413,15 +419,31 @@ abstract final class ScheduleFireHelper {
     }
   }
 
-  /// Effective step between successive fires in minutes
-  /// = `playlistDurationMinutes + intervalMinutes`, rounded UP.
-  /// Falls back to `intervalMinutes` alone when the playlist
-  /// duration is unknown / 0.
+  /// Effective step between successive fires
+  /// = `playlistDuration + interval`, in millisecond precision.
+  ///
+  /// Round 34: previously [effectiveStepMinutes] rounded playlist duration
+  /// UP to whole minutes (90s → 2 min), so AlarmManager epochs and the
+  /// NEXT SCHEDULES UI drifted by 1–2 minutes after the first fire.
+  /// Falls back to a 60s placeholder duration when the playlist length
+  /// is still unknown so we never register "interval-only" steps that
+  /// fire early once durations backfill.
+  static Duration effectiveStep(PlaybackSchedule schedule) {
+    final durationMs = schedule.playlistDurationMs > 0
+        ? schedule.playlistDurationMs
+        : 60 * 1000; // unknown length — conservative 1 minute
+    final total = Duration(minutes: schedule.intervalMinutes) +
+        Duration(milliseconds: durationMs);
+    return total < const Duration(minutes: 1)
+        ? const Duration(minutes: 1)
+        : total;
+  }
+
+  /// Effective step between successive fires in whole minutes
+  /// (ceil). Prefer [effectiveStep] for alarm / next-fire math.
   static int effectiveStepMinutes(PlaybackSchedule schedule) {
-    final durationMinutes = schedule.playlistDurationMs > 0
-        ? ((schedule.playlistDurationMs + 59999) ~/ 60000)
-        : 0;
-    final step = schedule.intervalMinutes + durationMinutes;
-    return step < 1 ? 1 : step;
+    final ms = effectiveStep(schedule).inMilliseconds;
+    final minutes = (ms + 59999) ~/ 60000;
+    return minutes < 1 ? 1 : minutes;
   }
 }

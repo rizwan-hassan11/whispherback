@@ -191,9 +191,22 @@ void main() {
       expect(src, contains('startForegroundService'),
           reason:
               'The receiver must use startForegroundService (Android 8+) so we have the FG-start grant.');
-      expect(src, contains('markFireDelivered'),
+      expect(src, contains('EXTRA_SLOT_EPOCH_MS'),
           reason:
-              'Dedup must stamp only AFTER a successful FG start so a failed start can retry.');
+              'Receiver must pass the slot epoch so the service can stamp dedup after MediaPlayer.start.');
+      expect(src, contains('WhisperPlaybackService.EXTRA_SLOT_EPOCH_MS'),
+          reason: 'Slot epoch must be forwarded on the PLAY_CLIP intent.');
+    });
+
+    test('WhisperPlaybackService stamps dedup after MediaPlayer.start', () {
+      final src = _read(
+          'android/app/src/main/kotlin/com/whisperback/whisperback/alarms/WhisperPlaybackService.kt');
+      expect(src, contains('markFireDeliveredAfterStart'),
+          reason:
+              'Round 34: dedup stamps only AFTER MediaPlayer.start so a failed prepare can still retry.');
+      expect(src, contains('rehydrateFromPrefsIfNeeded'),
+          reason:
+              'Resume from notification must rehydrate when MediaPlayer was reclaimed.');
     });
 
     test(
@@ -207,6 +220,12 @@ void main() {
       expect(src, contains('syncFromJson'),
           reason:
               'Round 33: diff-sync must exist so setSnapshot never cancelAll mid-delivery.');
+      expect(src, contains('CANCEL_GRACE_MS'),
+          reason:
+              'Round 34: grace window must preserve imminent alarms during realign.');
+      expect(src, contains('effectiveStepMs'),
+          reason:
+              'Round 34: native refill must use Dart step ms, not noisy median.');
       expect(src, contains('setExactAndAllowWhileIdle'),
           reason:
               'If setAlarmClock throws SecurityException we fall back so the user still gets near-on-time alarms.');

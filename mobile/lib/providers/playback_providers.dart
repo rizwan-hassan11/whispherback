@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/playback/playback_state.dart';
@@ -56,14 +58,33 @@ final playbackSnapshotProvider = StreamProvider<PlaybackSnapshot>((ref) {
   return ref.watch(playbackCoordinatorProvider).snapshotStream;
 });
 
-/// Round 31 — drives mini-player visibility from native prefs/stream.
-/// Reading `NativeAlarmsBridge.lastSnapshot` without watching a provider
-/// never rebuilt the bar when a schedule started with Flutter cold —
-/// audio played but the Spotify bar stayed hidden (QA blocker).
+/// Round 31 / 34 — drives mini-player visibility from native prefs/stream.
+/// Polls every 1.5s so Activity destruction (which used to null the
+/// method-channel listener) cannot leave the Spotify bar hidden while
+/// MediaPlayer is still audible.
 final nativePlaybackProvider =
     StreamProvider<NativePlaybackSnapshot>((ref) async* {
   yield await NativeAlarmsBridge.instance.fetchPlaybackState();
-  yield* NativeAlarmsBridge.instance.stateStream;
+  final controller = StreamController<NativePlaybackSnapshot>();
+  StreamSubscription<NativePlaybackSnapshot>? sub;
+  Timer? poll;
+  void emit(NativePlaybackSnapshot snap) {
+    if (!controller.isClosed) controller.add(snap);
+  }
+
+  sub = NativeAlarmsBridge.instance.stateStream.listen(emit);
+  poll = Timer.periodic(const Duration(milliseconds: 1500), (_) async {
+    try {
+      final snap = await NativeAlarmsBridge.instance.fetchPlaybackState();
+      emit(snap);
+    } catch (_) {}
+  });
+  ref.onDispose(() {
+    sub?.cancel();
+    poll?.cancel();
+    controller.close();
+  });
+  yield* controller.stream;
 });
 
 final isAppActiveProvider = FutureProvider<bool>((ref) {
@@ -88,6 +109,19 @@ final clipsProvider = FutureProvider((ref) {
     // ever bulk-import, riverpod naturally coalesces repeated
     // invalidations within a frame.
     ref.invalidateSelf();
+    // Round 34: duration was 0 when alarms were first armed → later
+    // fires were early by ~clip length. Force alarm realign once the
+    // native probe writes the real length.
+    unawaited(() async {
+      try {
+        await syncWhisperNotifications(
+          appState: ref.read(appStateRepositoryProvider),
+          schedules: ref.read(scheduleRepositoryProvider),
+          prayer: ref.read(prayerRepositoryProvider),
+          forceAlarmRebuild: true,
+        );
+      } catch (_) {}
+    }());
   });
   ref.onDispose(sub.cancel);
   return ref.watch(clipRepositoryProvider).getAll();

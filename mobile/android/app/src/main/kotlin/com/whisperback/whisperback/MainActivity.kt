@@ -34,11 +34,11 @@ class MainActivity : AudioServiceActivity() {
     }
 
     override fun onDestroy() {
-        // Round 22 — drop the Dart-side listener so the service doesn't try
-        // to call back into a dead Flutter engine after the activity dies.
-        // (The mirrored-prefs path means Dart still picks up state on
-        // re-launch.)
-        WhisperPlaybackService.stateListener = null
+        // Round 34: do NOT null stateListener here. OEMs destroy the
+        // Activity while MediaPlayer keeps playing; nulling the listener
+        // starved Dart of play/pause updates → hidden mini-player and
+        // dead notification controls in Flutter. Dead channels are
+        // already try/caught in the listener.
         super.onDestroy()
     }
 
@@ -106,6 +106,13 @@ class MainActivity : AudioServiceActivity() {
                             .putString(WhisperBootReceiver.KEY_SNAPSHOT_JSON, json)
                             .putBoolean("is_active", active)
                             .apply()
+                        // Round 34: mirror Active into the scheduler prefs file
+                        // so isActiveByPrefs and boot share one source of truth.
+                        applicationContext
+                            .getSharedPreferences(WhisperAlarmScheduler.PREFS, Context.MODE_PRIVATE)
+                            .edit()
+                            .putBoolean("is_active", active)
+                            .apply()
                         val registered =
                             WhisperAlarmScheduler.get(applicationContext).setSnapshot(json)
                         result.success(registered)
@@ -115,6 +122,11 @@ class MainActivity : AudioServiceActivity() {
                             .getSharedPreferences(WhisperBootReceiver.SNAPSHOT_PREFS, Context.MODE_PRIVATE)
                             .edit()
                             .remove(WhisperBootReceiver.KEY_SNAPSHOT_JSON)
+                            .putBoolean("is_active", false)
+                            .apply()
+                        applicationContext
+                            .getSharedPreferences(WhisperAlarmScheduler.PREFS, Context.MODE_PRIVATE)
+                            .edit()
                             .putBoolean("is_active", false)
                             .apply()
                         WhisperAlarmScheduler.get(applicationContext).cancelAll()
@@ -244,24 +256,31 @@ class MainActivity : AudioServiceActivity() {
         val intent = Intent(applicationContext, WhisperPlaybackService::class.java).apply {
             this.action = action
         }
-        // Round 29: prefer startService when the playback service is already
-        // a running FG service — startForegroundService from a backgrounded
-        // Activity throws ForegroundServiceStartNotAllowedException on
-        // Android 12+ and silently dropped pause/resume from the mini-player.
+        // Round 34: try BOTH startService and startForegroundService.
+        // Pause/resume from Dart used to die when one path threw on OEM
+        // background restrictions — leaving notification + mini-player
+        // buttons inert while audio kept playing.
+        var delivered = false
         try {
             applicationContext.startService(intent)
-            return
+            delivered = true
         } catch (t: Throwable) {
-            Log.w("WhisperMain", "startService($action) failed, retrying FG: ${t.message}")
+            Log.w("WhisperMain", "startService($action) failed: ${t.message}")
         }
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                applicationContext.startForegroundService(intent)
-            } else {
-                applicationContext.startService(intent)
+        if (!delivered) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    applicationContext.startForegroundService(intent)
+                } else {
+                    applicationContext.startService(intent)
+                }
+                delivered = true
+            } catch (t: Throwable) {
+                Log.e("WhisperMain", "sendCommandToService($action) failed", t)
             }
-        } catch (t: Throwable) {
-            Log.e("WhisperMain", "sendCommandToService($action) failed", t)
+        }
+        if (!delivered) {
+            Log.e("WhisperMain", "sendCommandToService($action) not delivered")
         }
     }
 }

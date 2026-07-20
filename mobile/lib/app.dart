@@ -81,11 +81,15 @@ class _WhisperBackAppState extends ConsumerState<WhisperBackApp>
     // every resume is cheap (idempotent — `_plugin.show` with the
     // same id just replaces) and guarantees the user always sees
     // the card after switching back to the app.
+    // Also force-rebuild alarms when clock/timezone may have jumped —
+    // NEXT SCHEDULES uses DateTime.now() but AlarmManager epochs would
+    // otherwise stay on the old offset until a schedule edit.
     try {
       await syncWhisperNotifications(
         appState: ref.read(appStateRepositoryProvider),
         schedules: ref.read(scheduleRepositoryProvider),
         prayer: ref.read(prayerRepositoryProvider),
+        forceAlarmRebuild: true,
       );
     } catch (_) {}
     if (!mounted) return;

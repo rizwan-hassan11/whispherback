@@ -143,28 +143,26 @@ class WhisperAlarmReceiver : BroadcastReceiver() {
                 putExtra(WhisperPlaybackService.EXTRA_CLIP_TITLE, clipTitle)
                 putExtra(WhisperPlaybackService.EXTRA_PLAYLIST_NAME, playlistName)
                 putExtra(WhisperPlaybackService.EXTRA_SCHEDULE_ID, scheduleId)
+                putExtra(WhisperPlaybackService.EXTRA_SLOT_EPOCH_MS, slotEpochMs)
                 if (!clipQueueJson.isNullOrBlank()) {
                     putExtra(WhisperPlaybackService.EXTRA_CLIP_QUEUE_JSON, clipQueueJson)
                 }
             }
 
-            var started = false
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     context.startForegroundService(serviceIntent)
                 } else {
                     context.startService(serviceIntent)
                 }
-                started = true
             } catch (t: Throwable) {
                 // ForegroundServiceStartNotAllowedException can land here
                 // if the OS decided this alarm doesn't count as a user
                 // wake-up (e.g. duplicate firing during a Doze unbox).
                 Log.e(TAG, "startForegroundService failed", t)
             }
-            if (started && !scheduleId.isNullOrBlank()) {
-                markFireDelivered(context, scheduleId, slotEpochMs)
-            }
+            // Round 34: dedup stamp moved to WhisperPlaybackService after
+            // MediaPlayer.start() so a failed prepare can still retry.
 
             // Round 24 — after handing off to the FG service, top up the
             // alarm table if we're running low. This is what keeps the

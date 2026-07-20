@@ -316,11 +316,17 @@ class NativeAlarmsBridge {
               ? schedule.playlistName
               : 'WhisperBack',
           'fireEpochMs': next.millisecondsSinceEpoch,
+          // Round 34: native refill uses this so extrapolated fires match
+          // Dart NEXT SCHEDULES math (ms-precise interval+duration).
+          'effectiveStepMs':
+              ScheduleFireHelper.effectiveStep(schedule).inMilliseconds,
         });
         added++;
         lastSlot = next;
-        lastCompletion =
-            next.add(Duration(milliseconds: schedule.playlistDurationMs));
+        final durationMs = schedule.playlistDurationMs > 0
+            ? schedule.playlistDurationMs
+            : 60 * 1000;
+        lastCompletion = next.add(Duration(milliseconds: durationMs));
         // Move the cursor PAST this slot so the helper returns the next one.
         cursor = next.add(const Duration(seconds: 1));
         if (fires.length >= _kMaxFiresTotal) break;

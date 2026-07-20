@@ -125,8 +125,11 @@ void main() {
     );
     expect(events.length, 3);
     expect(events[0].when, DateTime(2026, 6, 12, 9, 0));
-    expect(events[1].when, DateTime(2026, 6, 12, 9, 15));
-    expect(events[2].when, DateTime(2026, 6, 12, 9, 30));
+    // Round 34: unknown playlist duration uses a 60s floor in
+    // effectiveStep so AlarmManager never arms "interval-only" slots
+    // that fire early once durations backfill. Display hops match.
+    expect(events[1].when, DateTime(2026, 6, 12, 9, 16));
+    expect(events[2].when, DateTime(2026, 6, 12, 9, 32));
   });
 
   test('isInWindow supports overnight start/end windows', () {

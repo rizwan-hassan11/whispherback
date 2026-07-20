@@ -418,6 +418,29 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
       }
     }
     _keepAliveRunning = false;
+    // Round 34: clear the audio_service media notification so the user
+    // only sees the native MediaStyle Pause/Resume (which actually
+    // controls MediaPlayer). A stale audio_service card made Pause look
+    // broken because it only toggled ExoPlayer silence.
+    try {
+      playbackState.add(
+        PlaybackState(
+          controls: const [],
+          systemActions: const {},
+          processingState: AudioProcessingState.idle,
+          playing: false,
+          updatePosition: Duration.zero,
+          bufferedPosition: Duration.zero,
+          speed: 1.0,
+        ),
+      );
+      mediaItem.add(null);
+      queue.add(const []);
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint('suspendSilence: clear media notification failed: $e\n$st');
+      }
+    }
   }
 
   /// Restores the silence keep-alive after native scheduled playback ends.

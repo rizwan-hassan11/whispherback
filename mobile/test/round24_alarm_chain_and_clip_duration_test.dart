@@ -257,12 +257,12 @@ void main() {
       expect(src, contains('extendSnapshot'),
           reason: 'The native extension method must exist so Flutter is not '
               'a hard dependency for tail refill.');
-      expect(src, contains('medianDelta'),
-          reason: 'Using the observed median inter-fire delta lets the '
-              'native side project new fires without needing schedule '
-              'metadata (which lives in the Dart-side SQLite that we '
-              'cannot open from a BroadcastReceiver without booting '
-              'Flutter).');
+      expect(src, contains('effectiveStepMs'),
+          reason: 'Round 34: prefer Dart-supplied effectiveStepMs so native '
+              'refill matches NEXT SCHEDULES; median-only extrapolation '
+              'drifted later fires by 1–2 minutes.');
+      expect(src, contains('stepMs'),
+          reason: 'extendSnapshot must compute a step for synthetic fires.');
     });
   });
 

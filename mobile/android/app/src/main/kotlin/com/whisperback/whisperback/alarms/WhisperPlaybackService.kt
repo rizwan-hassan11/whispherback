@@ -63,6 +63,7 @@ class WhisperPlaybackService : Service() {
         const val EXTRA_PLAYLIST_NAME = "playlist_name"
         const val EXTRA_SCHEDULE_ID = "schedule_id"
         const val EXTRA_CLIP_QUEUE_JSON = "clip_queue_json"
+        const val EXTRA_SLOT_EPOCH_MS = "slot_epoch_ms"
 
         // Distinct from notification_service.dart's _ongoingId (1), the
         // keep-alive service id (0x57424B), and audio_service's IDs.
@@ -93,6 +94,8 @@ class WhisperPlaybackService : Service() {
         /// Set true while MediaPlayer owns the stream so Dart/Kotlin
         /// keep-alive can refuse to restart ExoPlayer silence underneath.
         const val KEY_NATIVE_ACTIVE = "native_playback_active"
+        const val KEY_CLIP_QUEUE_JSON = "clip_queue_json"
+        const val KEY_SLOT_EPOCH_MS = "slot_epoch_ms"
 
         const val STATE_IDLE = "idle"
         const val STATE_PLAYING = "playing"
@@ -138,6 +141,9 @@ class WhisperPlaybackService : Service() {
     private var clipQueue: List<Pair<String, String>> = emptyList()
     private var clipQueueIndex: Int = 0
     private var errorRestarts: Int = 0
+    private var currentSlotEpochMs: Long = 0L
+    private var currentQueueJson: String = ""
+    private var fireDedupMarked: Boolean = false
 
     private val progressTicker = object : Runnable {
         override fun run() {
@@ -265,7 +271,10 @@ class WhisperPlaybackService : Service() {
         currentClipTitle = intent.getStringExtra(EXTRA_CLIP_TITLE) ?: "WhisperBack"
         currentPlaylistName = intent.getStringExtra(EXTRA_PLAYLIST_NAME) ?: "Scheduled whisper"
         currentScheduleId = intent.getStringExtra(EXTRA_SCHEDULE_ID)
-        clipQueue = parseClipQueue(intent.getStringExtra(EXTRA_CLIP_QUEUE_JSON), clipPath, currentClipTitle)
+        currentSlotEpochMs = intent.getLongExtra(EXTRA_SLOT_EPOCH_MS, 0L)
+        currentQueueJson = intent.getStringExtra(EXTRA_CLIP_QUEUE_JSON) ?: ""
+        fireDedupMarked = false
+        clipQueue = parseClipQueue(currentQueueJson, clipPath, currentClipTitle)
         clipQueueIndex = 0
         // Stamp native-active BEFORE prepareAsync so a concurrent Dart
         // enterForeground / heartbeat cannot restart silence in the gap.
@@ -286,6 +295,12 @@ class WhisperPlaybackService : Service() {
             val player = mediaPlayer
             if (player == null) {
                 Log.w(TAG, "pause requested with no active player")
+                // Keep paused UI only if we still have clip metadata; otherwise
+                // a stale notification pause must not invent a broken session.
+                if (currentClipPath.isNullOrBlank()) {
+                    stopSelfSafely()
+                    return
+                }
                 postPlaybackNotification(isPlaying = false)
                 writeState(STATE_PAUSED)
                 notifyListener(STATE_PAUSED)
@@ -309,8 +324,20 @@ class WhisperPlaybackService : Service() {
         try {
             userPaused = false
             wantPlaying = true
-            val player = mediaPlayer ?: return run {
-                Log.w(TAG, "resume requested with no active player")
+            var player = mediaPlayer
+            if (player == null) {
+                // Round 34: OEM / process reclaim can drop MediaPlayer while
+                // prefs still say paused. Rehydrate from prefs and restart
+                // so notification Resume is never a dead button.
+                rehydrateFromPrefsIfNeeded()
+                val path = currentClipPath
+                if (!path.isNullOrBlank() && File(path).exists()) {
+                    Log.w(TAG, "resume with null player; re-preparing $path")
+                    playClip(path)
+                    return
+                }
+                Log.w(TAG, "resume requested with no active player and no path")
+                return
             }
             if (player.isPlaying) {
                 postPlaybackNotification(isPlaying = true)
@@ -322,7 +349,16 @@ class WhisperPlaybackService : Service() {
             if (!requestAudioFocus()) {
                 Log.w(TAG, "audio focus denied on resume; playing anyway")
             }
-            player.start()
+            try {
+                player.start()
+            } catch (t: Throwable) {
+                Log.e(TAG, "resume start failed; re-preparing", t)
+                val path = currentClipPath
+                if (!path.isNullOrBlank() && File(path).exists()) {
+                    playClip(path)
+                }
+                return
+            }
             writeState(STATE_PLAYING)
             startProgressTicker()
             startWatchdog()
@@ -330,6 +366,25 @@ class WhisperPlaybackService : Service() {
             notifyListener(STATE_PLAYING)
         } catch (t: Throwable) {
             Log.e(TAG, "handleResumeCommand failed", t)
+        }
+    }
+
+    private fun rehydrateFromPrefsIfNeeded() {
+        if (!currentClipPath.isNullOrBlank()) return
+        try {
+            val prefs = getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)
+            val path = prefs.getString(KEY_CURRENT_PATH, null)
+            if (path.isNullOrBlank()) return
+            currentClipPath = path
+            currentClipTitle = prefs.getString(KEY_CURRENT_TITLE, null) ?: "WhisperBack"
+            currentPlaylistName = prefs.getString(KEY_CURRENT_PLAYLIST, null) ?: "Scheduled whisper"
+            currentScheduleId = prefs.getString(KEY_CURRENT_SCHEDULE_ID, null)
+            currentQueueJson = prefs.getString(KEY_CLIP_QUEUE_JSON, "") ?: ""
+            currentSlotEpochMs = prefs.getLong(KEY_SLOT_EPOCH_MS, 0L)
+            currentDurationMs = prefs.getLong(KEY_DURATION_MS, 0L)
+            clipQueue = parseClipQueue(currentQueueJson, path, currentClipTitle)
+        } catch (t: Throwable) {
+            Log.e(TAG, "rehydrateFromPrefsIfNeeded failed", t)
         }
     }
 
@@ -350,8 +405,12 @@ class WhisperPlaybackService : Service() {
 
     private fun isActiveByPrefs(): Boolean {
         return try {
-            // Default to TRUE so a fresh install (no prefs yet) doesn't
-            // suppress a freshly-fired alarm.
+            // Round 34: prefer scheduler prefs (same file as snapshot_json_v2);
+            // fall back to the legacy MainActivity snapshot file.
+            val scheduler = getSharedPreferences(WhisperAlarmScheduler.PREFS, Context.MODE_PRIVATE)
+            if (scheduler.contains("is_active")) {
+                return scheduler.getBoolean("is_active", true)
+            }
             getSharedPreferences("whisperback.alarms.snapshot", Context.MODE_PRIVATE)
                 .getBoolean("is_active", true)
         } catch (t: Throwable) {
@@ -428,6 +487,7 @@ class WhisperPlaybackService : Service() {
                     wantPlaying = true
                     mp.start()
                     writeState(STATE_PLAYING)
+                    markFireDeliveredAfterStart()
                     startProgressTicker()
                     startWatchdog()
                     notifyListener(STATE_PLAYING)
@@ -535,12 +595,16 @@ class WhisperPlaybackService : Service() {
                     .remove(KEY_CURRENT_SCHEDULE_ID)
                     .remove(KEY_DURATION_MS)
                     .remove(KEY_POSITION_MS)
+                    .remove(KEY_CLIP_QUEUE_JSON)
+                    .remove(KEY_SLOT_EPOCH_MS)
             } else {
                 editor.putString(KEY_CURRENT_PATH, currentClipPath ?: "")
                     .putString(KEY_CURRENT_TITLE, currentClipTitle)
                     .putString(KEY_CURRENT_PLAYLIST, currentPlaylistName)
                     .putString(KEY_CURRENT_SCHEDULE_ID, currentScheduleId ?: "")
                     .putLong(KEY_DURATION_MS, currentDurationMs)
+                    .putString(KEY_CLIP_QUEUE_JSON, currentQueueJson)
+                    .putLong(KEY_SLOT_EPOCH_MS, currentSlotEpochMs)
             }
             // Round 33: commit synchronously so Dart's getPlaybackState
             // cannot read a stale nativeActive=false while MediaPlayer
@@ -548,6 +612,24 @@ class WhisperPlaybackService : Service() {
             editor.commit()
         } catch (t: Throwable) {
             Log.e(TAG, "writeState failed", t)
+        }
+    }
+
+    private fun markFireDeliveredAfterStart() {
+        if (fireDedupMarked) return
+        val scheduleId = currentScheduleId ?: return
+        if (scheduleId.isBlank() || currentSlotEpochMs <= 0L) return
+        try {
+            // Round 34: stamp dedup only after MediaPlayer actually starts.
+            // Stamping on FG-service start alone blocked OS retries when
+            // prepareAsync failed (missed schedule).
+            getSharedPreferences("whisperback.alarms.dedup", Context.MODE_PRIVATE)
+                .edit()
+                .putLong("last_fire_$scheduleId", currentSlotEpochMs)
+                .commit()
+            fireDedupMarked = true
+        } catch (t: Throwable) {
+            Log.e(TAG, "markFireDeliveredAfterStart failed", t)
         }
     }
 
@@ -913,11 +995,10 @@ class WhisperPlaybackService : Service() {
             this.action = action
         }
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            PendingIntent.getForegroundService(this, requestId, intent, flags)
-        } else {
-            PendingIntent.getService(this, requestId, intent, flags)
-        }
+        // Round 34: prefer getService for Pause/Resume. getForegroundService
+        // from the shade can fail on some OEMs when the FG service is
+        // already running, leaving the notification buttons dead.
+        return PendingIntent.getService(this, requestId, intent, flags)
     }
 
     private fun resolveSmallIcon(): Int {

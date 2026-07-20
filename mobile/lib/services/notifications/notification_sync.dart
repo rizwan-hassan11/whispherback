@@ -90,8 +90,9 @@ Future<void> syncWhisperNotifications({
         // nextWhen + playlistDuration) so the next iteration projects
         // the slot AFTER it.
         cursorSlot = nextWhen;
-        cursorFired =
-            nextWhen.add(Duration(milliseconds: s.playlistDurationMs));
+        final durationMs =
+            s.playlistDurationMs > 0 ? s.playlistDurationMs : 60 * 1000;
+        cursorFired = nextWhen.add(Duration(milliseconds: durationMs));
       }
     }
     upcoming.sort((a, b) => a.when.compareTo(b.when));
