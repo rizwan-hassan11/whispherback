@@ -173,7 +173,7 @@ abstract final class ScheduleFireHelper {
                   lastFired.difference(lastSlot) > placeholderTolerance);
           if (completionKnown) {
             // Case 1: real completion known.
-            projectedEnd = lastFired!;
+            projectedEnd = lastFired;
           } else {
             // Case 2: still playing or only the slot stamp exists.
             final base = referenceFired;
