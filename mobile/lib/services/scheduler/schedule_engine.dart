@@ -555,10 +555,9 @@ class ScheduleEngine {
     PlaybackSchedule schedule,
     DateTime now,
   ) {
-    // Completion-based last fired drives interval-from-end math; this is what
-    // `slotToFire` consumes to decide the next grid line. We must keep
-    // returning the completion stamp here so a 4-minute playlist on a
-    // 5-minute interval still waits 5 minutes after playback ends.
+    // Completion is the fallback anchor `slotToFire` consumes when no
+    // `slot` stamp is available (see `_lastSlotForCurrentCycle`, which is
+    // the PREFERRED anchor for the start-to-start `effectiveStep` math).
     final completion = _lastFired.completion(schedule.id);
     if (completion == null) return null;
     if (!_sameSessionAs(schedule, completion, now)) return null;

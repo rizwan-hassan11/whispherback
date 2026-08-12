@@ -17,7 +17,11 @@ DateTime _t(int hour, int minute) =>
 void main() {
   group('Round 34 — schedule consistency', () {
     test('effectiveStep is millisecond-precise (no minute-rounding drift)', () {
-      final schedule = PlaybackSchedule(
+      // Round 36: effectiveStep is max(interval, playlistDuration), not
+      // the sum — a 90s clip on a 5-minute interval is well under the
+      // interval, so the interval wins outright and the step is exactly
+      // 5 minutes (no rounding).
+      final shortClip = PlaybackSchedule(
         id: 's1',
         playlistId: 'p1',
         startTime: _t(9, 0),
@@ -26,10 +30,24 @@ void main() {
         playlistDurationMs: 90 * 1000, // 1.5 minutes
       );
       expect(
-        ScheduleFireHelper.effectiveStep(schedule),
-        const Duration(milliseconds: 5 * 60 * 1000 + 90 * 1000),
-        reason: '90s clip + 5m interval must stay exact — rounding to 7m '
-            'caused later fires to disagree with NEXT SCHEDULES.',
+        ScheduleFireHelper.effectiveStep(shortClip),
+        const Duration(minutes: 5),
+      );
+      // When the playlist itself is LONGER than the interval, the
+      // playlist's millisecond-precise length wins instead — rounding
+      // that to whole minutes caused later fires to disagree with NEXT
+      // SCHEDULES.
+      final longClip = PlaybackSchedule(
+        id: 's2',
+        playlistId: 'p1',
+        startTime: _t(9, 0),
+        endTime: _t(23, 59),
+        intervalMinutes: 5,
+        playlistDurationMs: 7 * 60 * 1000 + 30 * 1000, // 7:30
+      );
+      expect(
+        ScheduleFireHelper.effectiveStep(longClip),
+        const Duration(minutes: 7, seconds: 30),
       );
     });
 

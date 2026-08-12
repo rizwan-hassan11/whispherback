@@ -94,11 +94,12 @@ class ClipRepository {
   ///
   /// Round 24 — TRIES the native `MediaMetadataRetriever` first (which
   /// reads the container header directly, no `MediaPlayer` involved),
-  /// then falls back to `just_audio` if the channel is missing (non-
-  /// Android, unit tests). The prior implementation was `just_audio`
-  /// only, which on Samsung One UI 12+ intermittently returned null or
-  /// timed out — that was the user's QA "clip card only shows 0:00
-  /// instead of the actual length" symptom.
+  /// retrying a couple of times on failure (Round 37), then falls back
+  /// to `just_audio` if the channel is missing (non-Android, unit tests)
+  /// or every native attempt failed. The prior implementation was
+  /// `just_audio` only, which on Samsung One UI 12+ intermittently
+  /// returned null or timed out — that was the user's QA "clip card
+  /// only shows 0:00 instead of the actual length" symptom.
   ///
   /// On success, updates the row AND fires [onDurationBackfilled] so
   /// the UI providers can invalidate their cached list and re-render
@@ -118,34 +119,63 @@ class ClipRepository {
   ///   * Fallback path wraps everything in try/catch and disposes the
   ///     player even on error so a corrupt file can't leak the native
   ///     MediaPlayer.
+  /// Delay before each native-probe retry (see `backfillDuration`). A
+  /// freshly-stopped recording's `.m4a` trailer can still be finalizing
+  /// on disk for a brief moment after `MediaRecorder.stop()` returns, so
+  /// `MediaMetadataRetriever` can legitimately read 0 on the FIRST
+  /// attempt for a file that becomes perfectly readable a few hundred
+  /// milliseconds later.
+  static const _nativeProbeRetryDelays = [
+    Duration.zero,
+    Duration(milliseconds: 150),
+    Duration(milliseconds: 400),
+  ];
+
   Future<void> backfillDuration(String clipId, String filePath) async {
     // ── Primary path: native MediaMetadataRetriever. No AudioSession,
     // no MediaPlayer, no focus contention. Reliable on every device
-    // we've tested (Samsung / Xiaomi / Vivo / Pixel).
+    // we've tested (Samsung / Xiaomi / Vivo / Pixel) ONCE the file is
+    // fully flushed to disk.
+    //
+    // Retries a couple of times on a 0/failed read before giving up —
+    // without this, a recording probed the instant `stopAndSave()`
+    // returns (moov atom not yet finalized) fell straight through to
+    // the just_audio fallback below, which is exactly the "spin up a
+    // probe player and steal audio focus from the next real play()"
+    // failure mode this native path exists to avoid. That reproduced as
+    // "the first recording never plays, but a second recording made
+    // moments later plays fine" — by the time of a second attempt the
+    // first recording's probe race had long since resolved.
     if (!kIsWeb) {
-      try {
-        final raw = await _metadataChannel.invokeMethod<Object?>(
-          'readDurationMs',
-          filePath,
-        );
-        final ms = _asInt(raw);
-        if (ms > 0) {
-          await updateDuration(clipId, ms);
-          if (!_durationBackfilledController.isClosed) {
-            _durationBackfilledController.add(clipId);
-          }
-          return;
-        }
-      } on MissingPluginException {
-        // Non-Android / test environment: fall through to just_audio.
-      } catch (e) {
-        if (kDebugMode) {
-          debugPrint(
-            'ClipRepository.backfillDuration native probe failed '
-            '($clipId): $e',
+      for (final delay in _nativeProbeRetryDelays) {
+        if (delay > Duration.zero) await Future<void>.delayed(delay);
+        try {
+          final raw = await _metadataChannel.invokeMethod<Object?>(
+            'readDurationMs',
+            filePath,
           );
+          final ms = _asInt(raw);
+          if (ms > 0) {
+            await updateDuration(clipId, ms);
+            if (!_durationBackfilledController.isClosed) {
+              _durationBackfilledController.add(clipId);
+            }
+            return;
+          }
+        } on MissingPluginException {
+          // Non-Android / test environment: no point retrying, fall
+          // through to just_audio immediately.
+          break;
+        } catch (e) {
+          if (kDebugMode) {
+            debugPrint(
+              'ClipRepository.backfillDuration native probe failed '
+              '($clipId): $e',
+            );
+          }
+          // Keep retrying — a transient failure (file mid-flush) should
+          // not immediately fall through to the riskier fallback.
         }
-        // Fall through to just_audio as a secondary attempt.
       }
     }
 

@@ -105,14 +105,25 @@ abstract final class ScheduleFireHelper {
   /// `shouldFireNow` continue to use the grace window (forDisplay: false,
   /// the default) so engine firing logic is unchanged.
   ///
-  /// [lastSlot] is the wall-clock start of the previous fire. [lastFired]
-  /// is the actual completion (or null if not completed yet). When both
-  /// are provided, the helper picks the larger of `lastFired` and
-  /// `lastSlot + playlistDuration` as the projected end and computes
-  /// `next = projectedEnd + interval`. When only [lastFired] is
-  /// provided, the projection falls back to `lastFired + duration +
-  /// interval` (best-effort; matches the engine's "still firing"
-  /// expectation).
+  /// [lastSlot] is the wall-clock start of the previous fire — the
+  /// anchor used to project the next one. [lastFired] is the actual
+  /// completion time when known; it's used as a fallback anchor only
+  /// when [lastSlot] wasn't supplied (some legacy call sites only track
+  /// completion).
+  ///
+  /// Round 36: START-TO-START interval semantics. `intervalMinutes` is
+  /// the gap between successive whisper START times — `next = lastSlot +
+  /// effectiveStep(schedule)`, where `effectiveStep` is `max(interval,
+  /// playlistDuration)`. A shorter-than-interval playlist (the common
+  /// case) fires exactly on the user's configured cadence. A playlist
+  /// that runs LONGER than the interval still can't overlap itself, so
+  /// the next fire waits for it to finish instead.
+  ///
+  /// (Earlier rounds used "interval-from-end" semantics — next =
+  /// completion + interval, i.e. every fire cost `interval +
+  /// playlistDuration` — which is why a "15-minute" schedule used to
+  /// land 18-19 minutes apart for a few-minutes-long playlist. That
+  /// didn't match what users configure when they type "15 minutes".)
   static DateTime? nextSlotAfter(
     PlaybackSchedule schedule,
     DateTime now, {
@@ -131,65 +142,26 @@ abstract final class ScheduleFireHelper {
       final end = _endOnDay(schedule, day);
 
       var slot = start;
-      // Pick the more authoritative reference for "end of previous fire".
-      final referenceFired = lastFired ?? lastSlot;
-      if (referenceFired != null) {
+      // Prefer the previous fire's actual START time; fall back to the
+      // completion stamp only when no slot stamp was tracked.
+      final referenceStart = lastSlot ?? lastFired;
+      if (referenceStart != null) {
         final lastDay = DateTime(
-          referenceFired.year,
-          referenceFired.month,
-          referenceFired.day,
+          referenceStart.year,
+          referenceStart.month,
+          referenceStart.day,
         );
         final onSameDay = lastDay.year == day.year &&
             lastDay.month == day.month &&
             lastDay.day == day.day;
-        if (onSameDay && !referenceFired.isBefore(start)) {
-          // Interval-from-end semantics: the user's expectation is
-          // "wait `intervalMinutes` AFTER the previous playlist
-          // finishes, not after it starts".
-          //
-          // Two cases:
-          //   1. Previous fire completed cleanly. `lastFired` is the
-          //      actual completion time, which is approximately
-          //      `lastSlot + playlistDuration` (possibly slightly
-          //      later due to load/OS jitter). We use `lastFired` as
-          //      the projected end directly.
-          //   2. Previous fire still in flight. `lastFired` equals
-          //      `lastSlot` (the engine writes that placeholder at
-          //      fire start). We need to project: end ≈ slot + duration.
-          //
-          // Detection rule:
-          //   - If `lastFired != null` AND `lastFired > (lastSlot ?? 0)`
-          //     by at least a few seconds, treat case 1.
-          //   - Else (lastFired == lastSlot, or only lastSlot given),
-          //     treat case 2 — project end.
-          DateTime projectedEnd;
-          const placeholderTolerance = Duration(seconds: 5);
-          // Round 34: if only `lastFired` is provided (no lastSlot), treat it
-          // as a real completion — that is how the engine and tests stamp
-          // end-of-clip. Applying the unknown-duration floor here added an
-          // extra 60s and made NEXT SCHEDULES drift.
-          final completionKnown = lastFired != null &&
-              (lastSlot == null ||
-                  lastFired.difference(lastSlot) > placeholderTolerance);
-          if (completionKnown) {
-            // Case 1: real completion known.
-            projectedEnd = lastFired;
-          } else {
-            // Case 2: still playing or only the slot stamp exists.
-            final base = referenceFired;
-            final durationMs = schedule.playlistDurationMs > 0
-                ? schedule.playlistDurationMs
-                : 60 * 1000;
-            projectedEnd = base.add(Duration(milliseconds: durationMs));
-          }
-          slot = projectedEnd.add(Duration(minutes: schedule.intervalMinutes));
+        if (onSameDay && !referenceStart.isBefore(start)) {
+          slot = referenceStart.add(effectiveStep(schedule));
         }
       }
 
-      // Round 15 / Round 34: step between grid slots must match
-      // interval-from-end math in milliseconds — minute-rounding of
-      // playlist duration made later fires drift 1–2 minutes vs the
-      // NEXT SCHEDULES UI (which uses actual completion + interval).
+      // Round 15 / Round 34 / Round 36: step between grid slots must
+      // match the same millisecond-precise `effectiveStep` used above —
+      // minute-rounding made later fires drift vs the NEXT SCHEDULES UI.
       final stepDuration = effectiveStep(schedule);
 
       while (true) {
@@ -218,17 +190,10 @@ abstract final class ScheduleFireHelper {
 
   /// Grid slot that should fire now, or null if nothing is due.
   ///
-  /// [lastFired] is the completion timestamp of the previous fire (or the
-  /// slot start if playback never completed). [lastSlot] is the wall-clock
-  /// start of the previous fire — passing it lets `nextSlotAfter` know
-  /// whether the playback completed cleanly (lastFired > lastSlot) or
-  /// whether `lastFired` is still a placeholder (lastFired == lastSlot).
-  /// Without [lastSlot] the helper always falls into the "project end"
-  /// branch and over-counts the gap by `playlistDurationMs` — the user's
-  /// Round 19 QA report ("schedule shows next at 10:11 but it's 10:15 and
-  /// nothing played") was the helper computing `next = completion +
-  /// playlistDuration + interval` when it should have been `next =
-  /// completion + interval`.
+  /// [lastFired] is the completion timestamp of the previous fire (used as
+  /// a fallback anchor). [lastSlot] is the wall-clock START of the
+  /// previous fire — the preferred anchor for the start-to-start
+  /// `effectiveStep` projection in `nextSlotAfter` (Round 36).
   ///
   /// When [force] is true, the [maxLateness] cap is ignored. Used by the
   /// alarm-tap path so a user who taps a scheduled alarm 10 minutes
@@ -322,11 +287,10 @@ abstract final class ScheduleFireHelper {
 
   /// Upcoming grid fires across all schedules (sorted by time).
   ///
-  /// Step between fires uses [effectiveStepMinutes] = `playlistDuration +
-  /// intervalMinutes`. The previous implementation used `intervalMinutes`
-  /// alone, which made the upcoming list overlap the playlist with the
-  /// silent gap (a 5-min playlist on a 5-min interval predicted next at
-  /// `now+5min` even though the playlist would still be playing).
+  /// Step between fires uses [effectiveStep] = `max(intervalMinutes,
+  /// playlistDuration)` (Round 36) — start-to-start on the configured
+  /// cadence, falling back to the playlist's own length only when it
+  /// would otherwise overlap itself.
   static List<({DateTime when, String playlistName})> upcomingEvents(
     List<PlaybackSchedule> schedules,
     DateTime now, {
@@ -366,14 +330,13 @@ abstract final class ScheduleFireHelper {
 
   /// All weekly alarm slots (hour/minute) for notification scheduling.
   ///
-  /// Round 15 contract change: gap between successive fires is
-  /// `playlistDuration + intervalMinutes`, NOT just `intervalMinutes`.
-  /// Example (user-reported): a 5-minute playlist with a 10-minute
-  /// interval starting at 1:00 should fire at 1:00, 1:15, 1:30, …
-  /// because each fire occupies 5 minutes and we want a 10-minute
-  /// silent gap AFTER the playlist finishes. Previously this method
-  /// produced 1:00, 1:10, 1:20 which overlapped the playlist with
-  /// the "silent gap" the user explicitly configured.
+  /// Round 36: gap between successive fires is `max(playlistDuration,
+  /// intervalMinutes)` — start-to-start on the configured interval.
+  /// Example: a 5-minute playlist with a 10-minute interval starting at
+  /// 1:00 fires at 1:00, 1:10, 1:20, … (interval wins, playlist is
+  /// shorter). A 15-minute playlist on that same 10-minute interval
+  /// fires at 1:00, 1:15, 1:30, … (playlist wins — the next fire can't
+  /// start before the current one finishes).
   static Iterable<({int weekday, int hour, int minute, String label})>
       intervalAlarmSlots(PlaybackSchedule schedule) sync* {
     if (!schedule.enabled || !schedule.alarmEnabled) return;
@@ -419,24 +382,28 @@ abstract final class ScheduleFireHelper {
     }
   }
 
-  /// Effective step between successive fires
-  /// = `playlistDuration + interval`, in millisecond precision.
+  /// Effective step between successive fires (start-to-start), in
+  /// millisecond precision.
   ///
-  /// Round 34: previously [effectiveStepMinutes] rounded playlist duration
-  /// UP to whole minutes (90s → 2 min), so AlarmManager epochs and the
-  /// NEXT SCHEDULES UI drifted by 1–2 minutes after the first fire.
-  /// Falls back to a 60s placeholder duration when the playlist length
-  /// is still unknown so we never register "interval-only" steps that
-  /// fire early once durations backfill.
+  /// Round 36: `max(intervalMinutes, playlistDuration)` — NOT the sum.
+  /// The interval the user configures is the gap between whisper START
+  /// times. A playlist shorter than the interval (the common case) fires
+  /// exactly on the configured cadence; a playlist LONGER than the
+  /// interval still can't start the next fire before it finishes, so we
+  /// fall back to the playlist's own length for that one step.
+  ///
+  /// Falls back to a 60s placeholder duration when the playlist length is
+  /// still unknown (Round 34) so a step is never computed as 0.
   static Duration effectiveStep(PlaybackSchedule schedule) {
     final durationMs = schedule.playlistDurationMs > 0
         ? schedule.playlistDurationMs
         : 60 * 1000; // unknown length — conservative 1 minute
-    final total = Duration(minutes: schedule.intervalMinutes) +
-        Duration(milliseconds: durationMs);
-    return total < const Duration(minutes: 1)
+    final interval = Duration(minutes: schedule.intervalMinutes);
+    final duration = Duration(milliseconds: durationMs);
+    final step = interval > duration ? interval : duration;
+    return step < const Duration(minutes: 1)
         ? const Duration(minutes: 1)
-        : total;
+        : step;
   }
 
   /// Effective step between successive fires in whole minutes

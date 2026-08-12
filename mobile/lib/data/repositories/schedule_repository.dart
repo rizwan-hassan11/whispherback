@@ -28,10 +28,10 @@ class ScheduleRepository {
   Future<List<PlaybackSchedule>> getAll() async {
     final db = await _db.database;
     // Include `playlist_duration_ms` so the schedule entity carries enough
-    // info for `nextFireTime` to do interval-from-end math
-    // (`completion + playlist_duration + interval`). The LEFT JOIN
+    // info for `nextFireTime`'s `effectiveStep` math
+    // (`max(playlist_duration, interval)`, start-to-start). The LEFT JOIN
     // returns 0 when the playlist has no clips, which falls back to the
-    // old "interval from start" behaviour without crashing.
+    // 60s duration floor without crashing.
     final rows = await db.rawQuery('''
       SELECT s.*,
         p.name AS playlist_name,

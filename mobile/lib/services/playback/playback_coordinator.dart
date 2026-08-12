@@ -250,8 +250,10 @@ class PlaybackCoordinator {
         () => unawaited(_finalizeClipStopFromNotification());
     _audio.onPlayRequested = () => _syncPlayingSnapshot(true);
     _audio.onPauseRequested = () => _syncPlayingSnapshot(false);
-    _audio.onSkipToNextRequested = () => _skipPlaylistClip(next: true);
-    _audio.onSkipToPreviousRequested = () => _skipPlaylistClip(next: false);
+    _audio.onSkipToNextRequested =
+        () => _serializeSkip(() => _skipPlaylistClip(next: true));
+    _audio.onSkipToPreviousRequested =
+        () => _serializeSkip(() => _skipPlaylistClip(next: false));
     _audio.onClipSessionChanged = () {
       unawaited(refreshScheduleNotifications?.call());
     };
@@ -491,7 +493,6 @@ class PlaybackCoordinator {
         final endedAt = DateTime.now();
         final scheduleId = _nativeActiveScheduleId ?? native.scheduleId;
         _nativeActiveScheduleId = null;
-        _stampNativeFireCompletion(scheduleId, endedAt);
         // Round 33: on Android never restore ExoPlayer silence after a
         // native clip — KeepAliveService is enough and silence caused
         // the next schedule to auto-pause.
@@ -516,12 +517,31 @@ class PlaybackCoordinator {
             modalVisible: false,
           ));
         }
-        // Round 34: REALIGN AlarmManager to the actual completion cursor.
-        // Pre-registered epochs used estimated playlistDuration; UI
-        // NEXT SCHEDULES uses real completion + interval. Without a
-        // forced rebuild after fire #1, later fires drifted early/late
-        // by 1–2 minutes. Diff-sync + grace window make this safe.
+        // Round 35: stamp completion and AWAIT it before realigning
+        // AlarmManager. `applySnapshot`'s STAGE 3 projection reads this
+        // exact value straight out of `ScheduleLastFiredStore` (a
+        // synchronous, in-memory-cached read). Previously the stamp write
+        // and the Round-34 "realign" rebuild below were two INDEPENDENT
+        // `unawaited()` tasks kicked off back-to-back with no ordering
+        // between them — whichever task reached its critical line first
+        // (a race that depends on device I/O speed / DB contention) won.
+        // When the rebuild won, it projected the next alarm table from
+        // the STALE (one-cycle-old) completion stamp instead of the one
+        // that had just landed, arming the wrong epoch. That is what
+        // produced the QA symptoms: scheduled whispers sometimes not
+        // firing at all, and the gap between fires drifting
+        // inconsistently instead of by a fixed, predictable amount.
+        // Chaining these two steps sequentially in one task makes the
+        // ordering deterministic.
         unawaited(() async {
+          try {
+            await _stampNativeFireCompletion(scheduleId, endedAt);
+          } catch (e, st) {
+            if (kDebugMode) {
+              debugPrint(
+                  'coordinator _stampNativeFireCompletion failed: $e\n$st');
+            }
+          }
           try {
             await refreshScheduleNotifications?.call(forceAlarmRebuild: true);
           } catch (e, st) {
@@ -565,18 +585,15 @@ class PlaybackCoordinator {
     }());
   }
 
-  void _stampNativeFireCompletion(String? scheduleId, DateTime when) {
+  /// Awaitable so callers can guarantee this write has landed in
+  /// `ScheduleLastFiredStore` BEFORE reading it back (e.g. the Round 34
+  /// alarm-table realign). Errors are the caller's responsibility to
+  /// catch — see the single call site in `_onNativePlaybackState`.
+  Future<void> _stampNativeFireCompletion(
+      String? scheduleId, DateTime when) async {
     if (scheduleId == null || scheduleId.isEmpty) return;
-    unawaited(() async {
-      try {
-        final store = await ScheduleLastFiredStore.ensureLoaded();
-        await store.setCompletion(scheduleId, when);
-      } catch (e, st) {
-        if (kDebugMode) {
-          debugPrint('coordinator _stampNativeFireCompletion failed: $e\n$st');
-        }
-      }
-    }());
+    final store = await ScheduleLastFiredStore.ensureLoaded();
+    await store.setCompletion(scheduleId, when);
   }
 
   void _syncPlayingSnapshot(bool playing) {
@@ -637,14 +654,15 @@ class PlaybackCoordinator {
   Future<void> skipNext() => _guardedSkip(next: true);
   Future<void> skipPrevious() => _guardedSkip(next: false);
 
-  /// Wraps `_skipPlaylistClip` in a try/catch + error event so a thrown
-  /// PlatformException from the native player never propagates out of a
-  /// skip tap. The user perceives an unhandled throw as "app crashed when
-  /// I pressed next" — which is the exact symptom they reported on the
-  /// mini-player and modal controls.
+  /// Wraps `_skipPlaylistClip` in the skip gate (see [_serializeSkip]) AND
+  /// a try/catch + error event so a thrown PlatformException from the
+  /// native player never propagates out of a skip tap. The user perceives
+  /// an unhandled throw as "app crashed when I pressed next" — which is
+  /// the exact symptom they reported on the mini-player and modal
+  /// controls.
   Future<void> _guardedSkip({required bool next}) async {
     try {
-      await _skipPlaylistClip(next: next);
+      await _serializeSkip(() => _skipPlaylistClip(next: next));
     } catch (e, st) {
       if (kDebugMode) {
         debugPrint('skip${next ? 'Next' : 'Previous'} failed: $e\n$st');
@@ -656,6 +674,59 @@ class PlaybackCoordinator {
         ));
       }
     }
+  }
+
+  /// Round 38: serializes every skip request — in-app AND from the
+  /// notification bar's media controls — through a single FIFO queue, the
+  /// same principle `_serializePauseResume` already applies to pause /
+  /// resume / dismiss (see its doc comment for the full Samsung / Vivo
+  /// rationale).
+  ///
+  /// Before this gate, `_skipPlaylistClip` was called directly from BOTH
+  /// `_guardedSkip` (in-app mini-player / modal buttons) AND
+  /// `onSkipToNextRequested` / `onSkipToPreviousRequested` (notification
+  /// media controls) with no mutual exclusion at all. A double-tap, or an
+  /// in-app tap racing a notification tap, sent two concurrent
+  /// `_player.seek()` / `_player.play()` / `_audio.playFile()` calls into
+  /// the SAME native player. One of them would silently lose the race on
+  /// certain OEMs — reproduced as "forward/backward buttons intermittently
+  /// fail to respond, both in-app and from the notification bar, no
+  /// consistent pattern" (both surfaces funnel into this one function, so
+  /// the intermittent failure showed up identically on both).
+  ///
+  /// Uses its own gate (not `_serializePauseResume`'s) because a playlist
+  /// skip can call all the way through to `_audio.playFile`, which has its
+  /// own internal 8s `setAudioSource` cap — `_serializePauseResume`'s 4s
+  /// cap is sized for lightweight pause/resume calls and would time out a
+  /// legitimately-slow-but-succeeding track change.
+  Future<void> _skipGate = Future<void>.value();
+  static const _skipGateBodyTimeout = Duration(seconds: 10);
+
+  Future<T> _serializeSkip<T>(Future<T> Function() body) {
+    final previous = _skipGate;
+    final completer = Completer<T>();
+    _skipGate = previous
+        .then((_) => null, onError: (Object _, StackTrace __) => null)
+        .then((_) async {
+      try {
+        final result =
+            await body().timeout(_skipGateBodyTimeout, onTimeout: () {
+          throw TimeoutException(
+            'skip: native call exceeded $_skipGateBodyTimeout — releasing '
+            'gate so the next tap can proceed.',
+            _skipGateBodyTimeout,
+          );
+        });
+        if (!completer.isCompleted) completer.complete(result);
+      } catch (e, st) {
+        if (kDebugMode) {
+          debugPrint('PlaybackCoordinator._serializeSkip body failed: '
+              '$e\n$st');
+        }
+        if (!completer.isCompleted) completer.completeError(e, st);
+      }
+    });
+    return completer.future;
   }
 
   Future<void> _skipPlaylistClip({required bool next}) async {
