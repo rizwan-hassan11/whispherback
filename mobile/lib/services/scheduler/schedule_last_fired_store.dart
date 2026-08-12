@@ -4,15 +4,16 @@ import 'package:shared_preferences/shared_preferences.dart';
 ///
 /// We track TWO timestamps per schedule:
 ///
-/// * **slot** — the grid time the engine claimed (e.g. 09:00). Used purely
-///   for deduplication (don't fire the same slot twice, don't let another
-///   schedule steal a slot that's in flight). Always wall-clock equal to a
-///   real interval boundary.
-/// * **completion** — when playback actually finished. Used to compute the
-///   NEXT slot via interval-from-end (`completion + intervalMinutes`).
+/// * **slot** — the grid time the engine claimed (e.g. 09:00). Used for
+///   deduplication (don't fire the same slot twice, don't let another
+///   schedule steal a slot that's in flight), AND as the anchor for the
+///   NEXT slot: `slot + effectiveStep` (start-to-start; see
+///   `ScheduleFireHelper.effectiveStep`).
+/// * **completion** — when playback actually finished. Used as a fallback
+///   anchor only when no `slot` stamp is available.
 ///
-/// Splitting these prevents two regressions that surfaced after the
-/// "interval-from-end" feature shipped:
+/// Splitting these prevents two regressions that surfaced when per-slot
+/// tracking was first introduced:
 ///   1. `_slotTakenByOtherSchedule` compared minute components against
 ///      `completion` (e.g. 09:04) instead of `slot` (09:00) and stopped
 ///      detecting overlap.

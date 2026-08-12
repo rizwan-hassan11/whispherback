@@ -2,13 +2,10 @@
 // the user-reported bugs they were designed to address.
 //
 //   19-A  Engine now passes BOTH lastSlot AND lastFired (completion) to
-//         `slotToFire` so the next-slot math correctly distinguishes
-//         "playback completed cleanly (next = completion + interval)"
-//         from "still firing (next = slot + duration + interval)".
-//         Without lastSlot the helper always added an extra
-//         `playlistDurationMs` to the projection, which matched the
-//         user's QA "schedule shows next at 10:11 but it's 10:15 and
-//         nothing played".
+//         `slotToFire` so the projection has an authoritative anchor for
+//         the previous fire. (Round 36 changed WHAT that anchor produces
+//         — start-to-start via `effectiveStep` — but `lastSlot` remains
+//         the preferred anchor this test group pins.)
 //
 //   19-B  `WhisperAudioHandler` overrides `onTaskRemoved` and
 //         `onNotificationDeleted` to keep the silence keep-alive loop
@@ -95,8 +92,9 @@ void main() {
     });
 
     test(
-        'a 5-min playlist on 5-min interval, completed at 10:05, fires '
-        'next at 10:10 — NOT 10:15', () {
+        'a 5-min playlist on 5-min interval, started at 10:00, fires '
+        'next at 10:05 — start-to-start, back-to-back with no overlap',
+        () {
       final schedule = _buildSchedule(
         startHour: 10,
         startMinute: 0,
@@ -114,17 +112,17 @@ void main() {
       );
       expect(
         next,
-        DateTime(2026, 6, 28, 10, 10),
-        reason: 'When the completion stamp is known to be later than '
-            'the slot stamp, the helper must treat the previous fire '
-            'as "completed" (next = completion + interval) instead '
-            'of "still firing" (next = slot + duration + interval).',
+        DateTime(2026, 6, 28, 10, 5),
+        reason: 'Round 36: start-to-start interval — next = lastSlot + '
+            'max(interval, duration) = 10:00 + 5min = 10:05. Duration '
+            'equals interval here so the next fire starts exactly when '
+            'the previous one finishes: no gap, no overlap.',
       );
     });
 
     test(
-        'placeholder case: lastFired == lastSlot means the fire is still '
-        'in flight — helper projects end via playlistDurationMs', () {
+        'placeholder case: lastFired == lastSlot (still in flight) still '
+        'anchors on the slot START, not a projected end', () {
       final schedule = _buildSchedule(
         startHour: 10,
         startMinute: 0,
@@ -140,15 +138,13 @@ void main() {
         lastFired: placeholder,
         lastSlot: placeholder,
       );
-      // Projected end ≈ 10:00 + 4 min = 10:04. Next = 10:04 + 5 min = 10:09.
-      expect(
-        next,
-        DateTime(2026, 6, 28, 10, 9),
-        reason: 'When the completion stamp matches the slot stamp '
-            '(placeholder), the helper projects the end via '
-            'playlistDurationMs so the next fire still lands after '
-            'the silent gap the user configured.',
-      );
+      // Round 36: next = lastSlot + max(interval, duration)
+      //         = 10:00 + max(5min, 4min) = 10:00 + 5min = 10:05.
+      // The interval wins (5 > 4), so the fire lands on the user's
+      // configured cadence with no need to distinguish "still playing"
+      // from "already completed" — the max() already guarantees no
+      // overlap regardless of which case applies.
+      expect(next, DateTime(2026, 6, 28, 10, 5));
     });
   });
 
@@ -286,15 +282,16 @@ void main() {
         src,
         contains('ScheduleFireHelper.upcomingEvents'),
         reason: 'The upcoming list MUST be sourced from '
-            'upcomingEvents so it uses the same interval-from-end + '
+            'upcomingEvents so it uses the same start-to-start + '
             'last-fired-aware math as the engine.',
       );
     });
 
-    test('upcomingEvents uses effectiveStepMinutes (not raw interval)', () {
-      // A 5-min playlist on a 5-min interval starting 10:00 should
-      // produce 10:00, 10:10, 10:20 (step = 10 min), not 10:00, 10:05,
-      // 10:10 (step = 5 min — would overlap playlist with silent gap).
+    test('upcomingEvents uses effectiveStepMinutes (start-to-start)', () {
+      // Round 36: a 5-min playlist on a 5-min interval starting 10:00
+      // produces 10:00, 10:05, 10:10 — the interval IS the gap between
+      // start times, and duration == interval here so back-to-back
+      // fires never overlap (each starts exactly as the previous ends).
       final schedule = _buildSchedule(
         startHour: 10,
         startMinute: 0,
@@ -308,8 +305,8 @@ void main() {
       );
       expect(events.length, 3);
       expect(events[0].when, DateTime(2026, 6, 28, 10, 0));
-      expect(events[1].when, DateTime(2026, 6, 28, 10, 10));
-      expect(events[2].when, DateTime(2026, 6, 28, 10, 20));
+      expect(events[1].when, DateTime(2026, 6, 28, 10, 5));
+      expect(events[2].when, DateTime(2026, 6, 28, 10, 10));
     });
   });
 }

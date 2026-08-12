@@ -14,9 +14,9 @@
 //         even though `playClip` was called again.
 //
 //   15-C  Interval semantics: gap between fires =
-//         `playlistDuration + intervalMinutes`. A 5-minute playlist
-//         on a 10-minute interval starting at 1:00 fires at
-//         1:00, 1:15, 1:30 — NOT 1:00, 1:10, 1:20.
+//         `max(playlistDuration, intervalMinutes)` (start-to-start,
+//         updated in Round 36 — see that group's tests for the current
+//         contract; kept here only for the historical record).
 //
 //   15-D  Conflict detection is window-based. Two schedules
 //         conflict iff any pair of `[slot, slot+playlistDuration]`
@@ -131,8 +131,10 @@ void main() {
     });
   });
 
-  group('Round 15-C — interval = playlistDuration + intervalMinutes', () {
-    test('effectiveStepMinutes returns duration + interval rounded up', () {
+  group('Round 15-C / Round 36 — interval = max(playlistDuration, '
+      'intervalMinutes)', () {
+    test('effectiveStepMinutes uses the interval when it is the larger side',
+        () {
       final schedule = PlaybackSchedule(
         id: 's1',
         playlistId: 'p1',
@@ -143,28 +145,34 @@ void main() {
       );
       expect(
         ScheduleFireHelper.effectiveStepMinutes(schedule),
-        15,
-        reason: '5-minute playlist + 10-minute interval = 15-minute '
-            'step between successive fires.',
+        10,
+        reason: 'A 5-minute playlist is shorter than the configured '
+            '10-minute interval, so the interval wins — successive '
+            'fires land exactly 10 minutes apart, matching what the '
+            'user configured.',
       );
     });
 
-    test('effectiveStepMinutes rounds partial minutes UP', () {
+    test('effectiveStepMinutes uses the playlist when it is the larger '
+        'side, rounding partial minutes UP', () {
       final schedule = PlaybackSchedule(
         id: 's1',
         playlistId: 'p1',
         startTime: _t(9, 0),
         endTime: _t(23, 59),
         intervalMinutes: 10,
-        playlistDurationMs: 5 * 60 * 1000 + 1, // 5:00.001
+        playlistDurationMs: 11 * 60 * 1000 + 1, // 11:00.001
       );
-      // 5:00.001 ceilings to 6 minutes (the integer rounding is the
-      // safe choice — we never want two playlists to butt up against
-      // each other to the millisecond).
-      expect(ScheduleFireHelper.effectiveStepMinutes(schedule), 16);
+      // The 11-minute playlist is longer than the 10-minute interval, so
+      // it wins and the next fire can't start until it finishes. The
+      // extra 1ms ceilings to a whole extra minute (12) — the safe
+      // choice, since we never want two playlists to butt up against
+      // each other to the millisecond.
+      expect(ScheduleFireHelper.effectiveStepMinutes(schedule), 12);
     });
 
-    test('effectiveStepMinutes uses 60s duration floor when duration is 0', () {
+    test('effectiveStepMinutes uses 60s duration floor when duration is 0',
+        () {
       final schedule = PlaybackSchedule(
         id: 's1',
         playlistId: 'p1',
@@ -175,14 +183,14 @@ void main() {
       );
       expect(
         ScheduleFireHelper.effectiveStepMinutes(schedule),
-        11,
-        reason: 'Round 34: unknown playlist length must NOT collapse to '
-            'interval-only (that made later alarms fire early). Use a '
-            '60s floor → 10m + 1m = 11m.',
+        10,
+        reason: 'Unknown playlist length falls back to a 60s floor, which '
+            'is still well under the 10-minute interval — the interval '
+            'wins.',
       );
       expect(
         ScheduleFireHelper.effectiveStep(schedule),
-        const Duration(minutes: 11),
+        const Duration(minutes: 10),
       );
     });
 
@@ -193,23 +201,21 @@ void main() {
         // Restrict to Monday so we have a deterministic generator.
         daysMask: 1, // Monday only
         startTime: _t(9, 0),
-        endTime: _t(9, 45),
+        endTime: _t(9, 50),
         intervalMinutes: 10,
         playlistDurationMs: 5 * 60 * 1000,
       );
       final slots = ScheduleFireHelper.intervalAlarmSlots(schedule).toList();
       final minutes = slots.map((s) => s.hour * 60 + s.minute).toList();
-      // 9:00, 9:15, 9:30, 9:45 — step is 15 min, end is exclusive.
-      // Whether the last 9:45 is included depends on `!slot.isAfter(end)`
-      // which IS inclusive in the existing impl. We only assert that
-      // the step BETWEEN successive slots is 15.
+      // 9:00, 9:10, 9:20, 9:30, 9:40, 9:50 — step is the 10-minute
+      // interval (the 5-minute playlist is shorter and doesn't apply).
       expect(minutes.length, greaterThanOrEqualTo(3));
       for (var i = 1; i < minutes.length; i++) {
         expect(
           minutes[i] - minutes[i - 1],
-          15,
-          reason: 'Successive intervalAlarmSlots must step by '
-              'playlistDuration + intervalMinutes = 15 minutes.',
+          10,
+          reason: 'Successive intervalAlarmSlots must step by the '
+              'configured 10-minute interval (the playlist is shorter).',
         );
       }
     });

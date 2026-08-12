@@ -125,11 +125,12 @@ void main() {
     );
     expect(events.length, 3);
     expect(events[0].when, DateTime(2026, 6, 12, 9, 0));
-    // Round 34: unknown playlist duration uses a 60s floor in
-    // effectiveStep so AlarmManager never arms "interval-only" slots
-    // that fire early once durations backfill. Display hops match.
-    expect(events[1].when, DateTime(2026, 6, 12, 9, 16));
-    expect(events[2].when, DateTime(2026, 6, 12, 9, 32));
+    // Round 36: start-to-start interval — effectiveStep is
+    // max(intervalMinutes, playlistDuration). With no playlist duration
+    // known (60s floor, well under the 15-min interval), the interval
+    // wins outright, so successive fires land exactly 15 minutes apart.
+    expect(events[1].when, DateTime(2026, 6, 12, 9, 15));
+    expect(events[2].when, DateTime(2026, 6, 12, 9, 30));
   });
 
   test('isInWindow supports overnight start/end windows', () {
