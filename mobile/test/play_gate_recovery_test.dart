@@ -72,7 +72,7 @@ void main() {
       var secondCompleted = false;
       final secondFuture = gate.serialize<String>(() async {
         return 'follow-up tap ran';
-      }).then((v) {
+      }).then<String?>((v) {
         secondCompleted = true;
         return v;
       }, onError: (Object e) {
