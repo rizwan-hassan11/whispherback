@@ -146,6 +146,14 @@ class MainActivity : AudioServiceActivity() {
                         sendCommandToService(WhisperPlaybackService.ACTION_STOP_NOW)
                         result.success(null)
                     }
+                    "skipNativeNext" -> {
+                        sendCommandToService(WhisperPlaybackService.ACTION_SKIP_NEXT)
+                        result.success(null)
+                    }
+                    "skipNativePrevious" -> {
+                        sendCommandToService(WhisperPlaybackService.ACTION_SKIP_PREVIOUS)
+                        result.success(null)
+                    }
                     "setVolume" -> {
                         val raw = call.arguments
                         val vol = when (raw) {
@@ -175,6 +183,7 @@ class MainActivity : AudioServiceActivity() {
                             "durationMs" to prefs.getLong(WhisperPlaybackService.KEY_DURATION_MS, 0L),
                             "positionMs" to prefs.getLong(WhisperPlaybackService.KEY_POSITION_MS, 0L),
                             "nativeActive" to prefs.getBoolean(WhisperPlaybackService.KEY_NATIVE_ACTIVE, false),
+                            "playlistId" to prefs.getString(WhisperPlaybackService.KEY_PLAYLIST_ID, null),
                         )
                         result.success(map)
                     }
@@ -214,6 +223,7 @@ class MainActivity : AudioServiceActivity() {
                                         state == WhisperPlaybackService.STATE_PLAYING ||
                                             state == WhisperPlaybackService.STATE_PAUSED
                                         ),
+                                    "playlistId" to currentPlaylistIdFromPrefs(),
                                 ),
                             )
                         } catch (_: Throwable) {
@@ -249,6 +259,19 @@ class MainActivity : AudioServiceActivity() {
             } catch (t: Throwable) {
                 result.error("clip_metadata_error", t.message, null)
             }
+        }
+    }
+
+    private fun currentPlaylistIdFromPrefs(): String? {
+        return try {
+            applicationContext
+                .getSharedPreferences(
+                    WhisperPlaybackService.STATE_PREFS,
+                    Context.MODE_PRIVATE,
+                )
+                .getString(WhisperPlaybackService.KEY_PLAYLIST_ID, null)
+        } catch (_: Throwable) {
+            null
         }
     }
 

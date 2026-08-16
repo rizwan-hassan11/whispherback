@@ -33,7 +33,7 @@ class _ScheduleBuilderScreenState extends ConsumerState<ScheduleBuilderScreen> {
   TimeOfDay _startTime = const TimeOfDay(hour: 9, minute: 0);
   TimeOfDay? _endTime = const TimeOfDay(hour: 21, minute: 0);
   int _intervalMinutes = 30;
-  bool _shuffle = false;
+  bool _shuffle = true;
   bool _alarm = true;
   int _daysMask = 127;
   bool _loading = true;
@@ -78,6 +78,7 @@ class _ScheduleBuilderScreenState extends ConsumerState<ScheduleBuilderScreen> {
       } else {
         _alarm = alarm;
         _intervalMinutes = intervalMinutes;
+        _shuffle = true;
       }
       _loading = false;
     });

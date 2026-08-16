@@ -34,6 +34,8 @@ class WhisperAlarmReceiver : BroadcastReceiver() {
         const val EXTRA_PLAYLIST_NAME = "playlist_name"
         const val EXTRA_CLIP_QUEUE_JSON = "clip_queue_json"
         const val EXTRA_SLOT_EPOCH_MS = "slot_epoch_ms"
+        const val EXTRA_PLAY_SINGLE_CLIP = "play_single_clip"
+        const val EXTRA_PLAYLIST_ID = "playlist_id"
 
         // Round 23 — de-duplication window. On some OEMs (Vivo, Realme)
         // the OS occasionally delivers the same alarm PendingIntent twice
@@ -101,6 +103,8 @@ class WhisperAlarmReceiver : BroadcastReceiver() {
             val playlistName = intent.getStringExtra(EXTRA_PLAYLIST_NAME) ?: "Scheduled whisper"
             val clipQueueJson = intent.getStringExtra(EXTRA_CLIP_QUEUE_JSON)
             val slotEpochMs = intent.getLongExtra(EXTRA_SLOT_EPOCH_MS, 0L)
+            val playSingleClip = intent.getBooleanExtra(EXTRA_PLAY_SINGLE_CLIP, false)
+            val playlistId = intent.getStringExtra(EXTRA_PLAYLIST_ID)
             Log.i(
                 TAG,
                 "alarm fired: scheduleId=$scheduleId clipPath=$clipPath title=$clipTitle slot=$slotEpochMs",
@@ -144,6 +148,10 @@ class WhisperAlarmReceiver : BroadcastReceiver() {
                 putExtra(WhisperPlaybackService.EXTRA_PLAYLIST_NAME, playlistName)
                 putExtra(WhisperPlaybackService.EXTRA_SCHEDULE_ID, scheduleId)
                 putExtra(WhisperPlaybackService.EXTRA_SLOT_EPOCH_MS, slotEpochMs)
+                putExtra(WhisperPlaybackService.EXTRA_PLAY_SINGLE_CLIP, playSingleClip)
+                if (!playlistId.isNullOrBlank()) {
+                    putExtra(WhisperPlaybackService.EXTRA_PLAYLIST_ID, playlistId)
+                }
                 if (!clipQueueJson.isNullOrBlank()) {
                     putExtra(WhisperPlaybackService.EXTRA_CLIP_QUEUE_JSON, clipQueueJson)
                 }

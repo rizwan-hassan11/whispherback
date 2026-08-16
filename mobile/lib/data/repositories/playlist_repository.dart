@@ -98,6 +98,7 @@ class PlaylistRepository {
       name: name,
       createdAt: now,
       updatedAt: now,
+      shuffleEnabled: true,
     );
     final db = await _db.database;
     try {
@@ -106,7 +107,7 @@ class PlaylistRepository {
         'name': playlist.name,
         'created_at': playlist.createdAt.toIso8601String(),
         'updated_at': playlist.updatedAt.toIso8601String(),
-        'shuffle_enabled': 0,
+        'shuffle_enabled': 1,
         'is_favourite': 0,
       });
     } on DatabaseException catch (e) {
@@ -210,7 +211,12 @@ class PlaylistRepository {
       );
       await txn.update(
         'playlists',
-        {'updated_at': DateTime.now().toIso8601String()},
+        {
+          'updated_at': DateTime.now().toIso8601String(),
+          // Crossing 1 → 2 clips: shuffle-on is the default for
+          // multi-clip playlists (one clip per scheduled interval).
+          if (count == 1) 'shuffle_enabled': 1,
+        },
         where: 'id = ?',
         whereArgs: [playlistId],
       );

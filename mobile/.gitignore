@@ -44,3 +44,9 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 sqlite3.dll
+
+# App ships Android and iOS only. Flutter may regenerate these locally.
+/linux/
+/macos/
+/windows/
+/web/

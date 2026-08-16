@@ -172,9 +172,9 @@ void main() {
       // Helper must reference playlistDurationMs in its projection math.
       expect(
         src,
-        contains('schedule.playlistDurationMs'),
-        reason: 'The interval-from-end projection must include the '
-            'playlist duration (not just the interval).',
+        contains('schedule.occupancyDurationMs'),
+        reason: 'The step projection must include the fire occupancy '
+            '(full playlist, or longest clip when shuffle-on).',
       );
       // It must also distinguish slot vs completion via lastSlot.
       expect(

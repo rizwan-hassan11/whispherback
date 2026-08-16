@@ -253,15 +253,18 @@ class WhisperAlarmScheduler private constructor(private val appContext: Context)
                 var added = 0
                 while (futureCount + added < targetSize) {
                     if (added > MAX_ALARMS) break
+                    val rotated = nextRotatedClip(last, added)
                     extras.add(
                         Fire(
                             scheduleId = scheduleId,
-                            clipPath = last.clipPath,
-                            clipTitle = last.clipTitle,
+                            clipPath = rotated.first,
+                            clipTitle = rotated.second,
                             playlistName = last.playlistName,
                             fireEpochMs = next,
                             clipQueueJson = last.clipQueueJson,
                             effectiveStepMs = stepMs,
+                            playSingleClip = last.playSingleClip,
+                            playlistId = last.playlistId,
                         )
                     )
                     added++
@@ -286,6 +289,12 @@ class WhisperAlarmScheduler private constructor(private val appContext: Context)
                 }
                 if (f.effectiveStepMs > 0L) {
                     obj.put("effectiveStepMs", f.effectiveStepMs)
+                }
+                if (f.playSingleClip) {
+                    obj.put("playSingleClip", true)
+                }
+                if (f.playlistId.isNotBlank()) {
+                    obj.put("playlistId", f.playlistId)
                 }
                 arr.put(obj)
             }
@@ -465,6 +474,10 @@ class WhisperAlarmScheduler private constructor(private val appContext: Context)
             putExtra(WhisperAlarmReceiver.EXTRA_PLAYLIST_NAME, fire.playlistName)
             putExtra(WhisperAlarmReceiver.EXTRA_CLIP_QUEUE_JSON, fire.clipQueueJson)
             putExtra(WhisperAlarmReceiver.EXTRA_SLOT_EPOCH_MS, fire.fireEpochMs)
+            putExtra(WhisperAlarmReceiver.EXTRA_PLAY_SINGLE_CLIP, fire.playSingleClip)
+            if (fire.playlistId.isNotBlank()) {
+                putExtra(WhisperAlarmReceiver.EXTRA_PLAYLIST_ID, fire.playlistId)
+            }
         }
         return PendingIntent.getBroadcast(
             appContext,
@@ -498,7 +511,36 @@ class WhisperAlarmScheduler private constructor(private val appContext: Context)
         val fireEpochMs: Long,
         val clipQueueJson: String = "",
         val effectiveStepMs: Long = 0L,
+        val playSingleClip: Boolean = false,
+        val playlistId: String = "",
     )
+
+    /// When shuffle plays one clip per interval, native refill must keep
+    /// rotating through the full queue instead of repeating [last.clipPath].
+    private fun nextRotatedClip(last: Fire, addedOffset: Int): Pair<String, String> {
+        if (!last.playSingleClip || last.clipQueueJson.isBlank()) {
+            return last.clipPath to last.clipTitle
+        }
+        return try {
+            val arr = org.json.JSONArray(last.clipQueueJson)
+            if (arr.length() <= 0) return last.clipPath to last.clipTitle
+            var start = 0
+            for (i in 0 until arr.length()) {
+                val obj = arr.optJSONObject(i) ?: continue
+                if (obj.optString("path") == last.clipPath) {
+                    start = i
+                    break
+                }
+            }
+            val idx = (start + 1 + addedOffset).mod(arr.length())
+            val obj = arr.optJSONObject(idx) ?: return last.clipPath to last.clipTitle
+            val path = obj.optString("path").takeIf { it.isNotBlank() } ?: last.clipPath
+            val title = obj.optString("title").ifBlank { last.clipTitle }
+            path to title
+        } catch (_: Throwable) {
+            last.clipPath to last.clipTitle
+        }
+    }
 
     private fun parseFires(json: String): List<Fire> {
         val out = mutableListOf<Fire>()
@@ -525,8 +567,20 @@ class WhisperAlarmScheduler private constructor(private val appContext: Context)
             val clipQueueJson = obj.optString("clipQueueJson", "")
             val fireMs = obj.optLong("fireEpochMs", 0L)
             val stepMs = obj.optLong("effectiveStepMs", 0L)
+            val playSingle = obj.optBoolean("playSingleClip", false)
+            val playlistId = obj.optString("playlistId", "")
             if (fireMs <= 0L) return null
-            Fire(scheduleId, clipPath, clipTitle, playlistName, fireMs, clipQueueJson, stepMs)
+            Fire(
+                scheduleId,
+                clipPath,
+                clipTitle,
+                playlistName,
+                fireMs,
+                clipQueueJson,
+                stepMs,
+                playSingle,
+                playlistId,
+            )
         } catch (t: Throwable) {
             Log.e(TAG, "parseFire failed", t)
             null

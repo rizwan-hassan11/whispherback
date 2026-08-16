@@ -91,7 +91,7 @@ Future<void> syncWhisperNotifications({
         // the slot AFTER it.
         cursorSlot = nextWhen;
         final durationMs =
-            s.playlistDurationMs > 0 ? s.playlistDurationMs : 60 * 1000;
+            s.occupancyDurationMs > 0 ? s.occupancyDurationMs : 60 * 1000;
         cursorFired = nextWhen.add(Duration(milliseconds: durationMs));
       }
     }

@@ -35,6 +35,7 @@ class NativePlaybackSnapshot {
     this.durationMs = 0,
     this.positionMs = 0,
     this.nativeActive = false,
+    this.playlistId,
   });
 
   factory NativePlaybackSnapshot.idle() => const NativePlaybackSnapshot(
@@ -52,6 +53,7 @@ class NativePlaybackSnapshot {
   /// Prefs flag from Kotlin (`KEY_NATIVE_ACTIVE`). Survives brief races
   /// where state string and Dart keep-alive disagree.
   final bool nativeActive;
+  final String? playlistId;
 
   bool get isPlaying => state == NativePlaybackState.playing;
   bool get isPaused => state == NativePlaybackState.paused;
@@ -161,6 +163,7 @@ class NativeAlarmsBridge {
           durationMs: _asIntMs(args['durationMs']),
           positionMs: _asIntMs(args['positionMs']),
           nativeActive: args['nativeActive'] as bool? ?? false,
+          playlistId: args['playlistId'] as String?,
         );
         _lastSnapshot = snapshot;
         if (!_stateController.isClosed) {
@@ -213,11 +216,14 @@ class NativeAlarmsBridge {
 
     // ── STAGE 1: resolve ALL playable clips for each schedule so a
     // scheduled fire can play the full playlist (not just the first clip).
-    final resolvedQueues = <String, List<({String path, String title})>>{};
+    // Shuffle-on still sends the full queue (so skip works) but each
+    // fire starts at the next clip and plays only that one.
+    final resolvedQueues =
+        <String, List<({String path, String title, int durationMs})>>{};
     for (final schedule in enabled) {
       try {
         final list = await playlists.getClips(schedule.playlistId);
-        final queue = <({String path, String title})>[];
+        final queue = <({String path, String title, int durationMs})>[];
         for (final clip in list) {
           final path = clip.filePath;
           if (path.isEmpty) continue;
@@ -225,6 +231,7 @@ class NativeAlarmsBridge {
           queue.add((
             path: path,
             title: clip.title.isNotEmpty ? clip.title : 'WhisperBack',
+            durationMs: clip.durationMs,
           ));
         }
         if (queue.isNotEmpty) {
@@ -254,7 +261,8 @@ class NativeAlarmsBridge {
         s.startTime.hour * 60 + s.startTime.minute,
         (s.endTime?.hour ?? -1) * 60 + (s.endTime?.minute ?? 0),
         s.intervalMinutes,
-        s.playlistDurationMs ~/ 1000,
+        s.shuffleEnabled ? 1 : 0,
+        s.occupancyDurationMs ~/ 1000,
         queue.map((c) => c.path).join(','),
       ].join(':');
     }).toList()
@@ -281,10 +289,12 @@ class NativeAlarmsBridge {
     for (final schedule in enabled) {
       final queue = resolvedQueues[schedule.id];
       if (queue == null || queue.isEmpty) continue;
-      final first = queue.first;
       final queueJson = jsonEncode([
         for (final c in queue) {'path': c.path, 'title': c.title},
       ]);
+      final oneClipPerFire = schedule.shuffleEnabled && queue.length > 1;
+      final rotateFrom =
+          oneClipPerFire ? lastFired.shuffleCursor(schedule.id) : 0;
       var lastCompletion = lastFired.completion(schedule.id);
       var lastSlot = lastFired.slot(schedule.id);
       var added = 0;
@@ -307,11 +317,14 @@ class NativeAlarmsBridge {
           cursor = next.add(const Duration(seconds: 1));
           continue;
         }
+        final clip = queue[(rotateFrom + added) % queue.length];
         fires.add({
           'scheduleId': schedule.id,
-          'clipPath': first.path,
-          'clipTitle': first.title,
+          'playlistId': schedule.playlistId,
+          'clipPath': clip.path,
+          'clipTitle': clip.title,
           'clipQueueJson': queueJson,
+          'playSingleClip': oneClipPerFire,
           'playlistName': schedule.playlistName.isNotEmpty
               ? schedule.playlistName
               : 'WhisperBack',
@@ -323,8 +336,8 @@ class NativeAlarmsBridge {
         });
         added++;
         lastSlot = next;
-        final durationMs = schedule.playlistDurationMs > 0
-            ? schedule.playlistDurationMs
+        final durationMs = schedule.occupancyDurationMs > 0
+            ? schedule.occupancyDurationMs
             : 60 * 1000;
         lastCompletion = next.add(Duration(milliseconds: durationMs));
         // Move the cursor PAST this slot so the helper returns the next one.
@@ -385,6 +398,13 @@ class NativeAlarmsBridge {
     await _invokeVoid('resumeNative');
   }
 
+  /// Skips to the next/previous clip on the native MediaPlayer.
+  /// Used by the mini-player and notification skip buttons while a
+  /// scheduled fire owns playback — Dart/ExoPlayer skip is a no-op there.
+  Future<void> skipNative({required bool next}) async {
+    await _invokeVoid(next ? 'skipNativeNext' : 'skipNativePrevious');
+  }
+
   /// Stops the in-flight scheduled clip and tears down the native FG
   /// service. The user can dismiss the playback notification by tapping
   /// "Stop" in the shade, which routes through the same path.
@@ -439,6 +459,7 @@ class NativeAlarmsBridge {
         durationMs: _asIntMs(raw['durationMs']),
         positionMs: _asIntMs(raw['positionMs']),
         nativeActive: raw['nativeActive'] as bool? ?? false,
+        playlistId: raw['playlistId'] as String?,
       );
       _lastSnapshot = snapshot;
       if (!_stateController.isClosed) {

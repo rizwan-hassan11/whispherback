@@ -26,6 +26,7 @@ class ScheduleLastFiredStore {
   final SharedPreferences _prefs;
   static const _slotPrefix = 'schedule_last_slot_';
   static const _completionPrefix = 'schedule_last_completion_';
+  static const _shuffleCursorPrefix = 'schedule_shuffle_cursor_';
   // Legacy single-timestamp key (pre-v9). We migrate-on-read so we don't lose
   // dedup info after upgrading.
   static const _legacyPrefix = 'schedule_last_fired_';
@@ -87,9 +88,22 @@ class ScheduleLastFiredStore {
     await setCompletion(scheduleId, when);
   }
 
+  /// Next clip index for shuffle-on one-clip-per-interval rotation.
+  /// Incremented after each completed fire; applySnapshot does `% n`.
+  int shuffleCursor(String scheduleId) =>
+      _prefs.getInt('$_shuffleCursorPrefix$scheduleId') ?? 0;
+
+  Future<void> incrementShuffleCursor(String scheduleId) async {
+    await _prefs.setInt(
+      '$_shuffleCursorPrefix$scheduleId',
+      shuffleCursor(scheduleId) + 1,
+    );
+  }
+
   Future<void> clear(String scheduleId) async {
     await _prefs.remove('$_slotPrefix$scheduleId');
     await _prefs.remove('$_completionPrefix$scheduleId');
     await _prefs.remove('$_legacyPrefix$scheduleId');
+    await _prefs.remove('$_shuffleCursorPrefix$scheduleId');
   }
 }

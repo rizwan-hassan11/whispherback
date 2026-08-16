@@ -395,8 +395,11 @@ abstract final class ScheduleFireHelper {
   /// Falls back to a 60s placeholder duration when the playlist length is
   /// still unknown (Round 34) so a step is never computed as 0.
   static Duration effectiveStep(PlaybackSchedule schedule) {
-    final durationMs = schedule.playlistDurationMs > 0
-        ? schedule.playlistDurationMs
+    // Shuffle-on occupies one clip, not the whole playlist sum — using
+    // the sum here was why a 3-clip playlist on a 15-minute interval
+    // drifted by the extra clip lengths after every fire.
+    final durationMs = schedule.occupancyDurationMs > 0
+        ? schedule.occupancyDurationMs
         : 60 * 1000; // unknown length — conservative 1 minute
     final interval = Duration(minutes: schedule.intervalMinutes);
     final duration = Duration(milliseconds: durationMs);

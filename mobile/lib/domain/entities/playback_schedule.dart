@@ -13,6 +13,7 @@ class PlaybackSchedule extends Equatable {
     this.enabled = true,
     this.playlistName = '',
     this.playlistDurationMs = 0,
+    this.maxClipDurationMs = 0,
   });
 
   final String id;
@@ -36,6 +37,19 @@ class PlaybackSchedule extends Equatable {
   /// yet, which gracefully degrades to the old "interval from start"
   /// behaviour.
   final int playlistDurationMs;
+
+  /// Longest single clip in the playlist. Shuffle-on scheduled fires
+  /// play one clip per interval, so occupancy (and `effectiveStep`)
+  /// must use this instead of the full-playlist sum.
+  final int maxClipDurationMs;
+
+  /// Duration that actually occupies one scheduled fire.
+  /// Shuffle-on = one clip (use the longest so skip/rotation never
+  /// overlaps the next alarm). Shuffle-off = the full playlist.
+  int get occupancyDurationMs {
+    if (shuffleEnabled && maxClipDurationMs > 0) return maxClipDurationMs;
+    return playlistDurationMs;
+  }
 
   static const weekdayLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
@@ -68,6 +82,7 @@ class PlaybackSchedule extends Equatable {
     int? daysMask,
     bool? enabled,
     int? playlistDurationMs,
+    int? maxClipDurationMs,
   }) {
     return PlaybackSchedule(
       id: id,
@@ -81,6 +96,7 @@ class PlaybackSchedule extends Equatable {
       enabled: enabled ?? this.enabled,
       playlistName: playlistName,
       playlistDurationMs: playlistDurationMs ?? this.playlistDurationMs,
+      maxClipDurationMs: maxClipDurationMs ?? this.maxClipDurationMs,
     );
   }
 
@@ -97,5 +113,6 @@ class PlaybackSchedule extends Equatable {
         enabled,
         playlistName,
         playlistDurationMs,
+        maxClipDurationMs,
       ];
 }

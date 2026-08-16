@@ -40,7 +40,13 @@ class ScheduleRepository {
           FROM playlist_clips pc
           INNER JOIN clips c ON c.id = pc.clip_id
           WHERE pc.playlist_id = s.playlist_id
-        ), 0) AS playlist_duration_ms
+        ), 0) AS playlist_duration_ms,
+        COALESCE((
+          SELECT MAX(c.duration_ms)
+          FROM playlist_clips pc
+          INNER JOIN clips c ON c.id = pc.clip_id
+          WHERE pc.playlist_id = s.playlist_id
+        ), 0) AS max_clip_duration_ms
       FROM schedules s
       INNER JOIN playlists p ON p.id = s.playlist_id
       ORDER BY s.start_time ASC
@@ -59,7 +65,13 @@ class ScheduleRepository {
           FROM playlist_clips pc
           INNER JOIN clips c ON c.id = pc.clip_id
           WHERE pc.playlist_id = s.playlist_id
-        ), 0) AS playlist_duration_ms
+        ), 0) AS playlist_duration_ms,
+        COALESCE((
+          SELECT MAX(c.duration_ms)
+          FROM playlist_clips pc
+          INNER JOIN clips c ON c.id = pc.clip_id
+          WHERE pc.playlist_id = s.playlist_id
+        ), 0) AS max_clip_duration_ms
       FROM schedules s
       INNER JOIN playlists p ON p.id = s.playlist_id
       WHERE s.playlist_id = ?
@@ -88,15 +100,24 @@ class ScheduleRepository {
     // Compute THIS playlist's total duration so the conflict check can
     // model the new schedule's active windows correctly.
     final durationRows = await db.rawQuery('''
-      SELECT COALESCE(SUM(c.duration_ms), 0) AS total
+      SELECT COALESCE(SUM(c.duration_ms), 0) AS total,
+             COALESCE(MAX(c.duration_ms), 0) AS longest
       FROM playlist_clips pc
       INNER JOIN clips c ON c.id = pc.clip_id
       WHERE pc.playlist_id = ?
     ''', [playlistId]);
     final rawNewDuration = durationRows.first['total'];
-    final newDurationMs = rawNewDuration is int
+    final sumDurationMs = rawNewDuration is int
         ? rawNewDuration
         : (rawNewDuration is num ? rawNewDuration.toInt() : 0);
+    final rawLongest = durationRows.first['longest'];
+    final maxDurationMs = rawLongest is int
+        ? rawLongest
+        : (rawLongest is num ? rawLongest.toInt() : 0);
+    // Shuffle-on occupies one clip per fire — conflict windows must
+    // use that occupancy, not the full-playlist sum.
+    final newDurationMs =
+        shuffleEnabled && maxDurationMs > 0 ? maxDurationMs : sumDurationMs;
     for (final other in existing) {
       if (other.playlistId == playlistId) continue;
       if (!other.enabled) continue;
@@ -259,19 +280,17 @@ class ScheduleRepository {
     final sharedDays = existing.daysMask & daysMask;
     if (sharedDays == 0) return false;
 
+    final existingOccupancy = existing.occupancyDurationMs;
     final existingStep = existing.intervalMinutes +
-        (existing.playlistDurationMs > 0
-            ? ((existing.playlistDurationMs + 59999) ~/ 60000)
-            : 0);
+        (existingOccupancy > 0 ? ((existingOccupancy + 59999) ~/ 60000) : 0);
     final newStep = intervalMinutes +
         (playlistDurationMs > 0 ? ((playlistDurationMs + 59999) ~/ 60000) : 0);
     if (existingStep < 1 || newStep < 1) return false;
 
     final newDurationMin =
         playlistDurationMs > 0 ? ((playlistDurationMs + 59999) ~/ 60000) : 1;
-    final existingDurationMin = existing.playlistDurationMs > 0
-        ? ((existing.playlistDurationMs + 59999) ~/ 60000)
-        : 1;
+    final existingDurationMin =
+        existingOccupancy > 0 ? ((existingOccupancy + 59999) ~/ 60000) : 1;
 
     // For each shared weekday, expand both schedules into minute-of-day
     // windows. Cap the per-schedule expansion at 200 slots so a 1-minute
@@ -344,6 +363,9 @@ class ScheduleRepository {
     final durationMs = rawDuration is int
         ? rawDuration
         : (rawDuration is num ? rawDuration.toInt() : 0);
+    final rawMax = row['max_clip_duration_ms'];
+    final maxClipMs =
+        rawMax is int ? rawMax : (rawMax is num ? rawMax.toInt() : 0);
     return PlaybackSchedule(
       id: row['id']! as String,
       playlistId: row['playlist_id']! as String,
@@ -356,6 +378,7 @@ class ScheduleRepository {
       enabled: (row['enabled'] as int) == 1,
       playlistName: row['playlist_name']! as String,
       playlistDurationMs: durationMs,
+      maxClipDurationMs: maxClipMs,
     );
   }
 }

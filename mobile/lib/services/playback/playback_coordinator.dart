@@ -10,6 +10,7 @@ import '../../data/repositories/playlist_repository.dart';
 import '../../data/repositories/schedule_repository.dart';
 import '../../data/repositories/sleep_repository.dart';
 import '../../domain/entities/audio_clip.dart';
+import '../../domain/entities/playback_schedule.dart';
 import '../../domain/playback/playback_state.dart';
 import '../audio/audio_services.dart';
 import '../audio/clip_path_guard.dart';
@@ -435,6 +436,7 @@ class PlaybackCoordinator {
           _emit(_snapshot.copyWith(
             state: AppPlaybackState.scheduledPlaying,
             isPlaying: true,
+            playlistId: native.playlistId ?? _snapshot.playlistId,
             playlistName:
                 native.playlistName ?? _snapshot.playlistName ?? 'WhisperBack',
             clipTitle:
@@ -451,6 +453,7 @@ class PlaybackCoordinator {
             state: AppPlaybackState.scheduledPlaying,
             isPlaying: true,
             durationMs: native.durationMs,
+            playlistId: native.playlistId ?? _snapshot.playlistId,
             playlistName:
                 native.playlistName ?? _snapshot.playlistName ?? 'WhisperBack',
             clipTitle:
@@ -543,6 +546,13 @@ class PlaybackCoordinator {
             }
           }
           try {
+            await _advanceShuffleCursorAfterFire(scheduleId);
+          } catch (e, st) {
+            if (kDebugMode) {
+              debugPrint('coordinator shuffle cursor advance failed: $e\n$st');
+            }
+          }
+          try {
             await refreshScheduleNotifications?.call(forceAlarmRebuild: true);
           } catch (e, st) {
             if (kDebugMode) {
@@ -594,6 +604,25 @@ class PlaybackCoordinator {
     if (scheduleId == null || scheduleId.isEmpty) return;
     final store = await ScheduleLastFiredStore.ensureLoaded();
     await store.setCompletion(scheduleId, when);
+  }
+
+  /// Shuffle-on schedules play one clip per interval. Advance the
+  /// rotation cursor AFTER the completion stamp so the following
+  /// alarm realign assigns the next clip, not the one that just played.
+  Future<void> _advanceShuffleCursorAfterFire(String? scheduleId) async {
+    if (scheduleId == null || scheduleId.isEmpty) return;
+    final repo = _schedules;
+    if (repo == null) return;
+    PlaybackSchedule? schedule;
+    for (final s in await repo.getAll()) {
+      if (s.id == scheduleId) {
+        schedule = s;
+        break;
+      }
+    }
+    if (schedule == null || !schedule.shuffleEnabled) return;
+    final store = await ScheduleLastFiredStore.ensureLoaded();
+    await store.incrementShuffleCursor(scheduleId);
   }
 
   void _syncPlayingSnapshot(bool playing) {
@@ -734,6 +763,20 @@ class PlaybackCoordinator {
     // if they had previously tapped pause. Clear the sentinel so the next
     // natural completion in the new clip behaves normally.
     _userInitiatedPause = false;
+    // Scheduled Android playback is owned by native MediaPlayer. Dart
+    // skip used to call just_audio, which is idle in that state — the
+    // mini-player and notification next/prev looked dead.
+    if (_nativeOwnsPlayback ||
+        NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
+      try {
+        await NativeAlarmsBridge.instance.skipNative(next: next);
+      } catch (e, st) {
+        if (kDebugMode) {
+          debugPrint('skip: native skip failed: $e\n$st');
+        }
+      }
+      return;
+    }
     // Invalidate any in-flight completion from the clip we're leaving.
     _playbackGeneration++;
     final playlistId = _snapshot.playlistId;
@@ -932,23 +975,29 @@ class PlaybackCoordinator {
     }
 
     if (_snapshot.state == AppPlaybackState.scheduledPlaying) {
-      // Round 28: play EVERY clip in the playlist for a scheduled fire,
-      // then finish. Previously we called `_finishScheduledClip` after
-      // the first clip — multi-clip schedules stopped after track 1.
-      final playlistId = _snapshot.playlistId;
-      if (playlistId != null) {
-        final clips = await _playlists.getClips(playlistId);
-        if (clips.isNotEmpty) {
-          final lastIndex = _playlistClipIndex ?? 0;
-          final nextIndex = lastIndex + 1;
-          if (nextIndex < clips.length) {
-            final played = await _advanceToNextPlayable(
-              playlistId,
-              clips,
-              nextIndex,
-              fromSchedule: true,
-            );
-            if (played != null) return;
+      // Shuffle-on: one clip per interval (round-robin). Do not walk
+      // the rest of the playlist — that is what made interval timing
+      // occupy the full playlist length.
+      final shuffleThisFire =
+          _activeScheduleShuffle ?? _snapshot.shuffleEnabled;
+      if (!shuffleThisFire) {
+        // Shuffle-off: play EVERY clip in the playlist for this fire,
+        // then finish.
+        final playlistId = _snapshot.playlistId;
+        if (playlistId != null) {
+          final clips = await _playlists.getClips(playlistId);
+          if (clips.isNotEmpty) {
+            final lastIndex = _playlistClipIndex ?? 0;
+            final nextIndex = lastIndex + 1;
+            if (nextIndex < clips.length) {
+              final played = await _advanceToNextPlayable(
+                playlistId,
+                clips,
+                nextIndex,
+                fromSchedule: true,
+              );
+              if (played != null) return;
+            }
           }
         }
       }
@@ -1079,6 +1128,13 @@ class PlaybackCoordinator {
         completedScheduleId,
         DateTime.now(),
       );
+      try {
+        await _advanceShuffleCursorAfterFire(completedScheduleId);
+      } catch (e, st) {
+        if (kDebugMode) {
+          debugPrint('finishScheduledClip: shuffle cursor failed: $e\n$st');
+        }
+      }
     }
     await refreshScheduleNotifications?.call();
     await _drainPendingScheduled();
@@ -1367,8 +1423,25 @@ class PlaybackCoordinator {
     final shuffle = (fromSchedule && _activeScheduleShuffle != null)
         ? _activeScheduleShuffle!
         : (playlist?.shuffleEnabled ?? false);
-    final clip = shuffle ? _nextShuffledClip(playlistId, clips) : clips.first;
-    _playlistClipIndex = shuffle ? null : 0;
+    AudioClip clip;
+    if (fromSchedule && shuffle) {
+      // Scheduled shuffle is round-robin: one clip per interval, in
+      // playlist order, wrapping after the last clip. Random
+      // ShuffleEngine is only for manual playlist play.
+      final store = await ScheduleLastFiredStore.ensureLoaded();
+      final cursor = _activeScheduleId == null
+          ? 0
+          : store.shuffleCursor(_activeScheduleId!);
+      final index = clips.isEmpty ? 0 : cursor % clips.length;
+      clip = clips[index];
+      _playlistClipIndex = index;
+    } else if (shuffle) {
+      clip = _nextShuffledClip(playlistId, clips);
+      _playlistClipIndex = null;
+    } else {
+      clip = clips.first;
+      _playlistClipIndex = 0;
+    }
     _libraryQueue = const [];
     _libraryIndex = -1;
     // Starting a brand-new playlist clears any "user paused" sentinel from

@@ -58,12 +58,16 @@ class WhisperPlaybackService : Service() {
         const val ACTION_PAUSE = "com.whisperback.alarms.PAUSE"
         const val ACTION_RESUME = "com.whisperback.alarms.RESUME"
         const val ACTION_STOP_NOW = "com.whisperback.alarms.STOP_NOW"
+        const val ACTION_SKIP_NEXT = "com.whisperback.alarms.SKIP_NEXT"
+        const val ACTION_SKIP_PREVIOUS = "com.whisperback.alarms.SKIP_PREVIOUS"
         const val EXTRA_CLIP_PATH = "clip_path"
         const val EXTRA_CLIP_TITLE = "clip_title"
         const val EXTRA_PLAYLIST_NAME = "playlist_name"
         const val EXTRA_SCHEDULE_ID = "schedule_id"
+        const val EXTRA_PLAYLIST_ID = "playlist_id"
         const val EXTRA_CLIP_QUEUE_JSON = "clip_queue_json"
         const val EXTRA_SLOT_EPOCH_MS = "slot_epoch_ms"
+        const val EXTRA_PLAY_SINGLE_CLIP = "play_single_clip"
 
         // Distinct from notification_service.dart's _ongoingId (1), the
         // keep-alive service id (0x57424B), and audio_service's IDs.
@@ -96,6 +100,9 @@ class WhisperPlaybackService : Service() {
         const val KEY_NATIVE_ACTIVE = "native_playback_active"
         const val KEY_CLIP_QUEUE_JSON = "clip_queue_json"
         const val KEY_SLOT_EPOCH_MS = "slot_epoch_ms"
+        const val KEY_PLAY_SINGLE_CLIP = "play_single_clip"
+        const val KEY_QUEUE_INDEX = "clip_queue_index"
+        const val KEY_PLAYLIST_ID = "playlist_id"
 
         const val STATE_IDLE = "idle"
         const val STATE_PLAYING = "playing"
@@ -144,6 +151,8 @@ class WhisperPlaybackService : Service() {
     private var currentSlotEpochMs: Long = 0L
     private var currentQueueJson: String = ""
     private var fireDedupMarked: Boolean = false
+    private var playSingleClip: Boolean = false
+    private var currentPlaylistId: String? = null
 
     private val progressTicker = object : Runnable {
         override fun run() {
@@ -206,6 +215,8 @@ class WhisperPlaybackService : Service() {
                 ACTION_PLAY_CLIP -> handlePlayCommand(intent)
                 ACTION_PAUSE -> handlePauseCommand()
                 ACTION_RESUME -> handleResumeCommand()
+                ACTION_SKIP_NEXT -> handleSkipCommand(next = true)
+                ACTION_SKIP_PREVIOUS -> handleSkipCommand(next = false)
                 ACTION_STOP_NOW -> {
                     Log.i(TAG, "stop requested via notification/Dart")
                     stopSelfSafely()
@@ -271,11 +282,13 @@ class WhisperPlaybackService : Service() {
         currentClipTitle = intent.getStringExtra(EXTRA_CLIP_TITLE) ?: "WhisperBack"
         currentPlaylistName = intent.getStringExtra(EXTRA_PLAYLIST_NAME) ?: "Scheduled whisper"
         currentScheduleId = intent.getStringExtra(EXTRA_SCHEDULE_ID)
+        currentPlaylistId = intent.getStringExtra(EXTRA_PLAYLIST_ID)
         currentSlotEpochMs = intent.getLongExtra(EXTRA_SLOT_EPOCH_MS, 0L)
         currentQueueJson = intent.getStringExtra(EXTRA_CLIP_QUEUE_JSON) ?: ""
+        playSingleClip = intent.getBooleanExtra(EXTRA_PLAY_SINGLE_CLIP, false)
         fireDedupMarked = false
         clipQueue = parseClipQueue(currentQueueJson, clipPath, currentClipTitle)
-        clipQueueIndex = 0
+        clipQueueIndex = clipQueue.indexOfFirst { it.first == clipPath }.coerceAtLeast(0)
         // Stamp native-active BEFORE prepareAsync so a concurrent Dart
         // enterForeground / heartbeat cannot restart silence in the gap.
         userPaused = false
@@ -369,6 +382,47 @@ class WhisperPlaybackService : Service() {
         }
     }
 
+    /// Mini-player + notification skip. Walks [clipQueue] so a scheduled
+    /// shuffle fire (one clip auto-played) can still jump to any other
+    /// clip in the playlist without starting a second audio engine.
+    private fun handleSkipCommand(next: Boolean) {
+        try {
+            rehydrateFromPrefsIfNeeded()
+            if (clipQueue.isEmpty()) {
+                val path = currentClipPath
+                if (!path.isNullOrBlank() && File(path).exists()) {
+                    userPaused = false
+                    wantPlaying = true
+                    playClip(path)
+                } else {
+                    Log.w(TAG, "skip requested with empty queue and no path")
+                }
+                return
+            }
+            val size = clipQueue.size
+            var idx = clipQueueIndex
+            val delta = if (next) 1 else -1
+            var attempts = 0
+            while (attempts < size) {
+                idx = (idx + delta + size) % size
+                attempts++
+                val (path, title) = clipQueue[idx]
+                if (!File(path).exists()) continue
+                clipQueueIndex = idx
+                currentClipPath = path
+                currentClipTitle = title
+                userPaused = false
+                wantPlaying = true
+                writeState(STATE_PLAYING)
+                playClip(path)
+                return
+            }
+            Log.w(TAG, "skip: no playable file in queue of $size")
+        } catch (t: Throwable) {
+            Log.e(TAG, "handleSkipCommand failed", t)
+        }
+    }
+
     private fun rehydrateFromPrefsIfNeeded() {
         if (!currentClipPath.isNullOrBlank()) return
         try {
@@ -379,10 +433,13 @@ class WhisperPlaybackService : Service() {
             currentClipTitle = prefs.getString(KEY_CURRENT_TITLE, null) ?: "WhisperBack"
             currentPlaylistName = prefs.getString(KEY_CURRENT_PLAYLIST, null) ?: "Scheduled whisper"
             currentScheduleId = prefs.getString(KEY_CURRENT_SCHEDULE_ID, null)
+            currentPlaylistId = prefs.getString(KEY_PLAYLIST_ID, null)
             currentQueueJson = prefs.getString(KEY_CLIP_QUEUE_JSON, "") ?: ""
             currentSlotEpochMs = prefs.getLong(KEY_SLOT_EPOCH_MS, 0L)
             currentDurationMs = prefs.getLong(KEY_DURATION_MS, 0L)
+            playSingleClip = prefs.getBoolean(KEY_PLAY_SINGLE_CLIP, false)
             clipQueue = parseClipQueue(currentQueueJson, path, currentClipTitle)
+            clipQueueIndex = prefs.getInt(KEY_QUEUE_INDEX, 0).coerceIn(0, (clipQueue.size - 1).coerceAtLeast(0))
         } catch (t: Throwable) {
             Log.e(TAG, "rehydrateFromPrefsIfNeeded failed", t)
         }
@@ -505,16 +562,22 @@ class WhisperPlaybackService : Service() {
                 }
             }
             player.setOnCompletionListener {
-                Log.i(TAG, "clip complete at queue index $clipQueueIndex / ${clipQueue.size}")
-                val nextIndex = clipQueueIndex + 1
-                if (nextIndex < clipQueue.size) {
-                    val (nextPath, nextTitle) = clipQueue[nextIndex]
-                    if (File(nextPath).exists()) {
-                        clipQueueIndex = nextIndex
-                        currentClipPath = nextPath
-                        currentClipTitle = nextTitle
-                        playClip(nextPath)
-                        return@setOnCompletionListener
+                Log.i(TAG, "clip complete at queue index $clipQueueIndex / ${clipQueue.size} single=$playSingleClip")
+                // Shuffle-on scheduled fires play exactly one clip per
+                // interval. Auto-advancing the rest of the playlist here
+                // was what made a "15-minute" schedule occupy the full
+                // playlist length and drift the next alarm.
+                if (!playSingleClip) {
+                    val nextIndex = clipQueueIndex + 1
+                    if (nextIndex < clipQueue.size) {
+                        val (nextPath, nextTitle) = clipQueue[nextIndex]
+                        if (File(nextPath).exists()) {
+                            clipQueueIndex = nextIndex
+                            currentClipPath = nextPath
+                            currentClipTitle = nextTitle
+                            playClip(nextPath)
+                            return@setOnCompletionListener
+                        }
                     }
                 }
                 wantPlaying = false
@@ -597,14 +660,20 @@ class WhisperPlaybackService : Service() {
                     .remove(KEY_POSITION_MS)
                     .remove(KEY_CLIP_QUEUE_JSON)
                     .remove(KEY_SLOT_EPOCH_MS)
+                    .remove(KEY_PLAY_SINGLE_CLIP)
+                    .remove(KEY_QUEUE_INDEX)
+                    .remove(KEY_PLAYLIST_ID)
             } else {
                 editor.putString(KEY_CURRENT_PATH, currentClipPath ?: "")
                     .putString(KEY_CURRENT_TITLE, currentClipTitle)
                     .putString(KEY_CURRENT_PLAYLIST, currentPlaylistName)
                     .putString(KEY_CURRENT_SCHEDULE_ID, currentScheduleId ?: "")
+                    .putString(KEY_PLAYLIST_ID, currentPlaylistId ?: "")
                     .putLong(KEY_DURATION_MS, currentDurationMs)
                     .putString(KEY_CLIP_QUEUE_JSON, currentQueueJson)
                     .putLong(KEY_SLOT_EPOCH_MS, currentSlotEpochMs)
+                    .putBoolean(KEY_PLAY_SINGLE_CLIP, playSingleClip)
+                    .putInt(KEY_QUEUE_INDEX, clipQueueIndex)
             }
             // Round 33: commit synchronously so Dart's getPlaybackState
             // cannot read a stale nativeActive=false while MediaPlayer
@@ -942,8 +1011,10 @@ class WhisperPlaybackService : Service() {
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+        val prevPI = servicePendingIntent(ACTION_SKIP_PREVIOUS, 104)
         val pausePI = servicePendingIntent(ACTION_PAUSE, 101)
         val resumePI = servicePendingIntent(ACTION_RESUME, 102)
+        val nextPI = servicePendingIntent(ACTION_SKIP_NEXT, 105)
         val stopPI = servicePendingIntent(ACTION_STOP_NOW, 103)
         val smallIcon = resolveSmallIcon()
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
@@ -960,6 +1031,13 @@ class WhisperPlaybackService : Service() {
             // Round 30: do NOT attach a deleteIntent that STOPs playback.
             // Some OEMs auto-dismiss / recreate ongoing notifications and
             // were killing the MediaPlayer mid-clip.
+        builder.addAction(
+            NotificationCompat.Action(
+                android.R.drawable.ic_media_previous,
+                "Previous",
+                prevPI,
+            ),
+        )
         if (isPlaying) {
             builder.addAction(
                 NotificationCompat.Action(
@@ -979,13 +1057,20 @@ class WhisperPlaybackService : Service() {
         }
         builder.addAction(
             NotificationCompat.Action(
+                android.R.drawable.ic_media_next,
+                "Next",
+                nextPI,
+            ),
+        )
+        builder.addAction(
+            NotificationCompat.Action(
                 android.R.drawable.ic_menu_close_clear_cancel,
                 "Stop",
                 stopPI,
             ),
         )
         builder.setStyle(
-            MediaStyle().setShowActionsInCompactView(0, 1),
+            MediaStyle().setShowActionsInCompactView(0, 1, 2),
         )
         return builder.build()
     }

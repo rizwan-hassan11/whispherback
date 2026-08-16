@@ -39,6 +39,24 @@ void main() {
         source: ClipSource.recorded,
       );
 
+  test('create defaults shuffle on for new playlists', () async {
+    final created = await repo.create('Shuffled');
+    expect(created.shuffleEnabled, isTrue);
+    final reloaded = await repo.getById(created.id);
+    expect(reloaded?.shuffleEnabled, isTrue);
+  });
+
+  test('adding a second clip turns shuffle on', () async {
+    final p = await repo.create('Two clips');
+    await repo.setShuffle(p.id, false);
+    final a = await seedClip('A');
+    final b = await seedClip('B');
+    await repo.addClip(p.id, a.id);
+    expect((await repo.getById(p.id))!.shuffleEnabled, isFalse);
+    await repo.addClip(p.id, b.id);
+    expect((await repo.getById(p.id))!.shuffleEnabled, isTrue);
+  });
+
   test('create rejects names that collide with an existing playlist', () async {
     await repo.create('Morning');
     expect(
