@@ -736,6 +736,28 @@ class PlaybackCoordinator {
     _userInitiatedPause = false;
     // Invalidate any in-flight completion from the clip we're leaving.
     _playbackGeneration++;
+
+    // Round 39 — when the native FG MediaPlayer owns the clip (a
+    // scheduled multi-clip fire), route the skip over the native bridge
+    // instead of falling into the just_audio / library-queue path below.
+    // That path has no idea a native clip is even playing: `playlistId`
+    // is usually null right after a native fire (never set by
+    // `_onNativePlaybackState`), so the tap either silently no-op'd, or
+    // — if a stale `playlistId` was left over from an earlier manual
+    // play — started a SECOND, competing just_audio stream on top of
+    // the still-audible native clip. Mirrors the same branch `pause()` /
+    // `resume()` / `stop()` already have.
+    if (_nativeOwnsPlayback) {
+      try {
+        await NativeAlarmsBridge.instance.skipNative(next: next);
+      } catch (e, st) {
+        if (kDebugMode) {
+          debugPrint('_skipPlaylistClip: native skip failed: $e\n$st');
+        }
+      }
+      return;
+    }
+
     final playlistId = _snapshot.playlistId;
     if (playlistId == null) {
       // Library-queue context: walk through the currently shown clip list.

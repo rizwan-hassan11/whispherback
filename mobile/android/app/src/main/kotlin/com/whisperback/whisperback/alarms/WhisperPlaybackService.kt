@@ -58,6 +58,10 @@ class WhisperPlaybackService : Service() {
         const val ACTION_PAUSE = "com.whisperback.alarms.PAUSE"
         const val ACTION_RESUME = "com.whisperback.alarms.RESUME"
         const val ACTION_STOP_NOW = "com.whisperback.alarms.STOP_NOW"
+        // Round 39 — skip within the native clipQueue (multi-clip
+        // schedule fires). See handleSkipCommand().
+        const val ACTION_SKIP_NEXT = "com.whisperback.alarms.SKIP_NEXT"
+        const val ACTION_SKIP_PREVIOUS = "com.whisperback.alarms.SKIP_PREVIOUS"
         const val EXTRA_CLIP_PATH = "clip_path"
         const val EXTRA_CLIP_TITLE = "clip_title"
         const val EXTRA_PLAYLIST_NAME = "playlist_name"
@@ -206,6 +210,8 @@ class WhisperPlaybackService : Service() {
                 ACTION_PLAY_CLIP -> handlePlayCommand(intent)
                 ACTION_PAUSE -> handlePauseCommand()
                 ACTION_RESUME -> handleResumeCommand()
+                ACTION_SKIP_NEXT -> handleSkipCommand(next = true)
+                ACTION_SKIP_PREVIOUS -> handleSkipCommand(next = false)
                 ACTION_STOP_NOW -> {
                     Log.i(TAG, "stop requested via notification/Dart")
                     stopSelfSafely()
@@ -366,6 +372,44 @@ class WhisperPlaybackService : Service() {
             notifyListener(STATE_PLAYING)
         } catch (t: Throwable) {
             Log.e(TAG, "handleResumeCommand failed", t)
+        }
+    }
+
+    /**
+     * Round 39 — skip to the next/previous clip in the native clipQueue.
+     *
+     * This is the on-demand counterpart to `onCompletionListener`'s
+     * auto-advance: that one only moves forward, and only when a clip
+     * finishes naturally. A single-clip queue wraps back to index 0,
+     * which restarts the same clip via `playClip` — matching the
+     * in-app skip buttons' "restart on single clip" contract instead of
+     * doing nothing.
+     */
+    private fun handleSkipCommand(next: Boolean) {
+        try {
+            if (clipQueue.isEmpty()) {
+                Log.w(TAG, "skip requested with empty queue")
+                return
+            }
+            val size = clipQueue.size
+            val targetIndex = if (next) {
+                (clipQueueIndex + 1) % size
+            } else {
+                (clipQueueIndex - 1 + size) % size
+            }
+            val (path, title) = clipQueue[targetIndex]
+            if (!File(path).exists()) {
+                Log.w(TAG, "skip target missing on disk: $path")
+                return
+            }
+            clipQueueIndex = targetIndex
+            currentClipPath = path
+            currentClipTitle = title
+            userPaused = false
+            wantPlaying = true
+            playClip(path)
+        } catch (t: Throwable) {
+            Log.e(TAG, "handleSkipCommand failed", t)
         }
     }
 
@@ -689,6 +733,11 @@ class WhisperPlaybackService : Service() {
      */
     private fun requestAudioFocus(): Boolean {
         val mgr = audioManager ?: return false
+        // Round 40: same leak pattern as acquireWakeLock — abandon any
+        // request we already hold before building a new one, instead of
+        // silently overwriting `audioFocusRequest` and leaving the old
+        // one live in the system focus stack.
+        abandonAudioFocus()
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val attrs = AudioAttributes.Builder()
@@ -831,6 +880,13 @@ class WhisperPlaybackService : Service() {
 
     private fun acquireWakeLock() {
         try {
+            // Round 40: every playClip() call (fresh fire, multi-clip
+            // auto-advance, skip) reaches here. Without releasing the
+            // previous lock first, each clip transition orphaned a held
+            // PARTIAL_WAKE_LOCK for up to MAX_PLAYBACK_MS (2h) — a real
+            // leak across a multi-hour schedule that OEM battery
+            // managers can react to by killing the process.
+            releaseWakeLock()
             val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
             val lock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKE_LOCK_TAG)
             lock.setReferenceCounted(false)
@@ -945,7 +1001,17 @@ class WhisperPlaybackService : Service() {
         val pausePI = servicePendingIntent(ACTION_PAUSE, 101)
         val resumePI = servicePendingIntent(ACTION_RESUME, 102)
         val stopPI = servicePendingIntent(ACTION_STOP_NOW, 103)
+        val skipPreviousPI = servicePendingIntent(ACTION_SKIP_PREVIOUS, 104)
+        val skipNextPI = servicePendingIntent(ACTION_SKIP_NEXT, 105)
         val smallIcon = resolveSmallIcon()
+        val skipPreviousIcon = resolveActionIcon(
+            listOf("ic_action_skip_previous", "exo_icon_previous", "ic_skip_previous"),
+            android.R.drawable.ic_media_rew,
+        )
+        val skipNextIcon = resolveActionIcon(
+            listOf("ic_action_skip_next", "exo_icon_next", "ic_skip_next"),
+            android.R.drawable.ic_media_ff,
+        )
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText("Playing $playlistName")
@@ -960,6 +1026,13 @@ class WhisperPlaybackService : Service() {
             // Round 30: do NOT attach a deleteIntent that STOPs playback.
             // Some OEMs auto-dismiss / recreate ongoing notifications and
             // were killing the MediaPlayer mid-clip.
+        builder.addAction(
+            NotificationCompat.Action(
+                skipPreviousIcon,
+                "Previous",
+                skipPreviousPI,
+            ),
+        )
         if (isPlaying) {
             builder.addAction(
                 NotificationCompat.Action(
@@ -979,13 +1052,23 @@ class WhisperPlaybackService : Service() {
         }
         builder.addAction(
             NotificationCompat.Action(
+                skipNextIcon,
+                "Next",
+                skipNextPI,
+            ),
+        )
+        builder.addAction(
+            NotificationCompat.Action(
                 android.R.drawable.ic_menu_close_clear_cancel,
                 "Stop",
                 stopPI,
             ),
         )
+        // Round 39: action order is now [prev(0), play/pause(1), next(2),
+        // stop(3)] — show the standard prev/play-pause/next triple in
+        // compact view instead of the old play-pause/stop pair.
         builder.setStyle(
-            MediaStyle().setShowActionsInCompactView(0, 1),
+            MediaStyle().setShowActionsInCompactView(0, 1, 2),
         )
         return builder.build()
     }
@@ -1017,5 +1100,18 @@ class WhisperPlaybackService : Service() {
             if (mid != 0) return mid
         }
         return android.R.drawable.ic_media_play
+    }
+
+    /// Round 39 — resolve a bundled icon by name (e.g. one merged in
+    /// from another plugin's resources), falling back to a framework
+    /// drawable that's guaranteed to exist so the action is never blank.
+    private fun resolveActionIcon(names: List<String>, fallback: Int): Int {
+        val res = resources
+        val pkg = packageName
+        for (name in names) {
+            val id = res.getIdentifier(name, "drawable", pkg)
+            if (id != 0) return id
+        }
+        return fallback
     }
 }

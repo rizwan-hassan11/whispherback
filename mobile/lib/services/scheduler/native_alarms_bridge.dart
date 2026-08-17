@@ -400,6 +400,24 @@ class NativeAlarmsBridge {
     }
   }
 
+  /// Skips to the next/previous clip in the native scheduled-playback
+  /// queue. Only meaningful while the native `MediaPlayer` owns the
+  /// session — `WhisperPlaybackService` keeps its own `clipQueue` /
+  /// `clipQueueIndex`, entirely separate from the Dart-side playlist
+  /// state, so this is the only way to move it.
+  Future<void> skipNative({required bool next}) async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _channel.invokeMethod<void>('skipNative', {'next': next});
+    } on MissingPluginException {
+      // Not running on Android — silently ignore.
+    } catch (e, st) {
+      if (kDebugMode) {
+        print('NativeAlarmsBridge.skipNative failed: $e\n$st');
+      }
+    }
+  }
+
   /// Pushes the user's preferred playback volume (0.0–1.0) into native
   /// SharedPreferences. The next [WhisperPlaybackService.playClip] picks
   /// it up via `MediaPlayer.setVolume()`. The QA report "schedule plays

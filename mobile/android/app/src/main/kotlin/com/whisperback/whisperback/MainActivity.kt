@@ -146,6 +146,22 @@ class MainActivity : AudioServiceActivity() {
                         sendCommandToService(WhisperPlaybackService.ACTION_STOP_NOW)
                         result.success(null)
                     }
+                    "skipNative" -> {
+                        val args = call.arguments
+                        val next = when (args) {
+                            is Map<*, *> -> (args["next"] as? Boolean) ?: true
+                            is Boolean -> args
+                            else -> true
+                        }
+                        sendCommandToService(
+                            if (next) {
+                                WhisperPlaybackService.ACTION_SKIP_NEXT
+                            } else {
+                                WhisperPlaybackService.ACTION_SKIP_PREVIOUS
+                            },
+                        )
+                        result.success(null)
+                    }
                     "setVolume" -> {
                         val raw = call.arguments
                         val vol = when (raw) {
