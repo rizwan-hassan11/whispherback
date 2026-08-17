@@ -779,6 +779,7 @@ class PlaybackCoordinator {
     }
     // Invalidate any in-flight completion from the clip we're leaving.
     _playbackGeneration++;
+
     final playlistId = _snapshot.playlistId;
     if (playlistId == null) {
       // Library-queue context: walk through the currently shown clip list.

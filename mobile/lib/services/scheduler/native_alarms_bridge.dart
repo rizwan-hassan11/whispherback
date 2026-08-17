@@ -402,7 +402,16 @@ class NativeAlarmsBridge {
   /// Used by the mini-player and notification skip buttons while a
   /// scheduled fire owns playback — Dart/ExoPlayer skip is a no-op there.
   Future<void> skipNative({required bool next}) async {
-    await _invokeVoid(next ? 'skipNativeNext' : 'skipNativePrevious');
+    if (!Platform.isAndroid) return;
+    try {
+      await _channel.invokeMethod<void>('skipNative', {'next': next});
+    } on MissingPluginException {
+      // Not running on Android — silently ignore.
+    } catch (e, st) {
+      if (kDebugMode) {
+        print('NativeAlarmsBridge.skipNative failed: $e\n$st');
+      }
+    }
   }
 
   /// Stops the in-flight scheduled clip and tears down the native FG

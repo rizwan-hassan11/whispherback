@@ -128,8 +128,8 @@ void main() {
 
     test('NativeAlarmsBridge.skipNative calls the platform methods', () {
       final src = _read('lib/services/scheduler/native_alarms_bridge.dart');
-      expect(src, contains('skipNativeNext'));
-      expect(src, contains('skipNativePrevious'));
+      expect(src, contains("'skipNative'"));
+      expect(src, contains('skipNative({required bool next})'));
       expect(src, contains("'playSingleClip': oneClipPerFire"));
     });
   });

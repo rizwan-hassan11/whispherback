@@ -58,6 +58,7 @@ class WhisperPlaybackService : Service() {
         const val ACTION_PAUSE = "com.whisperback.alarms.PAUSE"
         const val ACTION_RESUME = "com.whisperback.alarms.RESUME"
         const val ACTION_STOP_NOW = "com.whisperback.alarms.STOP_NOW"
+        // Skip within the native clipQueue (scheduled multi-clip fires).
         const val ACTION_SKIP_NEXT = "com.whisperback.alarms.SKIP_NEXT"
         const val ACTION_SKIP_PREVIOUS = "com.whisperback.alarms.SKIP_PREVIOUS"
         const val EXTRA_CLIP_PATH = "clip_path"
@@ -385,6 +386,8 @@ class WhisperPlaybackService : Service() {
     /// Mini-player + notification skip. Walks [clipQueue] so a scheduled
     /// shuffle fire (one clip auto-played) can still jump to any other
     /// clip in the playlist without starting a second audio engine.
+    /// Rehydrates after OEM reclaim, and skips missing files instead of
+    /// dying on the first hole.
     private fun handleSkipCommand(next: Boolean) {
         try {
             rehydrateFromPrefsIfNeeded()
@@ -758,6 +761,11 @@ class WhisperPlaybackService : Service() {
      */
     private fun requestAudioFocus(): Boolean {
         val mgr = audioManager ?: return false
+        // Round 40: same leak pattern as acquireWakeLock — abandon any
+        // request we already hold before building a new one, instead of
+        // silently overwriting `audioFocusRequest` and leaving the old
+        // one live in the system focus stack.
+        abandonAudioFocus()
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val attrs = AudioAttributes.Builder()
@@ -900,6 +908,13 @@ class WhisperPlaybackService : Service() {
 
     private fun acquireWakeLock() {
         try {
+            // Round 40: every playClip() call (fresh fire, multi-clip
+            // auto-advance, skip) reaches here. Without releasing the
+            // previous lock first, each clip transition orphaned a held
+            // PARTIAL_WAKE_LOCK for up to MAX_PLAYBACK_MS (2h) — a real
+            // leak across a multi-hour schedule that OEM battery
+            // managers can react to by killing the process.
+            releaseWakeLock()
             val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
             val lock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKE_LOCK_TAG)
             lock.setReferenceCounted(false)
@@ -1017,6 +1032,14 @@ class WhisperPlaybackService : Service() {
         val nextPI = servicePendingIntent(ACTION_SKIP_NEXT, 105)
         val stopPI = servicePendingIntent(ACTION_STOP_NOW, 103)
         val smallIcon = resolveSmallIcon()
+        val skipPreviousIcon = resolveActionIcon(
+            listOf("ic_action_skip_previous", "exo_icon_previous", "ic_skip_previous"),
+            android.R.drawable.ic_media_previous,
+        )
+        val skipNextIcon = resolveActionIcon(
+            listOf("ic_action_skip_next", "exo_icon_next", "ic_skip_next"),
+            android.R.drawable.ic_media_next,
+        )
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText("Playing $playlistName")
@@ -1033,7 +1056,7 @@ class WhisperPlaybackService : Service() {
             // were killing the MediaPlayer mid-clip.
         builder.addAction(
             NotificationCompat.Action(
-                android.R.drawable.ic_media_previous,
+                skipPreviousIcon,
                 "Previous",
                 prevPI,
             ),
@@ -1057,7 +1080,7 @@ class WhisperPlaybackService : Service() {
         }
         builder.addAction(
             NotificationCompat.Action(
-                android.R.drawable.ic_media_next,
+                skipNextIcon,
                 "Next",
                 nextPI,
             ),
@@ -1069,6 +1092,9 @@ class WhisperPlaybackService : Service() {
                 stopPI,
             ),
         )
+        // Round 39: action order is now [prev(0), play/pause(1), next(2),
+        // stop(3)] — show the standard prev/play-pause/next triple in
+        // compact view instead of the old play-pause/stop pair.
         builder.setStyle(
             MediaStyle().setShowActionsInCompactView(0, 1, 2),
         )
@@ -1102,5 +1128,18 @@ class WhisperPlaybackService : Service() {
             if (mid != 0) return mid
         }
         return android.R.drawable.ic_media_play
+    }
+
+    /// Round 39 — resolve a bundled icon by name (e.g. one merged in
+    /// from another plugin's resources), falling back to a framework
+    /// drawable that's guaranteed to exist so the action is never blank.
+    private fun resolveActionIcon(names: List<String>, fallback: Int): Int {
+        val res = resources
+        val pkg = packageName
+        for (name in names) {
+            val id = res.getIdentifier(name, "drawable", pkg)
+            if (id != 0) return id
+        }
+        return fallback
     }
 }
