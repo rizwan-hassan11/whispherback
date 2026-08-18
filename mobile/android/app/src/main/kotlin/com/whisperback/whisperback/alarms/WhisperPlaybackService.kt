@@ -154,10 +154,12 @@ class WhisperPlaybackService : Service() {
     private var fireDedupMarked: Boolean = false
     private var playSingleClip: Boolean = false
     private var currentPlaylistId: String? = null
+    private var pendingPlayPath: String? = null
 
     private val progressTicker = object : Runnable {
         override fun run() {
             try {
+                if (userPaused || !wantPlaying) return
                 val player = mediaPlayer
                 if (player != null && player.isPlaying) {
                     val pos = player.currentPosition.toLong().coerceAtLeast(0L)
@@ -170,18 +172,26 @@ class WhisperPlaybackService : Service() {
             } catch (t: Throwable) {
                 Log.w(TAG, "progressTicker failed", t)
             }
-            progressHandler?.postDelayed(this, 500L)
+            // A pause that races this run() used to re-arm the ticker at
+            // the end even after stopProgressTicker() — which then pushed
+            // STATE_PLAYING and undid the user's pause in Flutter.
+            if (!userPaused && wantPlaying) {
+                progressHandler?.postDelayed(this, 500L)
+            }
         }
     }
 
     private val playbackWatchdog = object : Runnable {
         override fun run() {
             try {
+                if (userPaused || !wantPlaying) return
                 ensureStillPlaying("watchdog")
             } catch (t: Throwable) {
                 Log.w(TAG, "playbackWatchdog failed", t)
             }
-            progressHandler?.postDelayed(this, WATCHDOG_INTERVAL_MS)
+            if (!userPaused && wantPlaying) {
+                progressHandler?.postDelayed(this, WATCHDOG_INTERVAL_MS)
+            }
         }
     }
 
@@ -396,7 +406,10 @@ class WhisperPlaybackService : Service() {
                 if (!path.isNullOrBlank() && File(path).exists()) {
                     userPaused = false
                     wantPlaying = true
-                    playClip(path)
+                    writeState(STATE_PLAYING)
+                    notifyListener(STATE_PLAYING)
+                    postPlaybackNotification(isPlaying = true)
+                    playClipAfterUiUpdate(path)
                 } else {
                     Log.w(TAG, "skip requested with empty queue and no path")
                 }
@@ -417,7 +430,12 @@ class WhisperPlaybackService : Service() {
                 userPaused = false
                 wantPlaying = true
                 writeState(STATE_PLAYING)
-                playClip(path)
+                // Tell Flutter the new track NOW, before prepareAsync.
+                // Waiting until onPrepared made next/prev feel laggy
+                // (and like a miss) for 200–800ms on OEM MediaPlayer.
+                notifyListener(STATE_PLAYING)
+                postPlaybackNotification(isPlaying = true)
+                playClipAfterUiUpdate(path)
                 return
             }
             Log.w(TAG, "skip: no playable file in queue of $size")
@@ -504,7 +522,6 @@ class WhisperPlaybackService : Service() {
         // Stop any clip already playing — second alarm wins.
         stopProgressTicker()
         stopWatchdog()
-        releasePlayer()
         currentDurationMs = 0L
         resumeAfterFocusGain = false
         userPaused = false
@@ -514,7 +531,21 @@ class WhisperPlaybackService : Service() {
             Log.w(TAG, "audio focus denied; playing anyway (best effort)")
         }
 
-        val player = MediaPlayer()
+        var player = mediaPlayer
+        if (player != null) {
+            try {
+                if (player.isPlaying) player.stop()
+                player.reset()
+            } catch (t: Throwable) {
+                Log.w(TAG, "MediaPlayer.reset failed; allocating a new player", t)
+                releasePlayer()
+                player = null
+            }
+        }
+        if (player == null) {
+            player = MediaPlayer()
+            mediaPlayer = player
+        }
         try {
             // Round 22 — USAGE_MEDIA + CONTENT_TYPE_MUSIC + STREAM_MUSIC.
             player.setAudioAttributes(
@@ -607,7 +638,26 @@ class WhisperPlaybackService : Service() {
         } catch (t: Throwable) {
             Log.e(TAG, "playClip setup failed", t)
             try { player.release() } catch (_: Throwable) {}
+            if (mediaPlayer === player) mediaPlayer = null
             stopSelfSafely()
+        }
+    }
+
+    private fun playbackHandler(): android.os.Handler {
+        if (progressHandler == null) {
+            progressHandler = android.os.Handler(mainLooper)
+        }
+        return progressHandler!!
+    }
+
+    /// Skip must not block onStartCommand / Flutter's MethodChannel behind
+    /// setDataSource. Notify first, then prepare on the next main-loop turn.
+    private fun playClipAfterUiUpdate(clipPath: String) {
+        pendingPlayPath = clipPath
+        playbackHandler().post {
+            val path = pendingPlayPath ?: return@post
+            pendingPlayPath = null
+            playClip(path)
         }
     }
 
@@ -857,6 +907,9 @@ class WhisperPlaybackService : Service() {
         }
         try {
             if (player.isPlaying) return
+            // Re-check after the isPlaying read — pause can land in that gap
+            // and a watchdog start() would undo the user's pause tap.
+            if (userPaused || !wantPlaying) return
             Log.w(TAG, "ensureStillPlaying($reason): restarting MediaPlayer")
             if (!requestAudioFocus()) {
                 Log.w(TAG, "ensureStillPlaying: focus denied; starting anyway")

@@ -160,8 +160,7 @@ class MiniPlayerBar extends ConsumerWidget {
             child: Row(
               children: [
                 _MiniCover(
-                  isPlaying:
-                      snapshot.isPlaying || (nativeLive && native.isPlaying),
+                  isPlaying: snapshot.isPlaying,
                   onTap: coordinator.showModal,
                   colors: coverColors,
                   hasSchedule: hasSchedule,
@@ -272,11 +271,9 @@ class MiniPlayerBar extends ConsumerWidget {
                         _safeCall(coordinator.skipPrevious, 'skipPrevious'),
                   ),
                 _MiniPlayPauseButton(
-                  isPlaying:
-                      snapshot.isPlaying || (nativeLive && native.isPlaying),
+                  isPlaying: snapshot.isPlaying,
                   onTap: () {
-                    final playing =
-                        snapshot.isPlaying || (nativeLive && native.isPlaying);
+                    final playing = snapshot.isPlaying;
                     if (playing) {
                       _safeCall(coordinator.pause, 'pause');
                     } else {

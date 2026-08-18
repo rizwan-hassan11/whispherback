@@ -111,6 +111,11 @@ class PlaybackCoordinator {
   /// the user perceived "pause triggered next clip play".
   bool _userInitiatedPause = false;
 
+  /// Set on resume/skip until native reports PLAYING. Stale PAUSED ticks
+  /// from the 1.5s prefs poll (or a skip that has not prepared yet) must
+  /// not flip the optimistic play icon back to paused.
+  bool _awaitingNativePlay = false;
+
   /// Bumped on every skip / new `playFile` so a stale `ProcessingState.completed`
   /// from the previous source (emitted during `setAudioSource` swaps) cannot
   /// tear down the mini-player or jump ahead an extra track. QA: "tap next on
@@ -415,6 +420,16 @@ class PlaybackCoordinator {
         // `isPlaying` snapshots so the mini-player can scrub. Only the
         // FIRST transition into native play should stamp lastFired /
         // suspend silence / emit the scheduledPlaying frame.
+        //
+        // Round 41: if the user just tapped pause, ignore PLAYING ticks
+        // until native reports paused (or they tap resume). The progress
+        // ticker kept broadcasting PLAYING for up to ~500ms after the
+        // optimistic pause, and `wasPaused` treated that as "resume" —
+        // flipping the button back to pause and making the tap look dead.
+        if (_userInitiatedPause) {
+          return;
+        }
+        _awaitingNativePlay = false;
         final firstStart = !_nativeScheduledActive;
         final wasPaused = _nativeScheduledActive && !_snapshot.isPlaying;
         _nativeScheduledActive = true;
@@ -463,6 +478,9 @@ class PlaybackCoordinator {
         return;
       }
       if (native.isPaused) {
+        if (_awaitingNativePlay) {
+          return;
+        }
         _nativeScheduledActive = true;
         if (_snapshot.isPlaying ||
             _snapshot.state != AppPlaybackState.scheduledPlaying) {
@@ -724,12 +742,12 @@ class PlaybackCoordinator {
   /// the intermittent failure showed up identically on both).
   ///
   /// Uses its own gate (not `_serializePauseResume`'s) because a playlist
-  /// skip can call all the way through to `_audio.playFile`, which has its
-  /// own internal 8s `setAudioSource` cap — `_serializePauseResume`'s 4s
-  /// cap is sized for lightweight pause/resume calls and would time out a
-  /// legitimately-slow-but-succeeding track change.
+  /// skip can call all the way through to `_audio.playFile`. The skip
+  /// gate's body timeout is 2.5s — long enough for a native skip MethodChannel
+  /// plus MediaPlayer reset, short enough that a hung OEM call cannot make
+  /// the next/prev buttons look dead.
   Future<void> _skipGate = Future<void>.value();
-  static const _skipGateBodyTimeout = Duration(seconds: 10);
+  static const _skipGateBodyTimeout = Duration(milliseconds: 2500);
 
   Future<T> _serializeSkip<T>(Future<T> Function() body) {
     final previous = _skipGate;
@@ -768,9 +786,12 @@ class PlaybackCoordinator {
     // mini-player and notification next/prev looked dead.
     if (_nativeOwnsPlayback ||
         NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
+      _awaitingNativePlay = true;
+      _emit(_snapshot.copyWith(isPlaying: true));
       try {
         await NativeAlarmsBridge.instance.skipNative(next: next);
       } catch (e, st) {
+        _awaitingNativePlay = false;
         if (kDebugMode) {
           debugPrint('skip: native skip failed: $e\n$st');
         }
@@ -797,6 +818,15 @@ class PlaybackCoordinator {
           : (currentIndex - 1 + _libraryQueue.length) % _libraryQueue.length;
       _libraryIndex = nextIndex;
       final clip = _libraryQueue[nextIndex];
+      // Optimistic UI so next/prev feels instant while setAudioSource runs.
+      _emit(_snapshot.copyWith(
+        state: AppPlaybackState.manualPlaying,
+        clipTitle: clip.title,
+        playlistName: clip.title,
+        isPlaying: true,
+        durationMs: clip.durationMs,
+        modalVisible: false,
+      ));
       await playClip(clip, queue: _libraryQueue);
       return;
     }
@@ -832,6 +862,13 @@ class PlaybackCoordinator {
     final nextIndex = next
         ? (currentIndex + 1) % clips.length
         : (currentIndex - 1 + clips.length) % clips.length;
+    final target = clips[nextIndex];
+    _emit(_snapshot.copyWith(
+      clipTitle: target.title,
+      isPlaying: true,
+      durationMs: target.durationMs,
+      modalVisible: false,
+    ));
     // Walk forward/back from the target so a missing file never leaves the
     // mini-player stranded mid-skip (which looked like "next hid the bar").
     final played = await _advanceToNextPlayable(
@@ -1007,6 +1044,18 @@ class PlaybackCoordinator {
     }
 
     if (_snapshot.playlistId == null) {
+      // Multi-clip library queue: advance like a playlist instead of
+      // stopping after every track (which made next/prev + auto-end feel
+      // random when the user expected continuous playback).
+      if (_libraryQueue.length > 1) {
+        final currentIndex = _libraryIndex < 0 ? 0 : _libraryIndex;
+        final nextIndex = (currentIndex + 1) % _libraryQueue.length;
+        _libraryIndex = nextIndex;
+        final clip = _libraryQueue[nextIndex];
+        if (generationAtStart != _playbackGeneration) return;
+        await playClip(clip, queue: _libraryQueue);
+        return;
+      }
       await _finishManualPreview();
       await _drainPendingScheduled();
       return;
@@ -1541,21 +1590,11 @@ class PlaybackCoordinator {
       return;
     }
 
-    if (_snapshot.isPlaying) {
-      // CRITICAL: never let a pre-flight stop kill the whole play tap. On
-      // some Samsung / Vivo devices a fresh boot can leave the previous
-      // session in a half-bound state, and `_audio.stop()` throws a
-      // PlatformException. The user perceives this as "tapping play
-      // crashed the app". We swallow and proceed — the upcoming
-      // `setAudioSource` will overwrite whatever the player had.
-      try {
-        await _audio.stop();
-      } catch (e, st) {
-        if (kDebugMode) {
-          debugPrint('playClip: pre-flight stop failed (continuing): $e\n$st');
-        }
-      }
-    }
+    // Do NOT call `_audio.stop()` before swapping clips. stop() routes to
+    // stopClip(), which restarts the silence keep-alive on Active=ON and
+    // races the incoming playFile — the root cause of library next/prev
+    // hanging then surfacing "Couldn't play …" (playFile handles ExoPlayer
+    // source swap via `_player.stop()` only).
 
     _libraryQueue =
         (queue == null || queue.isEmpty) ? <AudioClip>[clip] : queue;
@@ -1663,12 +1702,12 @@ class PlaybackCoordinator {
         .then((_) async {
       try {
         // Hard cap so a hung native call cannot starve future taps.
-        final result =
-            await body().timeout(const Duration(seconds: 4), onTimeout: () {
+        final result = await body().timeout(const Duration(milliseconds: 1500),
+            onTimeout: () {
           throw TimeoutException(
-            'pause/resume: native call exceeded 4s — releasing gate '
+            'pause/resume: native call exceeded 1.5s — releasing gate '
             'so the next tap can proceed.',
-            const Duration(seconds: 4),
+            const Duration(milliseconds: 1500),
           );
         });
         if (!completer.isCompleted) completer.complete(result);
@@ -1690,6 +1729,7 @@ class PlaybackCoordinator {
       // actually landing is treated as "paused at the end" rather
       // than "auto-advance to next clip".
       _userInitiatedPause = true;
+      _awaitingNativePlay = false;
       // Optimistic UI flip first so the user sees their pause take
       // effect immediately even if the native player call is slow /
       // throws.
@@ -1800,6 +1840,7 @@ class PlaybackCoordinator {
       ));
 
       _userInitiatedPause = true;
+      _awaitingNativePlay = false;
 
       // Round 22 — if the native scheduled-playback service is the
       // active source, stop IT first. Otherwise the audio keeps going
@@ -1883,10 +1924,12 @@ class PlaybackCoordinator {
       // no-op (nothing was queued in it).
       if (_nativeOwnsPlayback ||
           NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
+        _awaitingNativePlay = true;
         _nativeScheduledActive = true;
         try {
           await NativeAlarmsBridge.instance.resumeNative();
         } catch (e, st) {
+          _awaitingNativePlay = false;
           if (kDebugMode) {
             debugPrint('resume: native resume failed: $e\n$st');
           }
@@ -1944,6 +1987,7 @@ class PlaybackCoordinator {
     _libraryQueue = const [];
     _libraryIndex = -1;
     _userInitiatedPause = false;
+    _awaitingNativePlay = false;
     // User-initiated stop must not count as a "successful completion": skip
     // the interval-from-end stamp so the next slot still fires on its grid.
     _activeScheduleId = null;

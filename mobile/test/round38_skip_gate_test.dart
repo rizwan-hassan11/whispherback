@@ -22,10 +22,9 @@
 // consistent pattern" on BOTH surfaces (they funnel into the same
 // unprotected function).
 //
-// The fix adds `_serializeSkip`, a dedicated FIFO gate (own 10s timeout,
-// sized for a full `playFile` track change rather than reusing the
-// lightweight pause/resume gate's 4s cap), and routes ALL THREE call
-// sites through it.
+// The fix adds `_serializeSkip`, a dedicated FIFO gate (own 2.5s timeout,
+// sized so a hung OEM skip cannot freeze next/prev, without waiting 10s),
+// and routes ALL THREE call sites through it.
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -39,7 +38,7 @@ import 'dart:io';
 /// need to stand up its repositories/audio service fakes — this test
 /// exists to pin the GATE's mutual-exclusion property, not the specific
 /// skip logic (which is exercised by other coordinator tests).
-const Duration kSkipGateBodyTimeout = Duration(seconds: 10);
+const Duration kSkipGateBodyTimeout = Duration(milliseconds: 2500);
 
 class _SkipGate {
   Future<void> _gate = Future<void>.value();
@@ -140,16 +139,15 @@ void main() {
         'all route through `_serializeSkip`', () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
       expect(src, contains('Future<T> _serializeSkip<T>('),
-          reason: 'A dedicated skip gate must exist — reusing the pause/'
-              'resume gate\'s 4s timeout would prematurely cut off a '
-              'slower playlist track change (playFile has its own 8s '
-              'internal cap).');
+          reason: 'A dedicated skip gate must exist — reusing a short '
+              'pause/resume timeout used to cut off a slower playlist '
+              'track change; the skip gate is now 2.5s so a hung OEM '
+              'call cannot freeze next/prev for 10s.');
 
       final guardedSkipIdx = src.indexOf('Future<void> _guardedSkip(');
       expect(guardedSkipIdx, greaterThanOrEqualTo(0));
       final guardedSkipEnd = src.indexOf('\n  }\n', guardedSkipIdx);
-      final guardedSkipBody =
-          src.substring(guardedSkipIdx, guardedSkipEnd);
+      final guardedSkipBody = src.substring(guardedSkipIdx, guardedSkipEnd);
       expect(guardedSkipBody, contains('_serializeSkip('),
           reason: 'The in-app mini-player / modal skip path (skipNext / '
               'skipPrevious -> _guardedSkip) must go through the gate.');

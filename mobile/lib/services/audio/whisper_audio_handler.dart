@@ -559,18 +559,26 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
       // Best-effort. The next _player event will re-publish anyway.
     }
 
-    // CRITICAL: if a previous source is still loading (rapid tap or schedule
-    // racing with manual play), `setAudioSource` would queue behind it on
-    // some OEMs and the new source never starts. Force-stop the player first
-    // so the next `setAudioSource` is a clean swap.
-    if (_player.processingState == ProcessingState.loading ||
+    // Swap path: stop the ExoPlayer source ONLY — never `stopClip()`, which
+    // restarts the silence keep-alive and races the incoming setAudioSource.
+    // QA: library/playlist next/prev hung for seconds, then surfaced
+    // "Couldn't play …" for the clip that was already audible.
+    if (_playingClip) {
+      _startWatchdog?.cancel();
+      _startWatchdog = null;
+      try {
+        if (_player.processingState != ProcessingState.idle ||
+            _player.playing) {
+          await _player.stop();
+        }
+      } catch (_) {
+        // Best-effort: setAudioSource below overwrites the source anyway.
+      }
+    } else if (_player.processingState == ProcessingState.loading ||
         _player.processingState == ProcessingState.buffering) {
       try {
         await _player.stop();
-      } catch (_) {
-        // Best-effort: keep going; the explicit setAudioSource below will
-        // overwrite the source even if stop() couldn't unwind cleanly.
-      }
+      } catch (_) {}
     }
 
     _playingClip = true;
