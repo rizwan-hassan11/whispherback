@@ -48,11 +48,9 @@ void main() {
   group('Round 35 — deterministic ordering of stamp-then-realign', () {
     test(
         '_stampNativeFireCompletion is awaitable (not internally '
-        'fire-and-forget) so callers can guarantee the write has landed',
-        () {
+        'fire-and-forget) so callers can guarantee the write has landed', () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
-      final declIdx =
-          src.indexOf('Future<void> _stampNativeFireCompletion(');
+      final declIdx = src.indexOf('Future<void> _stampNativeFireCompletion(');
       expect(declIdx, greaterThanOrEqualTo(0),
           reason: '_stampNativeFireCompletion must return a Future<void> — '
               'a void-returning method that wraps its body in an internal '
@@ -71,8 +69,7 @@ void main() {
     test(
         '_onNativePlaybackState\'s idle branch awaits the completion stamp '
         'BEFORE calling the forced alarm-table realign, inside the same '
-        'task, so the realign can never read a stale completion value',
-        () {
+        'task, so the realign can never read a stale completion value', () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
       final handlerIdx = src.indexOf('void _onNativePlaybackState');
       expect(handlerIdx, greaterThanOrEqualTo(0));
@@ -96,8 +93,7 @@ void main() {
       // Both calls must live inside the SAME unawaited(() async { ... }())
       // task — i.e. there must be exactly one `unawaited(() async {` between
       // the stamp call and the realign call, not two separate tasks.
-      final betweenCalls =
-          handlerBody.substring(stampCallIdx, realignCallIdx);
+      final betweenCalls = handlerBody.substring(stampCallIdx, realignCallIdx);
       expect(betweenCalls.contains('unawaited(() async'), isFalse,
           reason: 'A second unawaited() task started between the stamp '
               'and the realign call would reintroduce the race — both '

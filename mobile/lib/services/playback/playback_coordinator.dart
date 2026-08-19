@@ -175,7 +175,8 @@ class PlaybackCoordinator {
   bool _transportCurrent(int epoch) => epoch == _transportEpoch;
 
   /// Stops an in-flight skip / playFile without tearing down the media session.
-  Future<void> _abortInFlightTransport({required bool revertOptimisticSkip}) async {
+  Future<void> _abortInFlightTransport(
+      {required bool revertOptimisticSkip}) async {
     if (revertOptimisticSkip && _optimisticSkipSnapshot != null) {
       _emit(_optimisticSkipSnapshot!.copyWith(isPlaying: false));
       _optimisticSkipSnapshot = null;
@@ -203,8 +204,7 @@ class PlaybackCoordinator {
         revertOptimisticSkip: revertOptimisticSkip,
       ));
     }
-    final previous =
-        preempt ? Future<void>.value() : _transportGate;
+    final previous = preempt ? Future<void>.value() : _transportGate;
     final completer = Completer<T>();
     _transportGate = previous
         .then((_) => null, onError: (Object _, StackTrace __) => null)
@@ -811,9 +811,8 @@ class PlaybackCoordinator {
     if (_playlistClipCache.length <= 1) return null;
     final currentIndex = _playlistClipIndex ?? 0;
     final size = _playlistClipCache.length;
-    final nextIndex = next
-        ? (currentIndex + 1) % size
-        : (currentIndex - 1 + size) % size;
+    final nextIndex =
+        next ? (currentIndex + 1) % size : (currentIndex - 1 + size) % size;
     final clip = _playlistClipCache[nextIndex];
     return (title: clip.title, durationMs: clip.durationMs, index: nextIndex);
   }
@@ -878,20 +877,17 @@ class PlaybackCoordinator {
     if (_libraryQueue.length <= 1) return;
     final idx = _libraryIndex < 0 ? 0 : _libraryIndex;
     final n = _libraryQueue.length;
-    unawaited(_audio.warmFileCache(
-        _libraryQueue[(idx + 1) % n].filePath));
-    unawaited(_audio.warmFileCache(
-        _libraryQueue[(idx - 1 + n) % n].filePath));
+    unawaited(_audio.warmFileCache(_libraryQueue[(idx + 1) % n].filePath));
+    unawaited(_audio.warmFileCache(_libraryQueue[(idx - 1 + n) % n].filePath));
   }
 
   void _warmPlaylistNeighbors() {
     if (_playlistClipCache.length <= 1) return;
     final idx = _playlistClipIndex ?? 0;
     final n = _playlistClipCache.length;
-    unawaited(_audio.warmFileCache(
-        _playlistClipCache[(idx + 1) % n].filePath));
-    unawaited(_audio.warmFileCache(
-        _playlistClipCache[(idx - 1 + n) % n].filePath));
+    unawaited(_audio.warmFileCache(_playlistClipCache[(idx + 1) % n].filePath));
+    unawaited(
+        _audio.warmFileCache(_playlistClipCache[(idx - 1 + n) % n].filePath));
   }
 
   /// Wraps `_skipPlaylistClip` in the unified transport gate AND
@@ -2016,8 +2012,7 @@ class PlaybackCoordinator {
   }
 
   Future<void> resume() {
-    if (!_snapshot.isPlaying &&
-        _snapshot.state != AppPlaybackState.inactive) {
+    if (!_snapshot.isPlaying && _snapshot.state != AppPlaybackState.inactive) {
       _userInitiatedPause = false;
       _emit(_snapshot.copyWith(isPlaying: true));
     }

@@ -53,7 +53,8 @@ String _read(String relPath) {
 
 void main() {
   group('Round 40 — native wake lock / audio focus leak on every clip', () {
-    test('acquireWakeLock releases any previously-held lock before '
+    test(
+        'acquireWakeLock releases any previously-held lock before '
         'acquiring a new one', () {
       final src = _read(
           'android/app/src/main/kotlin/com/whisperback/whisperback/alarms/WhisperPlaybackService.kt');
@@ -62,8 +63,7 @@ void main() {
       final end = src.indexOf('\n    }\n', idx);
       final body = src.substring(idx, end);
       expect(body, contains('releaseWakeLock()'),
-          reason:
-              'Every playClip() call (fresh fire, multi-clip auto-advance, '
+          reason: 'Every playClip() call (fresh fire, multi-clip auto-advance, '
               'AND skip) calls acquireWakeLock() again. Without releasing '
               'the previous lock first, each scheduled clip orphans a '
               'held PARTIAL_WAKE_LOCK for up to MAX_PLAYBACK_MS (2h) — '
@@ -82,8 +82,7 @@ void main() {
       final end = src.indexOf('\n    }\n', idx);
       final body = src.substring(idx, end);
       expect(body, contains('abandonAudioFocus()'),
-          reason:
-              'Same leak pattern as the wake lock: every playClip() call '
+          reason: 'Same leak pattern as the wake lock: every playClip() call '
               'built a new AudioFocusRequest and overwrote the tracked '
               'field without abandoning the previous one, leaving stale '
               'requests accumulating in the system audio focus stack.');

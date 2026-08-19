@@ -192,7 +192,7 @@ void main() {
       // Capture the PRE-setAudioSource portion only (everything up to
       // the first setAudioSource call INSIDE playFile).
       final setSourceIdx =
-          src.indexOf('.setAudioSource(_cachedFileSource(path)', playFileIdx);
+          src.indexOf('.setAudioSource(_clipFileSource(path)', playFileIdx);
       expect(setSourceIdx, greaterThan(playFileIdx));
       final preBody = src.substring(playFileIdx, setSourceIdx);
       expect(

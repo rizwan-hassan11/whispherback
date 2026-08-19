@@ -93,8 +93,7 @@ void main() {
 
     test(
         'a 5-min playlist on 5-min interval, started at 10:00, fires '
-        'next at 10:05 — start-to-start, back-to-back with no overlap',
-        () {
+        'next at 10:05 — start-to-start, back-to-back with no overlap', () {
       final schedule = _buildSchedule(
         startHour: 10,
         startMinute: 0,

@@ -97,8 +97,8 @@ void main() {
     // platform plugin runtime — see the note in
     // clip_duration_backfill_test.dart. Pin the retry budget itself at
     // the source level instead.
-    final src = File('lib/data/repositories/clip_repository.dart')
-        .readAsStringSync();
+    final src =
+        File('lib/data/repositories/clip_repository.dart').readAsStringSync();
     expect(src, contains('_nativeProbeRetryDelays'),
         reason: 'A named retry-delay list makes the budget explicit and '
             'testable, instead of a magic loop count.');

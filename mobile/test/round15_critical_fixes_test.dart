@@ -120,7 +120,8 @@ void main() {
     });
   });
 
-  group('Round 15-C / Round 36 — interval = max(playlistDuration, '
+  group(
+      'Round 15-C / Round 36 — interval = max(playlistDuration, '
       'intervalMinutes)', () {
     test('effectiveStepMinutes uses the interval when it is the larger side',
         () {
@@ -142,7 +143,8 @@ void main() {
       );
     });
 
-    test('effectiveStepMinutes uses the playlist when it is the larger '
+    test(
+        'effectiveStepMinutes uses the playlist when it is the larger '
         'side, rounding partial minutes UP', () {
       final schedule = PlaybackSchedule(
         id: 's1',
@@ -160,8 +162,7 @@ void main() {
       expect(ScheduleFireHelper.effectiveStepMinutes(schedule), 12);
     });
 
-    test('effectiveStepMinutes uses 60s duration floor when duration is 0',
-        () {
+    test('effectiveStepMinutes uses 60s duration floor when duration is 0', () {
       final schedule = PlaybackSchedule(
         id: 's1',
         playlistId: 'p1',

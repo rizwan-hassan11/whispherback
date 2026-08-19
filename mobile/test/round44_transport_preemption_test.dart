@@ -27,12 +27,19 @@ void main() {
       expect(coord, contains('revertOptimisticSkip: true'));
       expect(coord, contains('_handleNotificationPause'));
       expect(coord, contains('_handleNotificationPlay'));
-      expect(coord, contains('onPauseRequested = () => unawaited(_handleNotificationPause())'));
-      expect(coord, isNot(contains('onPauseRequested = () => _syncPlayingSnapshot(false)')));
+      expect(
+          coord,
+          contains(
+              'onPauseRequested = () => unawaited(_handleNotificationPause())'));
+      expect(
+          coord,
+          isNot(contains(
+              'onPauseRequested = () => _syncPlayingSnapshot(false)')));
 
       final pauseIdx = coord.indexOf('Future<void> pause()');
       expect(pauseIdx, greaterThanOrEqualTo(0));
-      final pauseEnd = coord.indexOf('\n  /// Pauses the current clip', pauseIdx);
+      final pauseEnd =
+          coord.indexOf('\n  /// Pauses the current clip', pauseIdx);
       final pauseBody = coord.substring(pauseIdx, pauseEnd);
       expect(pauseBody, contains('preempt: true'));
       expect(pauseBody, contains('revertOptimisticSkip: true'));
@@ -41,8 +48,8 @@ void main() {
     test('playFile fast swap + neighbor cache warm', () {
       final handler = _read('lib/services/audio/whisper_audio_handler.dart');
       expect(handler, contains('bool sourceSwap = false'));
-      expect(handler, contains('LockCachingAudioSource'));
       expect(handler, contains('Future<void> warmFileCache(String path)'));
+      expect(handler, contains('AudioSource.file(path)'));
 
       final coord = _read('lib/services/playback/playback_coordinator.dart');
       expect(coord, contains('_primeOptimisticSkip'));

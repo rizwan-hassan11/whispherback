@@ -554,9 +554,7 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     queue.add([item]);
     _publishClipControls(
       playing: swapping,
-      processing: swapping
-          ? ProcessingState.loading
-          : ProcessingState.loading,
+      processing: swapping ? ProcessingState.loading : ProcessingState.loading,
     );
 
     if (!swapping) {
@@ -611,7 +609,7 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     // time clips/playlists delete but don't play".
     try {
       await _player
-          .setAudioSource(_cachedFileSource(path), preload: true)
+          .setAudioSource(_clipFileSource(path), preload: true)
           .timeout(const Duration(seconds: 8));
     } on TimeoutException {
       // The player is wedged. Force-stop so the next playFile can rebuild
@@ -657,17 +655,15 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
 
   AudioPlayer? _cacheWarmer;
 
-  AudioSource _cachedFileSource(String path) =>
-      LockCachingAudioSource(Uri.file(path));
+  AudioSource _clipFileSource(String path) => AudioSource.file(path);
 
-  /// Pre-decodes the next/prev neighbor into the on-disk lock cache so
-  /// the subsequent skip swap hits warm I/O instead of cold open().
+  /// Preloads the next/prev neighbor so the OS file cache is warm before skip.
   Future<void> warmFileCache(String path) async {
     if (path.isEmpty || !File(path).existsSync()) return;
     try {
       _cacheWarmer ??= AudioPlayer();
       await _cacheWarmer!
-          .setAudioSource(_cachedFileSource(path), preload: true)
+          .setAudioSource(_clipFileSource(path), preload: true)
           .timeout(const Duration(seconds: 4));
     } catch (_) {}
   }
