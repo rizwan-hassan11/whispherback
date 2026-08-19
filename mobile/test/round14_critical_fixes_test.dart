@@ -65,7 +65,7 @@ void main() {
       //     the user explicitly disabled background work.
       expect(
         body,
-        contains('_serializePauseResume'),
+        contains('_serializeTransport'),
         reason: 'dismissPlayer must funnel through the pause/resume '
             'gate so rapid cross/pause taps cannot have two native '
             'player calls in flight at once.',

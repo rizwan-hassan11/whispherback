@@ -111,11 +111,6 @@ class PlaybackCoordinator {
   /// the user perceived "pause triggered next clip play".
   bool _userInitiatedPause = false;
 
-  /// Set on resume/skip until native reports PLAYING. Stale PAUSED ticks
-  /// from the 1.5s prefs poll (or a skip that has not prepared yet) must
-  /// not flip the optimistic play icon back to paused.
-  bool _awaitingNativePlay = false;
-
   /// Bumped on every skip / new `playFile` so a stale `ProcessingState.completed`
   /// from the previous source (emitted during `setAudioSource` swaps) cannot
   /// tear down the mini-player or jump ahead an extra track. QA: "tap next on
@@ -153,58 +148,69 @@ class PlaybackCoordinator {
   List<AudioClip> _libraryQueue = const [];
   int _libraryIndex = -1;
 
-  /// Serializes every entry-point that starts new audio. Rapid taps from the
-  /// user (and racing schedule fires) used to interleave `stop()` and
-  /// `playFile()` calls — sometimes the SECOND call's `stop()` killed the
-  /// FIRST call's freshly-started playback, leaving the UI showing a clip
-  /// title with no audio. This mutex keeps each play attempt atomic from the
-  /// coordinator's POV; the audio_service plugin handles native-side ducking.
-  Future<void> _playGate = Future<void>.value();
+  /// Single FIFO queue for every user-facing transport action: play, skip,
+  /// pause, resume, dismiss. Separate skip / pause / play gates used to run
+  /// IN PARALLEL — skip could be mid-playFile while pause ran on another
+  /// gate, producing "I tapped next, nothing happened, then pause started
+  /// the next clip" (QA Round 43).
+  Future<void> _transportGate = Future<void>.value();
 
-  /// Hard cap on a single serialized play body. If a play attempt
-  /// genuinely hangs (audio session deadlock, native MediaPlayer hung on
-  /// decode, etc.) we MUST release the gate so the next user tap doesn't
-  /// queue forever — that was the "after a while nothing plays but delete
-  /// still works" symptom: delete bypassed the gate, every play attempt
-  /// was queued behind a permanently-hung previous gate body.
-  ///
-  /// 20 seconds is a comfortable upper bound: a healthy playFile finishes
-  /// in <2s even on cold Samsung devices, and the 8s setAudioSource cap
-  /// inside the handler plus a small margin for surrounding bookkeeping
-  /// fits well under this.
-  static const _playGateBodyTimeout = Duration(seconds: 20);
+  /// Incremented on every transport enqueue. A superseded body (e.g. skip
+  /// whose playFile finishes after the user tapped pause) must not leave
+  /// audio playing when the user asked to pause.
+  int _transportEpoch = 0;
 
-  Future<T> _serializePlay<T>(Future<T> Function() body) {
-    final previous = _playGate;
+  /// Sized for playFile's 8s setAudioSource cap plus native MethodChannel
+  /// skip / pause round-trips.
+  static const _transportBodyTimeout = Duration(seconds: 12);
+
+  bool _transportCurrent(int epoch) => epoch == _transportEpoch;
+
+  Future<T> _serializeTransport<T>(Future<T> Function(int epoch) body) {
+    final epoch = ++_transportEpoch;
+    final previous = _transportGate;
     final completer = Completer<T>();
-    _playGate = previous
-        // Swallow any error from the previous body so the chain itself
-        // never enters an unhandled state and starves follow-up plays.
+    _transportGate = previous
         .then((_) => null, onError: (Object _, StackTrace __) => null)
         .then((_) async {
       try {
-        final result =
-            await body().timeout(_playGateBodyTimeout, onTimeout: () {
-          // The body never finished — return a fallback (typed as T) so
-          // the gate can advance. We can't synthesise an arbitrary T here,
-          // so let the timeout propagate via a thrown TimeoutException;
-          // the catch below will release the completer.
-          throw TimeoutException(
-            'PlaybackCoordinator: play body did not complete within '
-            '$_playGateBodyTimeout — releasing the gate so follow-up '
-            'taps are not silently queued forever.',
-            _playGateBodyTimeout,
-          );
-        });
+        final result = await body(epoch).timeout(
+          _transportBodyTimeout,
+          onTimeout: () {
+            throw TimeoutException(
+              'transport: body exceeded $_transportBodyTimeout',
+              _transportBodyTimeout,
+            );
+          },
+        );
         if (!completer.isCompleted) completer.complete(result);
       } catch (e, st) {
         if (kDebugMode) {
-          debugPrint('PlaybackCoordinator._serializePlay body failed: $e\n$st');
+          debugPrint(
+              'PlaybackCoordinator._serializeTransport body failed: $e\n$st');
         }
         if (!completer.isCompleted) completer.completeError(e, st);
       }
     });
     return completer.future;
+  }
+
+  /// If a newer transport op superseded [epoch] after audio already started,
+  /// honor the user's latest intent (usually pause).
+  Future<void> _honorSupersededTransport(int epoch) async {
+    if (_transportCurrent(epoch)) return;
+    _userInitiatedPause = true;
+    _emit(_snapshot.copyWith(isPlaying: false));
+    if (_nativeOwnsPlayback ||
+        NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
+      try {
+        await NativeAlarmsBridge.instance.pauseNative();
+      } catch (_) {}
+    } else {
+      try {
+        await _audio.pause();
+      } catch (_) {}
+    }
   }
 
   /// Called after a scheduled whisper finishes so notifications show the next slot.
@@ -256,10 +262,8 @@ class PlaybackCoordinator {
         () => unawaited(_finalizeClipStopFromNotification());
     _audio.onPlayRequested = () => _syncPlayingSnapshot(true);
     _audio.onPauseRequested = () => _syncPlayingSnapshot(false);
-    _audio.onSkipToNextRequested =
-        () => _serializeSkip(() => _skipPlaylistClip(next: true));
-    _audio.onSkipToPreviousRequested =
-        () => _serializeSkip(() => _skipPlaylistClip(next: false));
+    _audio.onSkipToNextRequested = () => skipNext();
+    _audio.onSkipToPreviousRequested = () => skipPrevious();
     _audio.onClipSessionChanged = () {
       unawaited(refreshScheduleNotifications?.call());
     };
@@ -429,7 +433,23 @@ class PlaybackCoordinator {
         if (_userInitiatedPause) {
           return;
         }
-        _awaitingNativePlay = false;
+        final titleChanged = native.clipTitle != null &&
+            native.clipTitle!.isNotEmpty &&
+            native.clipTitle != _snapshot.clipTitle;
+        if (titleChanged) {
+          _emit(_snapshot.copyWith(
+            state: AppPlaybackState.scheduledPlaying,
+            isPlaying: true,
+            clipTitle: native.clipTitle,
+            playlistName:
+                native.playlistName ?? _snapshot.playlistName ?? 'WhisperBack',
+            durationMs: native.durationMs > 0
+                ? native.durationMs
+                : _snapshot.durationMs,
+            playlistId: native.playlistId ?? _snapshot.playlistId,
+          ));
+          return;
+        }
         final firstStart = !_nativeScheduledActive;
         final wasPaused = _nativeScheduledActive && !_snapshot.isPlaying;
         _nativeScheduledActive = true;
@@ -478,9 +498,6 @@ class PlaybackCoordinator {
         return;
       }
       if (native.isPaused) {
-        if (_awaitingNativePlay) {
-          return;
-        }
         _nativeScheduledActive = true;
         if (_snapshot.isPlaying ||
             _snapshot.state != AppPlaybackState.scheduledPlaying) {
@@ -701,7 +718,7 @@ class PlaybackCoordinator {
   Future<void> skipNext() => _guardedSkip(next: true);
   Future<void> skipPrevious() => _guardedSkip(next: false);
 
-  /// Wraps `_skipPlaylistClip` in the skip gate (see [_serializeSkip]) AND
+  /// Wraps `_skipPlaylistClip` in the unified transport gate AND
   /// a try/catch + error event so a thrown PlatformException from the
   /// native player never propagates out of a skip tap. The user perceives
   /// an unhandled throw as "app crashed when I pressed next" — which is
@@ -709,7 +726,8 @@ class PlaybackCoordinator {
   /// controls.
   Future<void> _guardedSkip({required bool next}) async {
     try {
-      await _serializeSkip(() => _skipPlaylistClip(next: next));
+      await _serializeTransport(
+          (epoch) => _skipPlaylistClip(epoch, next: next));
     } catch (e, st) {
       if (kDebugMode) {
         debugPrint('skip${next ? 'Next' : 'Previous'} failed: $e\n$st');
@@ -723,60 +741,8 @@ class PlaybackCoordinator {
     }
   }
 
-  /// Round 38: serializes every skip request — in-app AND from the
-  /// notification bar's media controls — through a single FIFO queue, the
-  /// same principle `_serializePauseResume` already applies to pause /
-  /// resume / dismiss (see its doc comment for the full Samsung / Vivo
-  /// rationale).
-  ///
-  /// Before this gate, `_skipPlaylistClip` was called directly from BOTH
-  /// `_guardedSkip` (in-app mini-player / modal buttons) AND
-  /// `onSkipToNextRequested` / `onSkipToPreviousRequested` (notification
-  /// media controls) with no mutual exclusion at all. A double-tap, or an
-  /// in-app tap racing a notification tap, sent two concurrent
-  /// `_player.seek()` / `_player.play()` / `_audio.playFile()` calls into
-  /// the SAME native player. One of them would silently lose the race on
-  /// certain OEMs — reproduced as "forward/backward buttons intermittently
-  /// fail to respond, both in-app and from the notification bar, no
-  /// consistent pattern" (both surfaces funnel into this one function, so
-  /// the intermittent failure showed up identically on both).
-  ///
-  /// Uses its own gate (not `_serializePauseResume`'s) because a playlist
-  /// skip can call all the way through to `_audio.playFile`. The skip
-  /// gate's body timeout is 2.5s — long enough for a native skip MethodChannel
-  /// plus MediaPlayer reset, short enough that a hung OEM call cannot make
-  /// the next/prev buttons look dead.
-  Future<void> _skipGate = Future<void>.value();
-  static const _skipGateBodyTimeout = Duration(milliseconds: 2500);
-
-  Future<T> _serializeSkip<T>(Future<T> Function() body) {
-    final previous = _skipGate;
-    final completer = Completer<T>();
-    _skipGate = previous
-        .then((_) => null, onError: (Object _, StackTrace __) => null)
-        .then((_) async {
-      try {
-        final result =
-            await body().timeout(_skipGateBodyTimeout, onTimeout: () {
-          throw TimeoutException(
-            'skip: native call exceeded $_skipGateBodyTimeout — releasing '
-            'gate so the next tap can proceed.',
-            _skipGateBodyTimeout,
-          );
-        });
-        if (!completer.isCompleted) completer.complete(result);
-      } catch (e, st) {
-        if (kDebugMode) {
-          debugPrint('PlaybackCoordinator._serializeSkip body failed: '
-              '$e\n$st');
-        }
-        if (!completer.isCompleted) completer.completeError(e, st);
-      }
-    });
-    return completer.future;
-  }
-
-  Future<void> _skipPlaylistClip({required bool next}) async {
+  Future<void> _skipPlaylistClip(int epoch, {required bool next}) async {
+    if (!_transportCurrent(epoch)) return;
     // Explicit skip is an unambiguous user intent to move forward/back, even
     // if they had previously tapped pause. Clear the sentinel so the next
     // natural completion in the new clip behaves normally.
@@ -786,16 +752,19 @@ class PlaybackCoordinator {
     // mini-player and notification next/prev looked dead.
     if (_nativeOwnsPlayback ||
         NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
-      _awaitingNativePlay = true;
-      _emit(_snapshot.copyWith(isPlaying: true));
+      _emit(_snapshot.copyWith(
+        state: AppPlaybackState.scheduledPlaying,
+        isPlaying: true,
+        modalVisible: false,
+      ));
       try {
         await NativeAlarmsBridge.instance.skipNative(next: next);
       } catch (e, st) {
-        _awaitingNativePlay = false;
         if (kDebugMode) {
           debugPrint('skip: native skip failed: $e\n$st');
         }
       }
+      await _honorSupersededTransport(epoch);
       return;
     }
     // Invalidate any in-flight completion from the clip we're leaving.
@@ -827,7 +796,9 @@ class PlaybackCoordinator {
         durationMs: clip.durationMs,
         modalVisible: false,
       ));
-      await playClip(clip, queue: _libraryQueue);
+      await _playClipInternal(clip,
+          queue: _libraryQueue, transportEpoch: epoch);
+      await _honorSupersededTransport(epoch);
       return;
     }
 
@@ -863,7 +834,11 @@ class PlaybackCoordinator {
         ? (currentIndex + 1) % clips.length
         : (currentIndex - 1 + clips.length) % clips.length;
     final target = clips[nextIndex];
+    _playlistClipIndex = nextIndex;
     _emit(_snapshot.copyWith(
+      state: fromSchedule
+          ? AppPlaybackState.scheduledPlaying
+          : AppPlaybackState.manualPlaying,
       clipTitle: target.title,
       isPlaying: true,
       durationMs: target.durationMs,
@@ -887,6 +862,7 @@ class PlaybackCoordinator {
         fromSchedule: fromSchedule,
       );
     }
+    await _honorSupersededTransport(epoch);
   }
 
   Future<void> _playClipAtIndex(
@@ -1258,7 +1234,7 @@ class PlaybackCoordinator {
     String? scheduleId,
     bool? shuffle,
   }) {
-    return _serializePlay(() async {
+    return _serializeTransport((epoch) async {
       // Belt-and-suspenders disable check at the very last moment before
       // we touch audio_service. Between the engine reading the schedule
       // and this body running inside the play-gate, the user may have
@@ -1425,8 +1401,8 @@ class PlaybackCoordinator {
   }
 
   Future<bool> playPlaylist(String playlistId, {bool fromSchedule = false}) {
-    return _serializePlay(
-      () => _playPlaylistInternal(playlistId, fromSchedule: fromSchedule),
+    return _serializeTransport(
+      (_) => _playPlaylistInternal(playlistId, fromSchedule: fromSchedule),
     );
   }
 
@@ -1570,13 +1546,16 @@ class PlaybackCoordinator {
   /// filtered Clip Library). When provided, Next/Previous on the mini-player
   /// and modal walk this list. Pass `[clip]` (or omit) for a true single play.
   Future<void> playClip(AudioClip clip, {List<AudioClip>? queue}) {
-    // Run through the serialization gate so rapid taps queue cleanly instead
-    // of racing each other and orphaning a half-started clip.
-    return _serializePlay(() => _playClipInternal(clip, queue: queue));
+    return _serializeTransport(
+      (epoch) => _playClipInternal(clip, queue: queue, transportEpoch: epoch),
+    );
   }
 
-  Future<void> _playClipInternal(AudioClip clip,
-      {List<AudioClip>? queue}) async {
+  Future<void> _playClipInternal(
+    AudioClip clip, {
+    List<AudioClip>? queue,
+    int? transportEpoch,
+  }) async {
     if (!_isPlayablePath(clip.filePath)) {
       // Path was rejected by ClipPathGuard — most often a stale row whose
       // file was deleted, or a clip recorded by an older app version stored
@@ -1651,6 +1630,9 @@ class PlaybackCoordinator {
         debugPrint('playClip: schedule notif refresh failed: $e\n$st');
       }
     }
+    if (transportEpoch != null) {
+      await _honorSupersededTransport(transportEpoch);
+    }
   }
 
   /// True when the user is in any clip-playing context.
@@ -1680,56 +1662,14 @@ class PlaybackCoordinator {
     return ClipPathGuard.isAllowed(path);
   }
 
-  /// Round 15: serialize pause/resume so rapid taps NEVER race the native
-  /// player. Without this gate, tapping pause→resume→pause→resume within
-  /// a few hundred milliseconds queues up overlapping `_player.pause()`
-  /// / `_player.play()` / `AudioSession.setActive()` calls. Each
-  /// individual call is safe, but the just_audio + audio_session
-  /// combination on Samsung One UI / Vivo Funtouch can throw
-  /// `PlatformException("(-38) MediaPlayerNative")` when 3+ state
-  /// changes are in flight at once — that PlatformException then
-  /// surfaces through the `playbackEventStream` listener and crashes
-  /// the audio_service onError plumbing on certain firmware revisions.
-  /// Serialization ensures we only ever have ONE state-change in
-  /// flight at a time.
-  Future<void> _pauseResume = Future<void>.value();
-
-  Future<T> _serializePauseResume<T>(Future<T> Function() body) {
-    final previous = _pauseResume;
-    final completer = Completer<T>();
-    _pauseResume = previous
-        .then((_) => null, onError: (Object _, StackTrace __) => null)
-        .then((_) async {
-      try {
-        // Hard cap so a hung native call cannot starve future taps.
-        final result = await body().timeout(const Duration(milliseconds: 1500),
-            onTimeout: () {
-          throw TimeoutException(
-            'pause/resume: native call exceeded 1.5s — releasing gate '
-            'so the next tap can proceed.',
-            const Duration(milliseconds: 1500),
-          );
-        });
-        if (!completer.isCompleted) completer.complete(result);
-      } catch (e, st) {
-        if (kDebugMode) {
-          debugPrint(
-              'PlaybackCoordinator._serializePauseResume body failed: $e\n$st');
-        }
-        if (!completer.isCompleted) completer.completeError(e, st);
-      }
-    });
-    return completer.future;
-  }
-
   Future<void> pause() {
-    return _serializePauseResume(() async {
+    return _serializeTransport((epoch) async {
+      if (!_transportCurrent(epoch)) return;
       // Mark BEFORE the await so any completion event that the player
       // races to emit between the user's tap and `_player.pause()`
       // actually landing is treated as "paused at the end" rather
       // than "auto-advance to next clip".
       _userInitiatedPause = true;
-      _awaitingNativePlay = false;
       // Optimistic UI flip first so the user sees their pause take
       // effect immediately even if the native player call is slow /
       // throws.
@@ -1817,10 +1757,10 @@ class PlaybackCoordinator {
     //   4. If Active is OFF, fully stop (since the user has no
     //      expectation of background work in that mode).
     //
-    // Everything is gated through `_serializePauseResume` so the
-    // user can mash pause / cross / play / pause as fast as they
-    // like and only ONE native state change is ever in flight.
-    return _serializePauseResume(() async {
+    // Everything is gated through `_serializeTransport` so skip / pause /
+    // resume never run in parallel on different native engines.
+    return _serializeTransport((epoch) async {
+      if (!_transportCurrent(epoch)) return;
       bool wasActive = false;
       try {
         wasActive = await _appState.isActive();
@@ -1840,7 +1780,6 @@ class PlaybackCoordinator {
       ));
 
       _userInitiatedPause = true;
-      _awaitingNativePlay = false;
 
       // Round 22 — if the native scheduled-playback service is the
       // active source, stop IT first. Otherwise the audio keeps going
@@ -1901,7 +1840,8 @@ class PlaybackCoordinator {
   }
 
   Future<void> resume() {
-    return _serializePauseResume(() async {
+    return _serializeTransport((epoch) async {
+      if (!_transportCurrent(epoch)) return;
       _userInitiatedPause = false;
       // Optimistic UI flip first — the user expects the play icon to
       // flip to pause the instant they tap. We roll back below if the
@@ -1924,12 +1864,10 @@ class PlaybackCoordinator {
       // no-op (nothing was queued in it).
       if (_nativeOwnsPlayback ||
           NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
-        _awaitingNativePlay = true;
         _nativeScheduledActive = true;
         try {
           await NativeAlarmsBridge.instance.resumeNative();
         } catch (e, st) {
-          _awaitingNativePlay = false;
           if (kDebugMode) {
             debugPrint('resume: native resume failed: $e\n$st');
           }
@@ -1987,7 +1925,6 @@ class PlaybackCoordinator {
     _libraryQueue = const [];
     _libraryIndex = -1;
     _userInitiatedPause = false;
-    _awaitingNativePlay = false;
     // User-initiated stop must not count as a "successful completion": skip
     // the interval-from-end stamp so the next slot still fires on its grid.
     _activeScheduleId = null;

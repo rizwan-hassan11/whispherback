@@ -47,6 +47,23 @@ class PlaybackSnapshot extends Equatable {
       state == AppPlaybackState.manualPlaying ||
       state == AppPlaybackState.scheduledPlaying;
 
+  /// True when the Spotify-style mini-player should occupy shell space.
+  /// Shared by [MainShell] and [MiniPlayerBar] so layout reserve and
+  /// visibility never disagree (QA: bar completely missing while audio
+  /// was still playing).
+  bool showsMiniPlayer({bool nativeActive = false}) {
+    if (modalVisible) return false;
+    if (state == AppPlaybackState.inactive) return false;
+    if (state == AppPlaybackState.manualPlaying ||
+        state == AppPlaybackState.scheduledPlaying) {
+      return clipTitle != null || playlistName != null || nativeActive;
+    }
+    if (nativeActive) {
+      return clipTitle != null || playlistName != null;
+    }
+    return false;
+  }
+
   PlaybackSnapshot copyWith({
     AppPlaybackState? state,
     String? playlistId,

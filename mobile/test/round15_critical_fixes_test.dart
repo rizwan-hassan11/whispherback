@@ -52,7 +52,7 @@ void main() {
       final src = _readFile('lib/services/playback/playback_coordinator.dart');
       expect(
         src,
-        contains('_serializePauseResume'),
+        contains('_serializeTransport'),
         reason: 'pause + resume MUST funnel through a single queue '
             'so the user tapping pause/resume rapidly cannot have '
             'overlapping native player calls in flight (the QA '
@@ -107,27 +107,16 @@ void main() {
   });
 
   group('Round 15-B — mini-player visibility honors actual playback', () {
-    test('mini_player_bar uses isPlaying / play-context as visibility gates',
-        () {
-      final src = _readFile('lib/features/playback/mini_player_bar.dart');
+    test('mini_player_bar uses showsMiniPlayer for visibility', () {
+      final bar = _readFile('lib/features/playback/mini_player_bar.dart');
       expect(
-        src,
-        contains('clipActuallyPlaying'),
-        reason: 'mini_player_bar must read the real player state so '
-            'the bar shows whenever audio is being heard.',
+        bar,
+        contains('showsMiniPlayer'),
+        reason: 'mini_player_bar and MainShell share one visibility helper.',
       );
-      expect(
-        src,
-        contains('AppPlaybackState.scheduledPlaying'),
-        reason: 'mini_player_bar must also show in the scheduled '
-            'play context.',
-      );
-      expect(
-        src,
-        contains('AppPlaybackState.manualPlaying'),
-        reason: 'mini_player_bar must show in the manual play '
-            'context.',
-      );
+      final state = _readFile('lib/domain/playback/playback_state.dart');
+      expect(state, contains('AppPlaybackState.scheduledPlaying'));
+      expect(state, contains('AppPlaybackState.manualPlaying'));
     });
   });
 

@@ -119,7 +119,7 @@ void main() {
       );
       expect(
         body,
-        contains('_serializePauseResume'),
+        contains('_serializeTransport'),
         reason: 'dismissPlayer must funnel through the same gate as '
             'pause/resume so rapid cross/pause taps cannot race '
             'overlapping native player calls.',

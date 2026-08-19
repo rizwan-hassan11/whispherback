@@ -44,32 +44,23 @@ void main() {
           reason: 'Must actually ignore the tick, not only log it.');
     });
 
-    test('stale native PAUSED must not undo an in-flight resume or skip', () {
+    test('native skip updates clip title on PLAYING when track changes', () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
-      expect(src, contains('bool _awaitingNativePlay'),
-          reason: 'Resume/skip optimistic UI is otherwise overwritten by '
-              'the 1.5s prefs poll still reporting PAUSED.');
-      final idx = src.indexOf('if (native.isPaused)');
-      expect(idx, greaterThanOrEqualTo(0));
-      final idleIdx = src.indexOf('if (_nativeScheduledActive)', idx);
-      final pausedBranch = src.substring(idx, idleIdx);
-      expect(pausedBranch, contains('if (_awaitingNativePlay)'),
-          reason: 'Skip/resume set isPlaying true before native prepare. '
-              'A PAUSED poll in that window must not flip the icon back.');
+      final idx = src.indexOf('if (native.isPlaying)');
+      final pausedIdx = src.indexOf('if (native.isPaused)', idx);
+      final playingBranch = src.substring(idx, pausedIdx);
+      expect(playingBranch, contains('titleChanged'),
+          reason: 'Round-robin skip must refresh clipTitle from native.');
     });
 
-    test('pause/resume gate times out in 1.5s, skip gate in 2.5s', () {
+    test('unified transport gate timeout covers setAudioSource', () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
+      expect(src, contains('return _serializeTransport((epoch) async'));
       expect(
         src,
-        contains('await body().timeout(const Duration(milliseconds: 1500)'),
-        reason: 'A hung pauseNative must not freeze the next tap for 4s.',
-      );
-      expect(
-        src,
-        contains(
-            'static const _skipGateBodyTimeout = Duration(milliseconds: 2500)'),
-        reason: 'A hung skipNative must not freeze next/prev for 10s.',
+        contains('static const _transportBodyTimeout = Duration(seconds: 12)'),
+        reason: 'Transport gate must cover setAudioSource (8s) without the '
+            'old 2.5s skip timeout aborting while playFile still runs.',
       );
     });
 

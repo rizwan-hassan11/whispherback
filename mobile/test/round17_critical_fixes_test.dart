@@ -242,7 +242,7 @@ void main() {
   });
 
   group('Round 17-D — dismissPlayer is serialised with pause/resume', () {
-    test('dismissPlayer routes through _serializePauseResume', () {
+    test('dismissPlayer routes through _serializeTransport', () {
       final src = _readFile('lib/services/playback/playback_coordinator.dart');
       final dismissIdx = src.indexOf('Future<void> dismissPlayer()');
       expect(dismissIdx, greaterThan(0));
@@ -252,7 +252,7 @@ void main() {
       final body = src.substring(dismissIdx, dismissIdx + 4000);
       expect(
         body,
-        contains('_serializePauseResume('),
+        contains('_serializeTransport('),
         reason: 'dismissPlayer used to bypass the pause/resume gate — '
             'the user reported crashes when rapidly toggling '
             'pause/resume/cross icon, which traced to overlapping '

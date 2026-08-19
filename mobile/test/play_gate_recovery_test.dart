@@ -2,7 +2,7 @@
 // don't play" — the QA report that ALL playback stops working after a
 // while, while delete continues to work.
 //
-// Root cause: `PlaybackCoordinator._serializePlay` chained every play
+// Root cause: `PlaybackCoordinator._serializeTransport` chained every play
 // invocation behind a `_playGate` Future. If one body hung (e.g. a stuck
 // `just_audio.setAudioSource` call after rapid record/import/play cycles
 // on Samsung One UI), the gate stayed unresolved forever and every

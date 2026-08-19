@@ -89,16 +89,13 @@ class MiniPlayerBar extends ConsumerWidget {
     });
 
     // Round 15: visibility contract — "IF audio is being played the bar
-    // MUST be visible."
+    // MUST be visible." Uses the same helper as MainShell so layout
+    // reserve and the bar itself never disagree.
     if (snapshot == null || snapshot.modalVisible) {
       return const SizedBox.shrink();
     }
     final nativeLive = native.isNativeActive;
-    final inPlayContext = snapshot.state == AppPlaybackState.manualPlaying ||
-        snapshot.state == AppPlaybackState.scheduledPlaying ||
-        nativeLive;
-    final clipActuallyPlaying = audio.currentPath != null && audio.isPlaying;
-    if (!inPlayContext && !clipActuallyPlaying) {
+    if (!snapshot.showsMiniPlayer(nativeActive: nativeLive)) {
       return const SizedBox.shrink();
     }
     final title = snapshot.clipTitle ?? native.clipTitle;

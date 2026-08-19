@@ -10,8 +10,9 @@ import '../../domain/playback/playback_state.dart';
 import '../../l10n/app_localizations.dart';
 import '../../providers/playback_providers.dart';
 import '../../services/playback/playback_coordinator.dart';
-import '../layout/shell_messenger.dart';
+import '../../services/scheduler/native_alarms_bridge.dart';
 import '../layout/responsive.dart';
+import '../layout/shell_messenger.dart';
 import '../theme/app_icons.dart';
 import '../theme/app_theme.dart';
 import 'adaptive_shell_nav.dart';
@@ -145,11 +146,11 @@ class _MainShellState extends ConsumerState<MainShell> {
     final r = context.responsive;
     final playback = ref.watch(playbackSnapshotProvider);
     final snapshot = playback.valueOrNull;
+    final nativeAsync = ref.watch(nativePlaybackProvider);
+    final native =
+        nativeAsync.valueOrNull ?? NativeAlarmsBridge.instance.lastSnapshot;
     final miniPlayerVisible = snapshot != null &&
-        snapshot.state != AppPlaybackState.inactive &&
-        snapshot.state != AppPlaybackState.activeIdle &&
-        snapshot.playlistName != null &&
-        !snapshot.modalVisible;
+        snapshot.showsMiniPlayer(nativeActive: native.isNativeActive);
     final shellBottomReserve = ShellMetrics.reservedBottomHeight(
       context,
       miniPlayerVisible: miniPlayerVisible,
