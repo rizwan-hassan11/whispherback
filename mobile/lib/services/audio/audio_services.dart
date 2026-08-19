@@ -288,6 +288,7 @@ class AudioPlaybackService {
     String? playlistName,
     String? subtitle,
     bool playlistMode = false,
+    bool sourceSwap = false,
   }) async {
     _currentPath = path;
     await _handler.playFile(
@@ -296,11 +297,17 @@ class AudioPlaybackService {
       playlistName: playlistName,
       subtitle: subtitle,
       playlistMode: playlistMode,
+      sourceSwap: sourceSwap,
     );
   }
 
+  Future<void> warmFileCache(String path) => _handler.warmFileCache(path);
+
   Future<void> pause() => _handler.pause();
   Future<void> resume() => _handler.play();
+
+  /// Stops an in-flight ExoPlayer source swap without tearing down the session.
+  Future<void> cancelInFlightPlay() => _handler.cancelInFlightPlay();
 
   /// Hides the lock-screen media card without tearing down the audio
   /// session. Used by `dismissPlayer` so the user's "cross icon" tap

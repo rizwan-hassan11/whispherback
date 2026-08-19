@@ -192,9 +192,14 @@ void main() {
       // Capture the PRE-setAudioSource portion only (everything up to
       // the first setAudioSource call INSIDE playFile).
       final setSourceIdx =
-          src.indexOf('.setAudioSource(AudioSource.file(path)', playFileIdx);
+          src.indexOf('.setAudioSource(_cachedFileSource(path)', playFileIdx);
       expect(setSourceIdx, greaterThan(playFileIdx));
       final preBody = src.substring(playFileIdx, setSourceIdx);
+      expect(
+        preBody,
+        contains('if (!swapping)'),
+        reason: 'First-play path publishes FG state before setAudioSource.',
+      );
       expect(
         preBody,
         contains('playbackState.add('),

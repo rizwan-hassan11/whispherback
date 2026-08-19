@@ -93,6 +93,9 @@ class PlaybackCoordinator {
   String? _pendingScheduledPlaylistId;
   String? _pendingScheduledScheduleId;
   int? _playlistClipIndex;
+
+  /// In-memory clip list for the active playlist so next/prev never hit SQLite.
+  List<AudioClip> _playlistClipCache = const [];
   String? _lastAdhanWindowKey;
 
   /// True while the visible mini-player snapshot is owned by the native
@@ -160,15 +163,48 @@ class PlaybackCoordinator {
   /// audio playing when the user asked to pause.
   int _transportEpoch = 0;
 
+  /// Snapshot captured before an optimistic skip title flip. Restored when
+  /// pause preempts an in-flight skip so the user does not see "pause changed
+  /// the clip".
+  PlaybackSnapshot? _optimisticSkipSnapshot;
+
   /// Sized for playFile's 8s setAudioSource cap plus native MethodChannel
   /// skip / pause round-trips.
   static const _transportBodyTimeout = Duration(seconds: 12);
 
   bool _transportCurrent(int epoch) => epoch == _transportEpoch;
 
-  Future<T> _serializeTransport<T>(Future<T> Function(int epoch) body) {
+  /// Stops an in-flight skip / playFile without tearing down the media session.
+  Future<void> _abortInFlightTransport({required bool revertOptimisticSkip}) async {
+    if (revertOptimisticSkip && _optimisticSkipSnapshot != null) {
+      _emit(_optimisticSkipSnapshot!.copyWith(isPlaying: false));
+      _optimisticSkipSnapshot = null;
+    }
+    if (_nativeOwnsPlayback ||
+        NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
+      try {
+        await NativeAlarmsBridge.instance.pauseNative();
+      } catch (_) {}
+    } else {
+      try {
+        await _audio.cancelInFlightPlay();
+      } catch (_) {}
+    }
+  }
+
+  Future<T> _serializeTransport<T>(
+    Future<T> Function(int epoch) body, {
+    bool preempt = false,
+    bool revertOptimisticSkip = false,
+  }) {
     final epoch = ++_transportEpoch;
-    final previous = _transportGate;
+    if (preempt) {
+      unawaited(_abortInFlightTransport(
+        revertOptimisticSkip: revertOptimisticSkip,
+      ));
+    }
+    final previous =
+        preempt ? Future<void>.value() : _transportGate;
     final completer = Completer<T>();
     _transportGate = previous
         .then((_) => null, onError: (Object _, StackTrace __) => null)
@@ -190,6 +226,10 @@ class PlaybackCoordinator {
               'PlaybackCoordinator._serializeTransport body failed: $e\n$st');
         }
         if (!completer.isCompleted) completer.completeError(e, st);
+      } finally {
+        if (_transportCurrent(epoch)) {
+          _optimisticSkipSnapshot = null;
+        }
       }
     });
     return completer.future;
@@ -260,8 +300,8 @@ class PlaybackCoordinator {
     _audio.onStopRequested = () => unawaited(_deactivateFromNotification());
     _audio.onStopClipRequested =
         () => unawaited(_finalizeClipStopFromNotification());
-    _audio.onPlayRequested = () => _syncPlayingSnapshot(true);
-    _audio.onPauseRequested = () => _syncPlayingSnapshot(false);
+    _audio.onPlayRequested = () => unawaited(_handleNotificationPlay());
+    _audio.onPauseRequested = () => unawaited(_handleNotificationPause());
     _audio.onSkipToNextRequested = () => skipNext();
     _audio.onSkipToPreviousRequested = () => skipPrevious();
     _audio.onClipSessionChanged = () {
@@ -660,24 +700,62 @@ class PlaybackCoordinator {
     await store.incrementShuffleCursor(scheduleId);
   }
 
-  void _syncPlayingSnapshot(bool playing) {
-    if (_snapshot.state == AppPlaybackState.inactive) return;
-    if (playing) {
-      // Lock-screen / notification "play" tap should clear the user-paused
-      // sentinel so the next completion event behaves like a normal end-of-
-      // clip and auto-advances when appropriate.
-      _userInitiatedPause = false;
-    } else if (!_systemDrivenPauseInFlight) {
-      // This callback fires for any `_handler.pause()` invocation, which
-      // includes both genuine user pauses (lock-screen button, in-app
-      // pause) AND coordinator-driven system pauses (sleep mode entering,
-      // prayer window starting). Only the user-driven ones should arm the
-      // suppression sentinel — `_systemDrivenPauseInFlight` is the flag we
-      // set around the system-pause call sites to opt out.
-      _userInitiatedPause = true;
-    }
-    if (_snapshot.isPlaying == playing) return;
-    _emit(_snapshot.copyWith(isPlaying: playing));
+  /// Lock-screen / audio_service notification already invoked
+  /// [WhisperAudioHandler.pause]. Preempt any in-flight skip and sync
+  /// coordinator + native state without double-pausing ExoPlayer.
+  Future<void> _handleNotificationPause() {
+    return _serializeTransport(
+      (epoch) async {
+        if (!_transportCurrent(epoch)) return;
+        if (_snapshot.state != AppPlaybackState.inactive &&
+            !_systemDrivenPauseInFlight) {
+          _userInitiatedPause = true;
+        }
+        if (_snapshot.isPlaying) {
+          _emit(_snapshot.copyWith(isPlaying: false));
+        }
+        if (_nativeOwnsPlayback ||
+            NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
+          try {
+            await NativeAlarmsBridge.instance.pauseNative();
+          } catch (e, st) {
+            if (kDebugMode) {
+              debugPrint('notification pause: native failed: $e\n$st');
+            }
+          }
+        }
+      },
+      preempt: true,
+      revertOptimisticSkip: true,
+    );
+  }
+
+  /// Lock-screen play after [WhisperAudioHandler.play] already resumed
+  /// ExoPlayer — sync coordinator + native and cancel stale skips.
+  Future<void> _handleNotificationPlay() {
+    return _serializeTransport(
+      (epoch) async {
+        if (!_transportCurrent(epoch)) return;
+        if (_snapshot.state != AppPlaybackState.inactive) {
+          _userInitiatedPause = false;
+        }
+        if (!_snapshot.isPlaying) {
+          _emit(_snapshot.copyWith(isPlaying: true));
+        }
+        if (_nativeOwnsPlayback ||
+            NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
+          try {
+            await NativeAlarmsBridge.instance.resumeNative();
+          } catch (e, st) {
+            if (kDebugMode) {
+              debugPrint('notification play: native failed: $e\n$st');
+            }
+          }
+        }
+      },
+      preempt: true,
+      revertOptimisticSkip: true,
+    );
   }
 
   /// Wraps a system-driven pause (sleep mode, prayer pause, scheduled
@@ -718,6 +796,104 @@ class PlaybackCoordinator {
   Future<void> skipNext() => _guardedSkip(next: true);
   Future<void> skipPrevious() => _guardedSkip(next: false);
 
+  /// Synchronous next/prev target for instant mini-player feedback.
+  ({String title, int durationMs, int index})? _resolveSkipTarget(bool next) {
+    final playlistId = _snapshot.playlistId;
+    if (playlistId == null) {
+      if (_libraryQueue.length <= 1) return null;
+      final currentIndex = _libraryIndex < 0 ? 0 : _libraryIndex;
+      final nextIndex = next
+          ? (currentIndex + 1) % _libraryQueue.length
+          : (currentIndex - 1 + _libraryQueue.length) % _libraryQueue.length;
+      final clip = _libraryQueue[nextIndex];
+      return (title: clip.title, durationMs: clip.durationMs, index: nextIndex);
+    }
+    if (_playlistClipCache.length <= 1) return null;
+    final currentIndex = _playlistClipIndex ?? 0;
+    final size = _playlistClipCache.length;
+    final nextIndex = next
+        ? (currentIndex + 1) % size
+        : (currentIndex - 1 + size) % size;
+    final clip = _playlistClipCache[nextIndex];
+    return (title: clip.title, durationMs: clip.durationMs, index: nextIndex);
+  }
+
+  /// Flip title / play icon on the same frame as the tap — before transport
+  /// serialization or native I/O.
+  void _primeOptimisticSkip(bool next) {
+    _userInitiatedPause = false;
+    _playbackGeneration++;
+    _optimisticSkipSnapshot = _snapshot;
+
+    final native = _nativeOwnsPlayback ||
+        NativeAlarmsBridge.instance.lastSnapshot.isNativeActive;
+    if (native) {
+      final target = _resolveSkipTarget(next);
+      _emit(_snapshot.copyWith(
+        state: AppPlaybackState.scheduledPlaying,
+        isPlaying: true,
+        clipTitle: target?.title ?? _snapshot.clipTitle,
+        durationMs: target?.durationMs ?? _snapshot.durationMs,
+        modalVisible: false,
+      ));
+      return;
+    }
+
+    final target = _resolveSkipTarget(next);
+    if (target == null) {
+      if (_snapshot.playlistId == null && _libraryQueue.length == 1) {
+        _emit(_snapshot.copyWith(isPlaying: true));
+      }
+      return;
+    }
+
+    final fromSchedule = _snapshot.state == AppPlaybackState.scheduledPlaying;
+    if (_snapshot.playlistId == null) {
+      _libraryIndex = target.index;
+      _emit(_snapshot.copyWith(
+        state: AppPlaybackState.manualPlaying,
+        clipTitle: target.title,
+        playlistName: target.title,
+        isPlaying: true,
+        durationMs: target.durationMs,
+        modalVisible: false,
+      ));
+      _warmLibraryNeighbors();
+    } else {
+      _playlistClipIndex = target.index;
+      _emit(_snapshot.copyWith(
+        state: fromSchedule
+            ? AppPlaybackState.scheduledPlaying
+            : AppPlaybackState.manualPlaying,
+        clipTitle: target.title,
+        isPlaying: true,
+        durationMs: target.durationMs,
+        modalVisible: false,
+      ));
+      _warmPlaylistNeighbors();
+    }
+  }
+
+  void _warmLibraryNeighbors() {
+    if (_libraryQueue.length <= 1) return;
+    final idx = _libraryIndex < 0 ? 0 : _libraryIndex;
+    final n = _libraryQueue.length;
+    unawaited(_audio.warmFileCache(
+        _libraryQueue[(idx + 1) % n].filePath));
+    unawaited(_audio.warmFileCache(
+        _libraryQueue[(idx - 1 + n) % n].filePath));
+  }
+
+  void _warmPlaylistNeighbors() {
+    if (_playlistClipCache.length <= 1) return;
+    final idx = _playlistClipIndex ?? 0;
+    final n = _playlistClipCache.length;
+    unawaited(_audio.warmFileCache(
+        _playlistClipCache[(idx + 1) % n].filePath));
+    unawaited(_audio.warmFileCache(
+        _playlistClipCache[(idx - 1 + n) % n].filePath));
+  }
+
   /// Wraps `_skipPlaylistClip` in the unified transport gate AND
   /// a try/catch + error event so a thrown PlatformException from the
   /// native player never propagates out of a skip tap. The user perceives
@@ -725,9 +901,12 @@ class PlaybackCoordinator {
   /// the exact symptom they reported on the mini-player and modal
   /// controls.
   Future<void> _guardedSkip({required bool next}) async {
+    _primeOptimisticSkip(next);
     try {
       await _serializeTransport(
-          (epoch) => _skipPlaylistClip(epoch, next: next));
+        (epoch) => _skipPlaylistClip(epoch, next: next),
+        preempt: true,
+      );
     } catch (e, st) {
       if (kDebugMode) {
         debugPrint('skip${next ? 'Next' : 'Previous'} failed: $e\n$st');
@@ -752,11 +931,6 @@ class PlaybackCoordinator {
     // mini-player and notification next/prev looked dead.
     if (_nativeOwnsPlayback ||
         NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
-      _emit(_snapshot.copyWith(
-        state: AppPlaybackState.scheduledPlaying,
-        isPlaying: true,
-        modalVisible: false,
-      ));
       try {
         await NativeAlarmsBridge.instance.skipNative(next: next);
       } catch (e, st) {
@@ -787,26 +961,25 @@ class PlaybackCoordinator {
           : (currentIndex - 1 + _libraryQueue.length) % _libraryQueue.length;
       _libraryIndex = nextIndex;
       final clip = _libraryQueue[nextIndex];
-      // Optimistic UI so next/prev feels instant while setAudioSource runs.
-      _emit(_snapshot.copyWith(
-        state: AppPlaybackState.manualPlaying,
-        clipTitle: clip.title,
-        playlistName: clip.title,
-        isPlaying: true,
-        durationMs: clip.durationMs,
-        modalVisible: false,
-      ));
-      await _playClipInternal(clip,
-          queue: _libraryQueue, transportEpoch: epoch);
+      await _playClipInternal(
+        clip,
+        queue: _libraryQueue,
+        transportEpoch: epoch,
+        skipSnapshotEmit: true,
+      );
       await _honorSupersededTransport(epoch);
       return;
     }
 
-    final clips = await _playlists.getClips(playlistId);
+    var clips = _playlistClipCache;
+    if (clips.isEmpty) {
+      clips = await _playlists.getClips(playlistId);
+      _playlistClipCache = clips;
+    }
+    if (clips.isEmpty) return;
     if (clips.length <= 1) {
       // Single-clip playlist: replay from the top instead of stopping —
       // matches user expectation for a "next" tap on a one-track playlist.
-      if (clips.isEmpty) return;
       _playlistClipIndex = 0;
       await _playClipAtIndex(
         playlistId,
@@ -833,17 +1006,7 @@ class PlaybackCoordinator {
     final nextIndex = next
         ? (currentIndex + 1) % clips.length
         : (currentIndex - 1 + clips.length) % clips.length;
-    final target = clips[nextIndex];
     _playlistClipIndex = nextIndex;
-    _emit(_snapshot.copyWith(
-      state: fromSchedule
-          ? AppPlaybackState.scheduledPlaying
-          : AppPlaybackState.manualPlaying,
-      clipTitle: target.title,
-      isPlaying: true,
-      durationMs: target.durationMs,
-      modalVisible: false,
-    ));
     // Walk forward/back from the target so a missing file never leaves the
     // mini-player stranded mid-skip (which looked like "next hid the bar").
     final played = await _advanceToNextPlayable(
@@ -888,12 +1051,15 @@ class PlaybackCoordinator {
             ? RuntimeCopy.l10n.scheduledWhisper
             : RuntimeCopy.l10n.nowPlaying,
         playlistMode: clips.length > 1,
+        sourceSwap: _snapshot.state == AppPlaybackState.manualPlaying ||
+            _snapshot.state == AppPlaybackState.scheduledPlaying,
       );
     } catch (_) {
       return;
     }
 
     _playlistClipIndex = index;
+    _warmPlaylistNeighbors();
     _emit(
       _snapshot.copyWith(
         state: fromSchedule
@@ -1440,6 +1606,7 @@ class PlaybackCoordinator {
       }
       return false;
     }
+    _playlistClipCache = clips;
 
     final playlist = await _playlists.getById(playlistId);
     // The schedule's own shuffle flag wins for scheduled fires (so toggling
@@ -1548,6 +1715,7 @@ class PlaybackCoordinator {
   Future<void> playClip(AudioClip clip, {List<AudioClip>? queue}) {
     return _serializeTransport(
       (epoch) => _playClipInternal(clip, queue: queue, transportEpoch: epoch),
+      preempt: true,
     );
   }
 
@@ -1555,6 +1723,7 @@ class PlaybackCoordinator {
     AudioClip clip, {
     List<AudioClip>? queue,
     int? transportEpoch,
+    bool skipSnapshotEmit = false,
   }) async {
     if (!_isPlayablePath(clip.filePath)) {
       // Path was rejected by ClipPathGuard — most often a stale row whose
@@ -1579,19 +1748,25 @@ class PlaybackCoordinator {
         (queue == null || queue.isEmpty) ? <AudioClip>[clip] : queue;
     _libraryIndex = _libraryQueue.indexWhere((c) => c.id == clip.id);
     if (_libraryIndex < 0) _libraryIndex = 0;
+    _playlistClipCache = const [];
     _userInitiatedPause = false;
 
-    // Optimistic: show the now-playing sheet instantly for snappy feedback.
-    // playlistId is null so completion stops cleanly.
-    _playbackGeneration++;
-    _emit(PlaybackSnapshot(
-      state: AppPlaybackState.manualPlaying,
-      playlistName: clip.title,
-      clipTitle: clip.title,
-      isPlaying: true,
-      modalVisible: false,
-      durationMs: clip.durationMs,
-    ));
+    if (!skipSnapshotEmit) {
+      // Optimistic: show the now-playing sheet instantly for snappy feedback.
+      _playbackGeneration++;
+      _emit(PlaybackSnapshot(
+        state: AppPlaybackState.manualPlaying,
+        playlistName: clip.title,
+        clipTitle: clip.title,
+        isPlaying: true,
+        modalVisible: false,
+        durationMs: clip.durationMs,
+      ));
+    }
+
+    if (transportEpoch != null && !_transportCurrent(transportEpoch)) {
+      return;
+    }
 
     try {
       await _audio.playFile(
@@ -1599,8 +1774,12 @@ class PlaybackCoordinator {
         title: clip.title,
         subtitle: RuntimeCopy.l10n.libraryPreview,
         playlistMode: _libraryQueue.length > 1,
+        sourceSwap: skipSnapshotEmit,
       );
     } catch (e, st) {
+      if (!_transportCurrent(transportEpoch ?? _transportEpoch)) {
+        return;
+      }
       if (kDebugMode) {
         debugPrint('playClip: playFile failed: $e\n$st');
       }
@@ -1633,6 +1812,7 @@ class PlaybackCoordinator {
     if (transportEpoch != null) {
       await _honorSupersededTransport(transportEpoch);
     }
+    _warmLibraryNeighbors();
   }
 
   /// True when the user is in any clip-playing context.
@@ -1663,17 +1843,13 @@ class PlaybackCoordinator {
   }
 
   Future<void> pause() {
+    if (_snapshot.isPlaying) {
+      _userInitiatedPause = true;
+      _emit(_snapshot.copyWith(isPlaying: false));
+    }
     return _serializeTransport((epoch) async {
       if (!_transportCurrent(epoch)) return;
-      // Mark BEFORE the await so any completion event that the player
-      // races to emit between the user's tap and `_player.pause()`
-      // actually landing is treated as "paused at the end" rather
-      // than "auto-advance to next clip".
       _userInitiatedPause = true;
-      // Optimistic UI flip first so the user sees their pause take
-      // effect immediately even if the native player call is slow /
-      // throws.
-      _emit(_snapshot.copyWith(isPlaying: false));
       // Round 22 — when a scheduled clip is being played by the native
       // FG service (not just_audio), `_audio.pause()` is a no-op. Route
       // the pause request through the native bridge so the actual
@@ -1698,7 +1874,7 @@ class PlaybackCoordinator {
               'pause: _audio.pause failed (UI already updated): $e\n$st');
         }
       }
-    });
+    }, preempt: true, revertOptimisticSkip: true);
   }
 
   /// Pauses the current clip AND hides the mini-player + modal — but does
@@ -1836,10 +2012,15 @@ class PlaybackCoordinator {
           debugPrint('dismissPlayer: notif refresh failed: $e\n$st');
         }
       }
-    });
+    }, preempt: true, revertOptimisticSkip: true);
   }
 
   Future<void> resume() {
+    if (!_snapshot.isPlaying &&
+        _snapshot.state != AppPlaybackState.inactive) {
+      _userInitiatedPause = false;
+      _emit(_snapshot.copyWith(isPlaying: true));
+    }
     return _serializeTransport((epoch) async {
       if (!_transportCurrent(epoch)) return;
       _userInitiatedPause = false;
@@ -1856,7 +2037,9 @@ class PlaybackCoordinator {
       // keep the mini-player if they were on it, or the modal if they
       // were in it.
       final previous = _snapshot;
-      _emit(_snapshot.copyWith(isPlaying: true));
+      if (!_snapshot.isPlaying) {
+        _emit(_snapshot.copyWith(isPlaying: true));
+      }
 
       // Round 22 — when the visible scheduledPlaying snapshot is owned by
       // the native FG service, the resume tap must go back to native so
@@ -1917,11 +2100,12 @@ class PlaybackCoordinator {
           ));
         }
       }
-    });
+    }, preempt: true, revertOptimisticSkip: true);
   }
 
   Future<void> stop() async {
     _playlistClipIndex = null;
+    _playlistClipCache = const [];
     _libraryQueue = const [];
     _libraryIndex = -1;
     _userInitiatedPause = false;

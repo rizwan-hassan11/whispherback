@@ -155,6 +155,10 @@ class WhisperPlaybackService : Service() {
     private var playSingleClip: Boolean = false
     private var currentPlaylistId: String? = null
     private var pendingPlayPath: String? = null
+    private var skipGeneration: Int = 0
+    private var skipRevertIndex: Int = -1
+    private var skipRevertPath: String? = null
+    private var skipRevertTitle: String? = null
 
     private val progressTicker = object : Runnable {
         override fun run() {
@@ -311,6 +315,19 @@ class WhisperPlaybackService : Service() {
 
     private fun handlePauseCommand() {
         try {
+            // Cancel a deferred skip prepare so pause cannot start the next clip.
+            skipGeneration++
+            if (pendingPlayPath != null) {
+                pendingPlayPath = null
+                skipRevertPath?.let { path ->
+                    clipQueueIndex = skipRevertIndex.coerceAtLeast(0)
+                    currentClipPath = path
+                    currentClipTitle = skipRevertTitle ?: currentClipTitle
+                }
+                skipRevertPath = null
+                skipRevertTitle = null
+                skipRevertIndex = -1
+            }
             // Explicit user pause — the ONLY path that may leave the
             // player paused without the watchdog restarting it.
             userPaused = true
@@ -424,6 +441,9 @@ class WhisperPlaybackService : Service() {
                 attempts++
                 val (path, title) = clipQueue[idx]
                 if (!File(path).exists()) continue
+                skipRevertIndex = clipQueueIndex
+                skipRevertPath = currentClipPath
+                skipRevertTitle = currentClipTitle
                 clipQueueIndex = idx
                 currentClipPath = path
                 currentClipTitle = title
@@ -653,10 +673,16 @@ class WhisperPlaybackService : Service() {
     /// Skip must not block onStartCommand / Flutter's MethodChannel behind
     /// setDataSource. Notify first, then prepare on the next main-loop turn.
     private fun playClipAfterUiUpdate(clipPath: String) {
+        val gen = ++skipGeneration
         pendingPlayPath = clipPath
         playbackHandler().post {
+            if (gen != skipGeneration) return@post
+            if (userPaused) return@post
             val path = pendingPlayPath ?: return@post
             pendingPlayPath = null
+            skipRevertPath = null
+            skipRevertTitle = null
+            skipRevertIndex = -1
             playClip(path)
         }
     }

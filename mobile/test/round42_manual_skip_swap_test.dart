@@ -44,7 +44,9 @@ void main() {
       expect(idx, greaterThanOrEqualTo(0));
       final end = src.indexOf('\n  /// Outstanding watchdog', idx);
       final body = src.substring(idx, end);
-      expect(body, contains('if (_playingClip)'),
+      expect(body, contains('bool sourceSwap = false'),
+          reason: 'Clip-to-clip skip uses a dedicated fast swap path.');
+      expect(body, contains('final swapping = sourceSwap && _playingClip'),
           reason: 'An in-flight clip must take the swap path.');
       expect(body, contains('await _player.stop()'),
           reason: 'ExoPlayer source must be cleared before setAudioSource.');
@@ -59,14 +61,11 @@ void main() {
         'multi-clip library auto-advances on completion', () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
 
-      final skipIdx = src.indexOf('Future<void> _skipPlaylistClip(');
-      expect(skipIdx, greaterThanOrEqualTo(0));
-      final skipEnd =
-          src.indexOf('\n  Future<void> _playClipAtIndex(', skipIdx);
-      final skipBody = src.substring(skipIdx, skipEnd);
-      expect(skipBody, contains('Optimistic UI so next/prev feels instant'),
-          reason: 'Manual skip must not wait for setAudioSource to update '
-              'the mini-player title.');
+      expect(src, contains('void _primeOptimisticSkip(bool next)'),
+          reason: 'Manual skip must update the mini-player on the tap frame, '
+              'not after setAudioSource.');
+      expect(src, contains('_guardedSkip({required bool next})'),
+          reason: 'Skip entry must prime UI before transport I/O.');
 
       final completeIdx = src.indexOf('Future<void> _onClipCompleted(');
       expect(completeIdx, greaterThanOrEqualTo(0));

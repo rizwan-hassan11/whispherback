@@ -517,6 +517,7 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     String? playlistName,
     String? subtitle,
     bool playlistMode = false,
+    bool sourceSwap = false,
   }) async {
     // Reject obviously bad inputs early so the caller's `try/catch` can show
     // a snackbar instead of the system silently doing nothing.
@@ -527,58 +528,15 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
       throw StateError('Clip file is missing on disk: $path');
     }
 
-    await _ensureAudioSession();
-    final session = await AudioSession.instance;
-    await session.setActive(true);
+    final playGen = ++_playFileGeneration;
+    final swapping = sourceSwap && _playingClip;
 
-    // Round 16: ALWAYS publish a playing-true PlaybackState BEFORE
-    // setAudioSource. This forces audio_service's native side to
-    // call `Service.startForeground()` IMMEDIATELY rather than
-    // waiting for the first playerEvent → broadcastState round-trip,
-    // which on Vivo / Xiaomi was sometimes 200-500ms late and let
-    // the OS reap the service first (the QA report "audio cuts off
-    // when I close the app while playing"). With this pre-flight
-    // state push, the service is FG-bound before the activity can
-    // get destroyed.
-    try {
-      playbackState.add(
-        playbackState.value.copyWith(
-          processingState: AudioProcessingState.loading,
-          playing: true,
-          controls: const [MediaControl.pause, _stopControl],
-          systemActions: const {
-            MediaAction.seek,
-            MediaAction.play,
-            MediaAction.pause,
-            MediaAction.stop,
-          },
-          androidCompactActionIndices: const [0],
-        ),
-      );
-    } catch (_) {
-      // Best-effort. The next _player event will re-publish anyway.
-    }
-
-    // Swap path: stop the ExoPlayer source ONLY — never `stopClip()`, which
-    // restarts the silence keep-alive and races the incoming setAudioSource.
-    // QA: library/playlist next/prev hung for seconds, then surfaced
-    // "Couldn't play …" for the clip that was already audible.
-    if (_playingClip) {
-      _startWatchdog?.cancel();
-      _startWatchdog = null;
-      try {
-        if (_player.processingState != ProcessingState.idle ||
-            _player.playing) {
-          await _player.stop();
-        }
-      } catch (_) {
-        // Best-effort: setAudioSource below overwrites the source anyway.
-      }
-    } else if (_player.processingState == ProcessingState.loading ||
-        _player.processingState == ProcessingState.buffering) {
-      try {
-        await _player.stop();
-      } catch (_) {}
+    if (!swapping) {
+      await _ensureAudioSession();
+      final session = await AudioSession.instance;
+      await session.setActive(true);
+    } else {
+      unawaited(_ensureAudioSession());
     }
 
     _playingClip = true;
@@ -594,11 +552,56 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     );
     mediaItem.add(item);
     queue.add([item]);
-    _publishClipControls(playing: false, processing: ProcessingState.loading);
+    _publishClipControls(
+      playing: swapping,
+      processing: swapping
+          ? ProcessingState.loading
+          : ProcessingState.loading,
+    );
 
-    await _player.setVolume(1);
-    await _player.setSpeed(1);
-    await _player.setLoopMode(LoopMode.off);
+    if (!swapping) {
+      // Round 16: publish loading state before first source bind.
+      try {
+        playbackState.add(
+          playbackState.value.copyWith(
+            processingState: AudioProcessingState.loading,
+            playing: true,
+            controls: const [MediaControl.pause, _stopControl],
+            systemActions: const {
+              MediaAction.seek,
+              MediaAction.play,
+              MediaAction.pause,
+              MediaAction.stop,
+            },
+            androidCompactActionIndices: const [0],
+          ),
+        );
+      } catch (_) {}
+    }
+
+    // Swap path: stop the ExoPlayer source ONLY — never `stopClip()`, which
+    // restarts the silence keep-alive and races the incoming setAudioSource.
+    _startWatchdog?.cancel();
+    _startWatchdog = null;
+    if (swapping) {
+      unawaited(_player.stop().catchError((_) {}));
+    } else if (_player.processingState != ProcessingState.idle ||
+        _player.playing) {
+      try {
+        await _player.stop();
+      } catch (_) {}
+    } else if (_player.processingState == ProcessingState.loading ||
+        _player.processingState == ProcessingState.buffering) {
+      try {
+        await _player.stop();
+      } catch (_) {}
+    }
+
+    if (!swapping) {
+      await _player.setVolume(1);
+      await _player.setSpeed(1);
+      await _player.setLoopMode(LoopMode.off);
+    }
     // CRITICAL: cap setAudioSource at 8 seconds. The just_audio future can
     // hang indefinitely if the underlying ExoPlayer / native MediaPlayer
     // gets into a stuck state (observed on Samsung One UI after rapid
@@ -608,7 +611,7 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     // time clips/playlists delete but don't play".
     try {
       await _player
-          .setAudioSource(AudioSource.file(path), preload: true)
+          .setAudioSource(_cachedFileSource(path), preload: true)
           .timeout(const Duration(seconds: 8));
     } on TimeoutException {
       // The player is wedged. Force-stop so the next playFile can rebuild
@@ -619,8 +622,17 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
       } catch (_) {}
       rethrow;
     }
+    if (playGen != _playFileGeneration) {
+      return;
+    }
     onClipSessionChanged?.call();
     await play();
+    if (playGen != _playFileGeneration) {
+      try {
+        await _player.pause();
+      } catch (_) {}
+      return;
+    }
 
     // Fire-and-forget watcher: if the native player never reaches a playable
     // state within 5s, emit `onPlaybackStartFailure` so the coordinator can
@@ -639,11 +651,54 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   /// fire late for a clip the user has already moved on from.
   Timer? _startWatchdog;
 
+  /// Bumped on every playFile start and on [cancelInFlightPlay] so a
+  /// superseded load never calls `play()` after the user tapped pause.
+  int _playFileGeneration = 0;
+
+  AudioPlayer? _cacheWarmer;
+
+  AudioSource _cachedFileSource(String path) =>
+      LockCachingAudioSource(Uri.file(path));
+
+  /// Pre-decodes the next/prev neighbor into the on-disk lock cache so
+  /// the subsequent skip swap hits warm I/O instead of cold open().
+  Future<void> warmFileCache(String path) async {
+    if (path.isEmpty || !File(path).existsSync()) return;
+    try {
+      _cacheWarmer ??= AudioPlayer();
+      await _cacheWarmer!
+          .setAudioSource(_cachedFileSource(path), preload: true)
+          .timeout(const Duration(seconds: 4));
+    } catch (_) {}
+  }
+
   /// Optional callback the coordinator wires up to surface a snackbar when
   /// playback truly never started. We use a callback (not a stream) so the
   /// signal stays decoupled from `PlaybackErrorEvent` — the coordinator
   /// decides how to phrase the user-visible message.
   void Function(String? clipTitle)? onPlaybackStartFailure;
+
+  /// Aborts an in-flight [playFile] (e.g. pause preempted skip). Keeps the
+  /// audio_service session alive — only stops the ExoPlayer source swap.
+  Future<void> cancelInFlightPlay() async {
+    _playFileGeneration++;
+    _startWatchdog?.cancel();
+    _startWatchdog = null;
+    if (!_playingClip &&
+        _player.processingState != ProcessingState.loading &&
+        _player.processingState != ProcessingState.buffering) {
+      return;
+    }
+    try {
+      await _player.stop();
+    } catch (_) {}
+    try {
+      _publishClipControls(
+        playing: false,
+        processing: _player.processingState,
+      );
+    } catch (_) {}
+  }
 
   void _scheduleStartWatchdog() {
     _startWatchdog?.cancel();
