@@ -6,7 +6,6 @@ import 'package:go_router/go_router.dart';
 
 import '../../features/playback/mini_player_bar.dart';
 import '../../features/playback/playback_modal.dart';
-import '../../domain/playback/playback_state.dart';
 import '../../l10n/app_localizations.dart';
 import '../../providers/playback_providers.dart';
 import '../../services/playback/playback_coordinator.dart';
