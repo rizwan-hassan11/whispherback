@@ -88,47 +88,53 @@ class MiniPlayerBar extends ConsumerWidget {
       coordinator.applyNativePlaybackSnapshot(n);
     });
 
-    // Round 15: visibility contract — "IF audio is being played the bar
-    // MUST be visible." Uses the same helper as MainShell so layout
-    // reserve and the bar itself never disagree.
+    // Round 15/50: visibility — bar stays for the whole clip session.
     if (snapshot == null || snapshot.modalVisible) {
       return const SizedBox.shrink();
     }
     final nativeLive = native.isNativeActive;
-    final dartClipActive =
-        audio.currentPath != null && (audio.isPlayingClip || audio.isPlaying);
+    // Match MainShell: keep session visible during source-swap gaps where
+    // isPlayingClip briefly flips while currentPath is still set.
+    final dartClipActive = audio.currentPath != null &&
+        (audio.isPlayingClip || audio.isPlaying);
     if (!snapshot.showsMiniPlayer(
       nativeActive: nativeLive,
       dartClipActive: dartClipActive,
     )) {
       return const SizedBox.shrink();
     }
-    // Prefer native titles when native owns playback — snapshot often lags
-    // one skip behind (empty Dart playlist cache on scheduled fires).
-    final useNativeTitles = _useNativeProgress(snapshot, audio) ||
-        (nativeLive && audio.currentPath == null);
+
+    // Single display model: newest non-empty title wins. Prefer native when
+    // Dart has no clip path (scheduled MediaPlayer owns audio).
+    // Once showsMiniPlayer passed, NEVER shrink for missing titles — that
+    // made the Spotify bar vanish mid next/prev (QA: "invisible").
+    final dartOwns = audio.currentPath != null;
     final nativeTitle =
-        (native.clipTitle != null && native.clipTitle!.isNotEmpty)
-            ? native.clipTitle
+        (native.clipTitle != null && native.clipTitle!.trim().isNotEmpty)
+            ? native.clipTitle!.trim()
             : null;
     final nativeSubtitle =
-        (native.playlistName != null && native.playlistName!.isNotEmpty)
-            ? native.playlistName
+        (native.playlistName != null && native.playlistName!.trim().isNotEmpty)
+            ? native.playlistName!.trim()
             : null;
-    final title = useNativeTitles
-        ? (nativeTitle ?? snapshot.clipTitle)
-        : (snapshot.clipTitle ?? nativeTitle);
-    final subtitle = useNativeTitles
-        ? (nativeSubtitle ?? snapshot.playlistName)
-        : (snapshot.playlistName ?? nativeSubtitle);
-    if (title == null && subtitle == null && !nativeLive) {
-      return const SizedBox.shrink();
-    }
-    final displayTitle = title ?? subtitle ?? 'Scheduled whisper';
-    final displaySubtitle = subtitle ?? 'WhisperBack';
+    final snapTitle = snapshot.clipTitle?.trim();
+    final snapSubtitle = snapshot.playlistName?.trim();
+    final title = dartOwns
+        ? (snapTitle?.isNotEmpty == true ? snapTitle : nativeTitle)
+        : (nativeTitle ?? snapTitle);
+    final subtitle = dartOwns
+        ? (snapSubtitle?.isNotEmpty == true ? snapSubtitle : nativeSubtitle)
+        : (nativeSubtitle ?? snapSubtitle);
+    final displayTitle = (title != null && title.isNotEmpty)
+        ? title
+        : (subtitle != null && subtitle.isNotEmpty ? subtitle : 'Now playing');
+    final displaySubtitle = (subtitle != null && subtitle.isNotEmpty)
+        ? subtitle
+        : 'WhisperBack';
+    // Play icon follows coordinator snapshot only (skip forces isPlaying true).
+    final displayPlaying = snapshot.isPlaying;
     final progressKey = ValueKey<String>(
-      'mini-progress-${title ?? ''}-${snapshot.durationMs}-'
-      '${useNativeTitles ? 'n' : 'd'}',
+      'mini-$displayTitle-${snapshot.durationMs}-${dartOwns ? 'd' : 'n'}',
     );
     final l10n = context.l10n;
     final theme = Theme.of(context);
@@ -295,10 +301,9 @@ class MiniPlayerBar extends ConsumerWidget {
                         _safeCall(coordinator.skipPrevious, 'skipPrevious'),
                   ),
                 _MiniPlayPauseButton(
-                  isPlaying: snapshot.isPlaying,
+                  isPlaying: displayPlaying,
                   onTap: () {
-                    final playing = snapshot.isPlaying;
-                    if (playing) {
+                    if (displayPlaying) {
                       _safeCall(coordinator.pause, 'pause');
                     } else {
                       _safeCall(coordinator.resume, 'resume');

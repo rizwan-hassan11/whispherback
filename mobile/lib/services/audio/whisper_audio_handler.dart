@@ -1064,6 +1064,16 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> pause() async {
     if (!_playingClip) return;
 
+    // Round 50: source-swap `stop()` makes Android MediaSession echo a
+    // PAUSE command back into audio_service. Honoring that mid-skip pauses
+    // the clip we just loaded — QA: "next changes the clip but pauses it".
+    if (_sourceSwapInFlight) {
+      if (kDebugMode) {
+        debugPrint('handler.pause: ignored during source swap');
+      }
+      return;
+    }
+
     _publishClipControls(
       playing: false,
       processing: _player.processingState,

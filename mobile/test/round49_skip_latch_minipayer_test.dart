@@ -32,26 +32,20 @@ void main() {
       final end = src.indexOf('Future<void> _skipPlaylistClip(', idx);
       final body = src.substring(idx, end);
       expect(body, contains('_suppressTransientNotPlaying = true'));
-      expect(body.contains('_suppressTransientNotPlaying = false'), isFalse,
+      expect(body.contains('} finally {'), isFalse,
           reason: 'Clearing in finally reintroduced alternate pause/play.');
-      expect(body, contains('_emit(_snapshot.copyWith(isPlaying: true))'));
+      // Native-only clear after emit is OK — Dart keeps latch until playing:true.
+      expect(body, contains('isPlaying: true'));
+      expect(body, contains('await _audio.resume()'));
     });
 
-    test('onPlayerState clears latch only on playing:true', () {
+    test('onPlayerState never syncs playing:false into snapshot', () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
       final idx = src.indexOf('void _onPlayerState(PlayerState state)');
       final end = src.indexOf('Future<void> _onClipCompleted(', idx);
       final body = src.substring(idx, end);
-      expect(
-        body,
-        contains(
-            'if (playing && _suppressTransientNotPlaying && !_userInitiatedPause)'),
-      );
-      expect(
-        body,
-        contains(
-            'if (!playing && !_userInitiatedPause && _suppressTransientNotPlaying)'),
-      );
+      expect(body, contains('if (!playing) {\n          return;'));
+      expect(body, contains('_emit(_snapshot.copyWith(isPlaying: true))'));
     });
 
     test('handler clears sourceSwapInFlight when player is playing', () {
@@ -65,11 +59,13 @@ void main() {
       expect(broadcast, contains('_sourceSwapInFlight = false'));
     });
 
-    test('mini-player prefers native titles and keys progress by clip', () {
+    test('mini-player merges titles by ownership and keys progress by clip', () {
       final bar = _read('lib/features/playback/mini_player_bar.dart');
-      expect(bar, contains('useNativeTitles'));
+      expect(bar, contains('final dartOwns = audio.currentPath != null'));
       expect(bar, contains('ValueKey<String>'));
       expect(bar, contains('key: progressKey'));
+      expect(bar, contains('displayPlaying = snapshot.isPlaying'));
+      expect(bar, contains('audio.isPlayingClip || audio.isPlaying'));
     });
   });
 }

@@ -31,9 +31,16 @@ void main() {
       expect(onIdx, greaterThanOrEqualTo(0));
       final onEnd = src.indexOf('Future<void> _onClipCompleted(', onIdx);
       final body = src.substring(onIdx, onEnd);
-      expect(body, contains('if (!playing && !_userInitiatedPause && _suppressTransientNotPlaying)'));
-      expect(body, contains('ProcessingState.idle'));
+      // Round 50: never sync playing:false from player events (stronger than
+      // the Round 48 transient latch alone).
+      expect(
+        body.contains(
+                'if (!playing && !_userInitiatedPause && _suppressTransientNotPlaying)') ||
+            body.contains('if (!playing) {\n          return;'),
+        isTrue,
+      );
     });
+
 
     test('handler keeps notification playing during source swap', () {
       final handler = _read('lib/services/audio/whisper_audio_handler.dart');

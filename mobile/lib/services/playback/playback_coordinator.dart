@@ -540,6 +540,10 @@ class PlaybackCoordinator {
             native.clipTitle!.isNotEmpty &&
             native.clipTitle != _snapshot.clipTitle;
         if (titleChanged) {
+          // Native skip already started the new clip — release Dart skip latch
+          // so a real user pause still works (playerState is ignored while
+          // native owns audio, so latch would never clear otherwise).
+          _suppressTransientNotPlaying = false;
           _emit(_snapshot.copyWith(
             state: AppPlaybackState.scheduledPlaying,
             isPlaying: true,
@@ -662,11 +666,16 @@ class PlaybackCoordinator {
         // not playing) unless Dart has no clip and no skip is in flight.
         if (_snapshot.state == AppPlaybackState.scheduledPlaying) {
           final dartOwnsClip = _audio.currentPath != null;
-          final skipInFlight = _optimisticSkipIndex != null;
+          final skipInFlight =
+              _optimisticSkipIndex != null || _suppressTransientNotPlaying;
           if (dartOwnsClip || skipInFlight) {
-            _emit(_snapshot.copyWith(isPlaying: false));
+            // Keep session state so the mini-player never vanishes mid-skip.
+            _emit(_snapshot.copyWith(isPlaying: _suppressTransientNotPlaying
+                ? true
+                : false));
           } else {
-            _emit(_snapshot.copyWith(
+            // True end of native clip — clear metadata so the bar can hide.
+            _emit(const PlaybackSnapshot(
               state: AppPlaybackState.activeIdle,
               isPlaying: false,
               modalVisible: false,
@@ -782,9 +791,18 @@ class PlaybackCoordinator {
   /// [WhisperAudioHandler.pause]. Preempt any in-flight skip and sync
   /// coordinator + native state without double-pausing ExoPlayer.
   Future<void> _handleNotificationPause() {
+    // Round 50: ignore MediaSession pause echoes triggered by ExoPlayer
+    // stop() during next/prev source swap.
+    if (_suppressTransientNotPlaying) {
+      if (kDebugMode) {
+        debugPrint('notification pause: ignored during skip latch');
+      }
+      return Future<void>.value();
+    }
     return _serializeTransport(
       (epoch) async {
         if (!_transportCurrent(epoch)) return;
+        if (_suppressTransientNotPlaying) return;
         if (_snapshot.state != AppPlaybackState.inactive &&
             !_systemDrivenPauseInFlight) {
           _userInitiatedPause = true;
@@ -997,21 +1015,45 @@ class PlaybackCoordinator {
   /// controls.
   Future<void> _guardedSkip({required bool next}) async {
     _primeOptimisticSkip(next);
-    // Latch until playerState reports playing:true (or user pauses).
-    // Clearing in `finally` after await let a late ready+false pause every
-    // other skip (QA: change+pause, change+play, alternate).
+    // Latch until we explicitly finish the skip as playing. MediaSession
+    // pause echoes from stop() must not win over next/prev.
     _suppressTransientNotPlaying = true;
+    _userInitiatedPause = false;
     try {
       await _serializeTransport(
         (epoch) => _skipPlaylistClip(epoch, next: next),
         preempt: true,
       );
-      if (_userInitiatedPause) return;
+      // Spotify contract: skip always leaves the new clip PLAYING.
+      if (_latestTransportPausesPlayback) return;
+      _userInitiatedPause = false;
       if (_snapshot.state == AppPlaybackState.manualPlaying ||
-          _snapshot.state == AppPlaybackState.scheduledPlaying) {
-        // Force a full UI refresh: title + playing. StreamBuilders keyed
-        // off clipTitle rebuild progress from the new clip.
-        _emit(_snapshot.copyWith(isPlaying: true));
+          _snapshot.state == AppPlaybackState.scheduledPlaying ||
+          _snapshot.clipTitle != null) {
+        try {
+          if (!_nativeOwnsPlayback &&
+              !NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
+            await _audio.resume();
+          }
+        } catch (e, st) {
+          if (kDebugMode) {
+            debugPrint('skip: force-resume failed: $e\n$st');
+          }
+        }
+        _emit(_snapshot.copyWith(
+          state: _snapshot.state == AppPlaybackState.scheduledPlaying ||
+                  _nativeOwnsPlayback
+              ? AppPlaybackState.scheduledPlaying
+              : AppPlaybackState.manualPlaying,
+          isPlaying: true,
+          modalVisible: false,
+        ));
+        // Native skips never hit Dart playerState — clear latch here.
+        // Dart skips keep the latch until playing:true (MediaSession echo).
+        if (_nativeOwnsPlayback ||
+            NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
+          _suppressTransientNotPlaying = false;
+        }
       }
     } catch (e, st) {
       if (kDebugMode) {
@@ -1280,31 +1322,21 @@ class PlaybackCoordinator {
         _snapshot.state == AppPlaybackState.scheduledPlaying) {
       final playing = state.playing;
       if (playing && _suppressTransientNotPlaying && !_userInitiatedPause) {
-        // Confirmed audible after skip — release the latch.
         _suppressTransientNotPlaying = false;
       }
       if (playing != _snapshot.isPlaying &&
           state.processingState != ProcessingState.completed) {
-        // Round 45: after an optimistic pause, ExoPlayer can still emit
-        // playing:true for a frame or two. Do not undo the user's pause.
         if (_userInitiatedPause && playing) {
           return;
         }
-        // Round 48/49: ignore ALL not-playing while the skip latch is
-        // armed — including ready+false after stop()/setAudioSource.
-        // That late event was the alternate pause/play bug.
-        if (!playing && !_userInitiatedPause && _suppressTransientNotPlaying) {
+        // Round 50: NEVER auto-pause the snapshot from player events.
+        // Pause is only via coordinator.pause() / notification pause.
+        // Player-driven false was the persistent "skip pauses the clip"
+        // bug (stop()/MediaSession echo during source swap).
+        if (!playing) {
           return;
         }
-        if (!playing && !_userInitiatedPause) {
-          final ps = state.processingState;
-          if (ps == ProcessingState.loading ||
-              ps == ProcessingState.buffering ||
-              ps == ProcessingState.idle) {
-            return;
-          }
-        }
-        _emit(_snapshot.copyWith(isPlaying: playing));
+        _emit(_snapshot.copyWith(isPlaying: true));
       }
     }
 

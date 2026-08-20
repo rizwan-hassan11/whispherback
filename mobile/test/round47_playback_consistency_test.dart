@@ -48,18 +48,29 @@ void main() {
     });
 
     test('showsMiniPlayer stays up for dartClipActive handoff', () {
-      final snap = const PlaybackSnapshot(
+      final withTitles = const PlaybackSnapshot(
         state: AppPlaybackState.activeIdle,
         clipTitle: 'Winter Time',
         playlistName: 'Library',
       );
-      expect(snap.showsMiniPlayer(), isFalse);
+      expect(withTitles.showsMiniPlayer(), isTrue,
+          reason: 'Titles keep the bar during activeIdle handoff.');
       expect(
-        snap.showsMiniPlayer(dartClipActive: true),
+        withTitles.showsMiniPlayer(dartClipActive: true),
         isTrue,
-        reason: 'Bar must stay visible while ExoPlayer still owns a clip.',
       );
-      expect(snap.showsMiniPlayer(nativeActive: true), isTrue);
+      expect(withTitles.showsMiniPlayer(nativeActive: true), isTrue);
+
+      final bareIdle =
+          const PlaybackSnapshot(state: AppPlaybackState.activeIdle);
+      expect(bareIdle.showsMiniPlayer(), isFalse);
+      expect(bareIdle.showsMiniPlayer(dartClipActive: true), isTrue);
+
+      final playing = const PlaybackSnapshot(
+        state: AppPlaybackState.manualPlaying,
+        clipTitle: 'A',
+      );
+      expect(playing.showsMiniPlayer(), isTrue);
     });
 
     test('playFile preload stays true and does not pause newer generation', () {
