@@ -137,6 +137,11 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
 
   String? _clipTitle;
 
+  /// True while [playFile] is mid source-swap. Transient `_player.stop()` must
+  /// not publish paused to the notification / lock screen — that made next/prev
+  /// look like pause (QA Round 48).
+  bool _sourceSwapInFlight = false;
+
   void Function()? onStopRequested;
   void Function()? onStopClipRequested;
   void Function()? onPlayRequested;
@@ -543,6 +548,7 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     _clipTitle = title;
     _playlistMode = playlistMode;
     if (!_keepAlive) _standalonePlayback = true;
+    _sourceSwapInFlight = swapping;
 
     final item = _clipMediaItem(
       path: path,
@@ -553,8 +559,8 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     mediaItem.add(item);
     queue.add([item]);
     _publishClipControls(
-      playing: swapping,
-      processing: swapping ? ProcessingState.loading : ProcessingState.loading,
+      playing: true,
+      processing: ProcessingState.loading,
     );
 
     if (!swapping) {
@@ -581,74 +587,82 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     // restarts the silence keep-alive and races the incoming setAudioSource.
     _startWatchdog?.cancel();
     _startWatchdog = null;
-    if (swapping) {
-      try {
-        await _player.stop();
-      } catch (_) {}
-    } else if (_player.processingState != ProcessingState.idle ||
-        _player.playing) {
-      try {
-        await _player.stop();
-      } catch (_) {}
-    } else if (_player.processingState == ProcessingState.loading ||
-        _player.processingState == ProcessingState.buffering) {
-      try {
-        await _player.stop();
-      } catch (_) {}
-    }
-
-    if (!swapping) {
-      await _player.setVolume(1);
-      await _player.setSpeed(1);
-      await _player.setLoopMode(LoopMode.off);
-    }
-    // CRITICAL: cap setAudioSource. The just_audio future can hang
-    // indefinitely if the underlying ExoPlayer / native MediaPlayer
-    // gets into a stuck state (observed on Samsung One UI after rapid
-    // record/import/play cycles). Without this cap the play-gate mutex in
-    // PlaybackCoordinator stays held forever and every subsequent tap
-    // queues behind a dead future — that is the QA report "after some
-    // time clips/playlists delete but don't play".
-    //
-    // Round 47: always preload local files. Round 45's preload:false on
-    // sourceSwap left duration/position streams empty so the mini-player
-    // stuck at 00:00 while audio played. Keep a shorter timeout on swaps.
-    final sourceTimeout =
-        swapping ? const Duration(seconds: 4) : const Duration(seconds: 8);
     try {
-      await _player
-          .setAudioSource(_clipFileSource(path), preload: true)
-          .timeout(sourceTimeout);
-    } on TimeoutException {
-      // The player is wedged. Force-stop so the next playFile can rebuild
-      // the source cleanly, and rethrow so the coordinator surfaces a
-      // decodeFailed snackbar instead of silently swallowing the failure.
-      try {
-        await _player.stop();
-      } catch (_) {}
-      rethrow;
-    }
-    if (playGen != _playFileGeneration) {
-      return;
-    }
-    onClipSessionChanged?.call();
-    await play();
-    if (playGen != _playFileGeneration) {
-      // Round 47: do NOT pause here — the newer playFile already owns
-      // the player. Pausing would stop the clip the user just skipped to.
-      return;
-    }
+      if (swapping) {
+        try {
+          await _player.stop();
+        } catch (_) {}
+      } else if (_player.processingState != ProcessingState.idle ||
+          _player.playing) {
+        try {
+          await _player.stop();
+        } catch (_) {}
+      } else if (_player.processingState == ProcessingState.loading ||
+          _player.processingState == ProcessingState.buffering) {
+        try {
+          await _player.stop();
+        } catch (_) {}
+      }
 
-    // Fire-and-forget watcher: if the native player never reaches a playable
-    // state within 5s, emit `onPlaybackStartFailure` so the coordinator can
-    // surface a snackbar. We deliberately do NOT block `playFile` on this —
-    // the previous design awaited a 2s deadline INSIDE `playFile`, which on
-    // slow Samsung devices threw spurious errors even for healthy clips,
-    // caused the playback gate to hold for 2s on real failures (blocking the
-    // next user tap), and locked the engine into failure backoff after the
-    // first scheduled fire. Now the watcher is decoupled: playback is
-    // launched immediately, and stuck-state detection happens out of band.
-    _scheduleStartWatchdog();
+      if (!swapping) {
+        await _player.setVolume(1);
+        await _player.setSpeed(1);
+        await _player.setLoopMode(LoopMode.off);
+      }
+      // CRITICAL: cap setAudioSource. The just_audio future can hang
+      // indefinitely if the underlying ExoPlayer / native MediaPlayer
+      // gets into a stuck state (observed on Samsung One UI after rapid
+      // record/import/play cycles). Without this cap the play-gate mutex in
+      // PlaybackCoordinator stays held forever and every subsequent tap
+      // queues behind a dead future — that is the QA report "after some
+      // time clips/playlists delete but don't play".
+      //
+      // Round 47: always preload local files. Round 45's preload:false on
+      // sourceSwap left duration/position streams empty so the mini-player
+      // stuck at 00:00 while audio played. Keep a shorter timeout on swaps.
+      final sourceTimeout =
+          swapping ? const Duration(seconds: 4) : const Duration(seconds: 8);
+      try {
+        await _player
+            .setAudioSource(_clipFileSource(path), preload: true)
+            .timeout(sourceTimeout);
+      } on TimeoutException {
+        // The player is wedged. Force-stop so the next playFile can rebuild
+        // the source cleanly, and rethrow so the coordinator surfaces a
+        // decodeFailed snackbar instead of silently swallowing the failure.
+        try {
+          await _player.stop();
+        } catch (_) {}
+        rethrow;
+      }
+      if (playGen != _playFileGeneration) {
+        return;
+      }
+      onClipSessionChanged?.call();
+      await play();
+      if (playGen != _playFileGeneration) {
+        // Round 47: do NOT pause here — the newer playFile already owns
+        // the player. Pausing would stop the clip the user just skipped to.
+        return;
+      }
+
+      // Fire-and-forget watcher: if the native player never reaches a playable
+      // state within 5s, emit `onPlaybackStartFailure` so the coordinator can
+      // surface a snackbar. We deliberately do NOT block `playFile` on this —
+      // the previous design awaited a 2s deadline INSIDE `playFile`, which on
+      // slow Samsung devices threw spurious errors even for healthy clips,
+      // caused the playback gate to hold for 2s on real failures (blocking the
+      // next user tap), and locked the engine into failure backoff after the
+      // first scheduled fire. Now the watcher is decoupled: playback is
+      // launched immediately, and stuck-state detection happens out of band.
+      _scheduleStartWatchdog();
+    } finally {
+      // Only the active generation clears the flag. A superseded playFile
+      // must leave it set so the newer swap keeps publishing "playing".
+      if (playGen == _playFileGeneration) {
+        _sourceSwapInFlight = false;
+      }
+    }
   }
 
   /// Outstanding watchdog for "play() called but processing state never
@@ -695,6 +709,7 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   /// audio_service session alive — only stops the ExoPlayer source swap.
   Future<void> cancelInFlightPlay() async {
     invalidateInFlightPlay();
+    _sourceSwapInFlight = false;
     if (!_playingClip &&
         _player.processingState != ProcessingState.loading &&
         _player.processingState != ProcessingState.buffering) {
@@ -1256,6 +1271,16 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   /// Broadcasts state to the system notification + lock screen (official pattern).
   void _broadcastState(PlaybackEvent event) {
     if (!_playingClip) return;
+    // Round 48: during source swap, ExoPlayer briefly reports not-playing
+    // after stop(). Publishing that paused the notification / lock-screen
+    // right as next/prev changed the title — "skip pauses the new clip".
+    if (_sourceSwapInFlight) {
+      _publishClipControls(
+        playing: true,
+        processing: ProcessingState.loading,
+      );
+      return;
+    }
     _publishClipControls(
       playing: _player.playing,
       processing: _player.processingState,

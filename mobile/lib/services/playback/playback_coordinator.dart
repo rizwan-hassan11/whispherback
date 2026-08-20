@@ -285,6 +285,11 @@ class PlaybackCoordinator {
     }());
   }
 
+  /// True while next/prev / clip play is swapping sources. Transient
+  /// ExoPlayer `playing:false` after stop() must not flip the mini-player
+  /// to paused or hide the bar (QA Round 48).
+  bool _suppressTransientNotPlaying = false;
+
   /// If a newer transport op superseded [epoch] after audio already started,
   /// honor the user's latest intent — but ONLY when that intent is pause /
   /// dismiss. Skip→skip must not pause the newer clip (Round 47).
@@ -965,11 +970,20 @@ class PlaybackCoordinator {
   /// controls.
   Future<void> _guardedSkip({required bool next}) async {
     _primeOptimisticSkip(next);
+    _suppressTransientNotPlaying = true;
     try {
       await _serializeTransport(
         (epoch) => _skipPlaylistClip(epoch, next: next),
         preempt: true,
       );
+      // Re-assert playing after swap so a raced playerState:false cannot
+      // leave next/prev looking paused.
+      if (_snapshot.state == AppPlaybackState.manualPlaying ||
+          _snapshot.state == AppPlaybackState.scheduledPlaying) {
+        if (!_snapshot.isPlaying && !_userInitiatedPause) {
+          _emit(_snapshot.copyWith(isPlaying: true));
+        }
+      }
     } catch (e, st) {
       if (kDebugMode) {
         debugPrint('skip${next ? 'Next' : 'Previous'} failed: $e\n$st');
@@ -980,6 +994,8 @@ class PlaybackCoordinator {
           clipTitle: _snapshot.clipTitle,
         ));
       }
+    } finally {
+      _suppressTransientNotPlaying = false;
     }
   }
 
@@ -1242,6 +1258,18 @@ class PlaybackCoordinator {
         // playing:true for a frame or two. Do not undo the user's pause.
         if (_userInitiatedPause && playing) {
           return;
+        }
+        // Round 48: next/prev source swap calls `_player.stop()` which
+        // emits playing:false. Syncing that made the first skip look like
+        // pause and let the mini-player disappear after a few taps.
+        if (!playing && !_userInitiatedPause) {
+          if (_suppressTransientNotPlaying) return;
+          final ps = state.processingState;
+          if (ps == ProcessingState.loading ||
+              ps == ProcessingState.buffering ||
+              ps == ProcessingState.idle) {
+            return;
+          }
         }
         _emit(_snapshot.copyWith(isPlaying: playing));
       }
@@ -1935,6 +1963,17 @@ class PlaybackCoordinator {
       }
       if (kDebugMode) {
         debugPrint('playClip: playFile failed: $e\n$st');
+      }
+      // Skip swaps must NOT call stop() — that emits activeIdle and hides
+      // the Spotify mini-player while the user is still tapping next/prev.
+      if (skipSnapshotEmit) {
+        if (!_errorController.isClosed) {
+          _errorController.add(PlaybackErrorEvent(
+            PlaybackErrorReason.decodeFailed,
+            clipTitle: clip.title,
+          ));
+        }
+        return;
       }
       // Roll back the optimistic snapshot and let the shell warn the user
       // instead of failing silently — this was the client-reported "recorded
