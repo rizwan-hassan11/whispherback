@@ -71,7 +71,13 @@ void main() {
           reason: 'OR-ing native.isPlaying with the snapshot re-lit the '
               'pause icon after the user tapped pause.');
       expect(src, contains('isPlaying: snapshot.isPlaying'));
-      expect(src, contains('final playing = snapshot.isPlaying;'));
+      // Round 50 renamed the local to displayPlaying; still snapshot-only.
+      expect(
+        src.contains('final displayPlaying = snapshot.isPlaying;') ||
+            src.contains('final playing = snapshot.isPlaying;'),
+        isTrue,
+        reason: 'Play/pause icon must follow coordinator snapshot only.',
+      );
     });
 
     test('native skip notifies Flutter and posts playClip after the UI update',
