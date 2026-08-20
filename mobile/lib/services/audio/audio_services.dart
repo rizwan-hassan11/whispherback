@@ -306,6 +306,9 @@ class AudioPlaybackService {
   Future<void> pause() => _handler.pause();
   Future<void> resume() => _handler.play();
 
+  /// Invalidates an in-flight playFile without stopping playback.
+  void invalidateInFlightPlay() => _handler.invalidateInFlightPlay();
+
   /// Stops an in-flight ExoPlayer source swap without tearing down the session.
   Future<void> cancelInFlightPlay() => _handler.cancelInFlightPlay();
 

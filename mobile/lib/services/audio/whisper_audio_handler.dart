@@ -680,12 +680,20 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   /// decides how to phrase the user-visible message.
   void Function(String? clipTitle)? onPlaybackStartFailure;
 
-  /// Aborts an in-flight [playFile] (e.g. pause preempted skip). Keeps the
-  /// audio_service session alive — only stops the ExoPlayer source swap.
-  Future<void> cancelInFlightPlay() async {
+  /// Invalidates an in-flight [playFile] without stopping a healthy clip.
+  /// Used when skip/play preempts a prior load — the new [playFile] owns the
+  /// ExoPlayer stop/swap. Stopping here made every next/prev sound like
+  /// pause and reset the scrubber to 0:00.
+  void invalidateInFlightPlay() {
     _playFileGeneration++;
     _startWatchdog?.cancel();
     _startWatchdog = null;
+  }
+
+  /// Aborts an in-flight [playFile] (e.g. pause preempted skip). Keeps the
+  /// audio_service session alive — only stops the ExoPlayer source swap.
+  Future<void> cancelInFlightPlay() async {
+    invalidateInFlightPlay();
     if (!_playingClip &&
         _player.processingState != ProcessingState.loading &&
         _player.processingState != ProcessingState.buffering) {

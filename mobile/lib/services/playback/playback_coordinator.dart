@@ -168,6 +168,11 @@ class PlaybackCoordinator {
   /// the clip".
   PlaybackSnapshot? _optimisticSkipSnapshot;
 
+  /// Index chosen by [_primeOptimisticSkip]. The skip body plays THIS index
+  /// instead of advancing again (double-advance made 2-clip queues wrap to
+  /// the same track and feel like pause/seek-0).
+  int? _optimisticSkipIndex;
+
   /// Sized for playFile's 8s setAudioSource cap plus native MethodChannel
   /// skip / pause round-trips.
   static const _transportBodyTimeout = Duration(seconds: 12);
@@ -180,14 +185,15 @@ class PlaybackCoordinator {
   /// abort (skip/play preempting a prior load):
   /// - Hard: pause native (cancels deferred prepare via skipGeneration) and
   ///   stop ExoPlayer load.
-  /// - Soft: cancel Dart in-flight playFile only. Never call pauseNative —
-  ///   that raced skipNative, bumped skipGeneration, and cancelled the clip
-  ///   the user just asked to play (next/prev felt dead or multi-second lag).
+  /// - Soft: invalidate Dart playFile generation only — never stop() and never
+  ///   pauseNative. Soft stop made every next/prev pause audio and reset the
+  ///   scrubber to 0; pauseNative raced skipNative and cancelled prepares.
   Future<void> _abortInFlightTransport(
       {required bool revertOptimisticSkip}) async {
     if (revertOptimisticSkip && _optimisticSkipSnapshot != null) {
       _emit(_optimisticSkipSnapshot!.copyWith(isPlaying: false));
       _optimisticSkipSnapshot = null;
+      _optimisticSkipIndex = null;
     }
     final nativeActive = _nativeOwnsPlayback ||
         NativeAlarmsBridge.instance.lastSnapshot.isNativeActive;
@@ -199,9 +205,15 @@ class PlaybackCoordinator {
       }
       return;
     }
-    try {
-      await _audio.cancelInFlightPlay();
-    } catch (_) {}
+    if (revertOptimisticSkip) {
+      try {
+        await _audio.cancelInFlightPlay();
+      } catch (_) {}
+    } else {
+      try {
+        _audio.invalidateInFlightPlay();
+      } catch (_) {}
+    }
   }
 
   Future<T> _serializeTransport<T>(
@@ -215,15 +227,10 @@ class PlaybackCoordinator {
       final abort = _abortInFlightTransport(
         revertOptimisticSkip: revertOptimisticSkip,
       );
-      if (revertOptimisticSkip) {
-        // Pause/dismiss: cut the line immediately; abort runs in parallel.
-        unawaited(abort);
-        previous = Future<void>.value();
-      } else {
-        // Skip/play: wait only for the cheap cancel — never for the previous
-        // body's setAudioSource (up to 8s). Soft abort does not pauseNative.
-        previous = abort.then((_) {}, onError: (Object _, StackTrace __) {});
-      }
+      // Soft abort is synchronous (generation bump only) — never wait on it.
+      // Hard abort (pause) cuts the line immediately while cancel runs parallel.
+      unawaited(abort);
+      previous = Future<void>.value();
     } else {
       previous = _transportGate;
     }
@@ -860,11 +867,13 @@ class PlaybackCoordinator {
     _userInitiatedPause = false;
     _playbackGeneration++;
     _optimisticSkipSnapshot = _snapshot;
+    _optimisticSkipIndex = null;
 
     final native = _nativeOwnsPlayback ||
         NativeAlarmsBridge.instance.lastSnapshot.isNativeActive;
     if (native) {
       final target = _resolveSkipTarget(next);
+      _optimisticSkipIndex = target?.index;
       _emit(_snapshot.copyWith(
         state: AppPlaybackState.scheduledPlaying,
         isPlaying: true,
@@ -883,6 +892,7 @@ class PlaybackCoordinator {
       return;
     }
 
+    _optimisticSkipIndex = target.index;
     final fromSchedule = _snapshot.state == AppPlaybackState.scheduledPlaying;
     if (_snapshot.playlistId == null) {
       _libraryIndex = target.index;
@@ -964,6 +974,7 @@ class PlaybackCoordinator {
     // mini-player and notification next/prev looked dead.
     if (_nativeOwnsPlayback ||
         NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
+      _optimisticSkipIndex = null;
       try {
         await NativeAlarmsBridge.instance.skipNative(next: next);
       } catch (e, st) {
@@ -984,14 +995,23 @@ class PlaybackCoordinator {
         // Single clip — restart from the top so the button still feels alive
         // instead of silently doing nothing.
         if (_libraryQueue.isEmpty) return;
+        _optimisticSkipIndex = null;
         await _audio.seek(Duration.zero);
         await _audio.resume();
         return;
       }
-      final currentIndex = _libraryIndex < 0 ? 0 : _libraryIndex;
-      final nextIndex = next
-          ? (currentIndex + 1) % _libraryQueue.length
-          : (currentIndex - 1 + _libraryQueue.length) % _libraryQueue.length;
+      // Prefer the index primed on the tap frame. Only re-compute when prime
+      // could not resolve (empty queue at tap time) — never advance twice.
+      final primed = _optimisticSkipIndex;
+      _optimisticSkipIndex = null;
+      final nextIndex = primed ??
+          (next
+              ? ((_libraryIndex < 0 ? 0 : _libraryIndex) + 1) %
+                  _libraryQueue.length
+              : ((_libraryIndex < 0 ? 0 : _libraryIndex) -
+                      1 +
+                      _libraryQueue.length) %
+                  _libraryQueue.length);
       _libraryIndex = nextIndex;
       final clip = _libraryQueue[nextIndex];
       await _playClipInternal(
@@ -1014,6 +1034,7 @@ class PlaybackCoordinator {
       // Single-clip playlist: replay from the top instead of stopping —
       // matches user expectation for a "next" tap on a one-track playlist.
       _playlistClipIndex = 0;
+      _optimisticSkipIndex = null;
       await _playClipAtIndex(
         playlistId,
         clips,
@@ -1030,6 +1051,7 @@ class PlaybackCoordinator {
     final fromSchedule = _snapshot.state == AppPlaybackState.scheduledPlaying;
 
     if (shuffle) {
+      _optimisticSkipIndex = null;
       // Lightweight shuffle skip: pick next via ShuffleEngine + sourceSwap.
       // Full `_playPlaylistInternal` re-hit DB, sleep/prayer checks, and
       // awaited notification refresh — that was multi-second next/prev lag.
@@ -1071,10 +1093,13 @@ class PlaybackCoordinator {
       return;
     }
 
-    final currentIndex = _playlistClipIndex ?? 0;
-    final nextIndex = next
-        ? (currentIndex + 1) % clips.length
-        : (currentIndex - 1 + clips.length) % clips.length;
+    // Prefer primed index; only advance here when prime had no cache yet.
+    final primed = _optimisticSkipIndex;
+    _optimisticSkipIndex = null;
+    final nextIndex = primed ??
+        (next
+            ? ((_playlistClipIndex ?? 0) + 1) % clips.length
+            : ((_playlistClipIndex ?? 0) - 1 + clips.length) % clips.length);
     _playlistClipIndex = nextIndex;
     // Walk forward/back from the target so a missing file never leaves the
     // mini-player stranded mid-skip (which looked like "next hid the bar").
