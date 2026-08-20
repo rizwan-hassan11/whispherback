@@ -600,17 +600,23 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
       await _player.setSpeed(1);
       await _player.setLoopMode(LoopMode.off);
     }
-    // CRITICAL: cap setAudioSource at 8 seconds. The just_audio future can
-    // hang indefinitely if the underlying ExoPlayer / native MediaPlayer
+    // CRITICAL: cap setAudioSource. The just_audio future can hang
+    // indefinitely if the underlying ExoPlayer / native MediaPlayer
     // gets into a stuck state (observed on Samsung One UI after rapid
     // record/import/play cycles). Without this cap the play-gate mutex in
     // PlaybackCoordinator stays held forever and every subsequent tap
     // queues behind a dead future — that is the QA report "after some
     // time clips/playlists delete but don't play".
+    //
+    // Round 45: on mid-session sourceSwap use preload:false so local
+    // files return as soon as ExoPlayer accepts the source — preload:true
+    // was waiting on buffer fill and made next/prev feel multi-second.
+    final sourceTimeout =
+        swapping ? const Duration(seconds: 4) : const Duration(seconds: 8);
     try {
       await _player
-          .setAudioSource(_clipFileSource(path), preload: true)
-          .timeout(const Duration(seconds: 8));
+          .setAudioSource(_clipFileSource(path), preload: !swapping)
+          .timeout(sourceTimeout);
     } on TimeoutException {
       // The player is wedged. Force-stop so the next playFile can rebuild
       // the source cleanly, and rethrow so the coordinator surfaces a
@@ -927,24 +933,34 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> play() async {
     if (!_playingClip) return;
 
-    // Round 15: each of these calls is independently try/caught so a
-    // single failure (e.g. audio focus revoked because we're rapidly
-    // toggling) cannot block the player.play() below or surface as
-    // an uncaught exception that crashes the activity. See the
-    // matching comment in `pause()` for the full failure mode.
-    try {
-      await _ensureAudioSession();
-    } catch (e, st) {
-      if (kDebugMode) {
-        debugPrint('handler.play: _ensureAudioSession failed: $e\n$st');
+    // Round 45: mid-clip resume — skip AudioSession churn. setActive +
+    // _ensureAudioSession on every pause→play added hundreds of ms and
+    // made the notification / mini-player play button feel dead.
+    final ps = _player.processingState;
+    final quickResume = ps == ProcessingState.ready ||
+        ps == ProcessingState.buffering ||
+        (ps == ProcessingState.completed);
+
+    if (!quickResume) {
+      // Round 15: each of these calls is independently try/caught so a
+      // single failure (e.g. audio focus revoked because we're rapidly
+      // toggling) cannot block the player.play() below or surface as
+      // an uncaught exception that crashes the activity. See the
+      // matching comment in `pause()` for the full failure mode.
+      try {
+        await _ensureAudioSession();
+      } catch (e, st) {
+        if (kDebugMode) {
+          debugPrint('handler.play: _ensureAudioSession failed: $e\n$st');
+        }
       }
-    }
-    try {
-      final session = await AudioSession.instance;
-      await session.setActive(true);
-    } catch (e, st) {
-      if (kDebugMode) {
-        debugPrint('handler.play: setActive failed: $e\n$st');
+      try {
+        final session = await AudioSession.instance;
+        await session.setActive(true);
+      } catch (e, st) {
+        if (kDebugMode) {
+          debugPrint('handler.play: setActive failed: $e\n$st');
+        }
       }
     }
 

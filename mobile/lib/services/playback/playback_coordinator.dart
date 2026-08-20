@@ -175,22 +175,33 @@ class PlaybackCoordinator {
   bool _transportCurrent(int epoch) => epoch == _transportEpoch;
 
   /// Stops an in-flight skip / playFile without tearing down the media session.
+  ///
+  /// [revertOptimisticSkip] distinguishes hard abort (pause/dismiss) from soft
+  /// abort (skip/play preempting a prior load):
+  /// - Hard: pause native (cancels deferred prepare via skipGeneration) and
+  ///   stop ExoPlayer load.
+  /// - Soft: cancel Dart in-flight playFile only. Never call pauseNative —
+  ///   that raced skipNative, bumped skipGeneration, and cancelled the clip
+  ///   the user just asked to play (next/prev felt dead or multi-second lag).
   Future<void> _abortInFlightTransport(
       {required bool revertOptimisticSkip}) async {
     if (revertOptimisticSkip && _optimisticSkipSnapshot != null) {
       _emit(_optimisticSkipSnapshot!.copyWith(isPlaying: false));
       _optimisticSkipSnapshot = null;
     }
-    if (_nativeOwnsPlayback ||
-        NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
-      try {
-        await NativeAlarmsBridge.instance.pauseNative();
-      } catch (_) {}
-    } else {
-      try {
-        await _audio.cancelInFlightPlay();
-      } catch (_) {}
+    final nativeActive = _nativeOwnsPlayback ||
+        NativeAlarmsBridge.instance.lastSnapshot.isNativeActive;
+    if (nativeActive) {
+      if (revertOptimisticSkip) {
+        try {
+          await NativeAlarmsBridge.instance.pauseNative();
+        } catch (_) {}
+      }
+      return;
     }
+    try {
+      await _audio.cancelInFlightPlay();
+    } catch (_) {}
   }
 
   Future<T> _serializeTransport<T>(
@@ -199,12 +210,23 @@ class PlaybackCoordinator {
     bool revertOptimisticSkip = false,
   }) {
     final epoch = ++_transportEpoch;
+    final Future<void> previous;
     if (preempt) {
-      unawaited(_abortInFlightTransport(
+      final abort = _abortInFlightTransport(
         revertOptimisticSkip: revertOptimisticSkip,
-      ));
+      );
+      if (revertOptimisticSkip) {
+        // Pause/dismiss: cut the line immediately; abort runs in parallel.
+        unawaited(abort);
+        previous = Future<void>.value();
+      } else {
+        // Skip/play: wait only for the cheap cancel — never for the previous
+        // body's setAudioSource (up to 8s). Soft abort does not pauseNative.
+        previous = abort.then((_) {}, onError: (Object _, StackTrace __) {});
+      }
+    } else {
+      previous = _transportGate;
     }
-    final previous = preempt ? Future<void>.value() : _transportGate;
     final completer = Completer<T>();
     _transportGate = previous
         .then((_) => null, onError: (Object _, StackTrace __) => null)
@@ -233,6 +255,21 @@ class PlaybackCoordinator {
       }
     });
     return completer.future;
+  }
+
+  /// Schedule notification refresh off the transport hot path so next/prev /
+  /// pause never wait on alarm-table rebuilds.
+  void _refreshScheduleNotificationsDeferred() {
+    unawaited(() async {
+      try {
+        await refreshScheduleNotifications?.call();
+      } catch (e, st) {
+        if (kDebugMode) {
+          debugPrint(
+              'PlaybackCoordinator: deferred schedule notif refresh failed: $e\n$st');
+        }
+      }
+    }());
   }
 
   /// If a newer transport op superseded [epoch] after audio already started,
@@ -982,19 +1019,55 @@ class PlaybackCoordinator {
         clips,
         0,
         fromSchedule: _snapshot.state == AppPlaybackState.scheduledPlaying,
+        transportEpoch: epoch,
       );
+      await _honorSupersededTransport(epoch);
       return;
     }
 
-    final playlist = await _playlists.getById(playlistId);
-    final shuffle = playlist?.shuffleEnabled ?? false;
+    // Prefer snapshot flags — avoid a SQLite getById on every next/prev tap.
+    final shuffle = _snapshot.shuffleEnabled;
     final fromSchedule = _snapshot.state == AppPlaybackState.scheduledPlaying;
 
     if (shuffle) {
-      // _skipPlaylistClip is called from inside an already-running play, so
-      // re-enter the internal (non-locking) path; the public playPlaylist
-      // would deadlock on the same gate.
-      await _playPlaylistInternal(playlistId, fromSchedule: fromSchedule);
+      // Lightweight shuffle skip: pick next via ShuffleEngine + sourceSwap.
+      // Full `_playPlaylistInternal` re-hit DB, sleep/prayer checks, and
+      // awaited notification refresh — that was multi-second next/prev lag.
+      final clip = _nextShuffledClip(playlistId, clips);
+      final idx = clips.indexWhere((c) => c.id == clip.id);
+      if (idx >= 0) _playlistClipIndex = idx;
+      try {
+        await _audio.playFile(
+          clip.filePath,
+          title: clip.title,
+          playlistName: _snapshot.playlistName,
+          subtitle: fromSchedule
+              ? RuntimeCopy.l10n.scheduledWhisper
+              : RuntimeCopy.l10n.nowPlaying,
+          playlistMode: true,
+          sourceSwap: true,
+        );
+      } catch (e, st) {
+        if (kDebugMode) {
+          debugPrint('skip shuffle playFile failed: $e\n$st');
+        }
+        await _honorSupersededTransport(epoch);
+        return;
+      }
+      _warmPlaylistNeighbors();
+      if (_transportCurrent(epoch)) {
+        _emit(_snapshot.copyWith(
+          state: fromSchedule
+              ? AppPlaybackState.scheduledPlaying
+              : AppPlaybackState.manualPlaying,
+          clipTitle: clip.title,
+          isPlaying: true,
+          durationMs: clip.durationMs,
+          modalVisible: false,
+        ));
+      }
+      _refreshScheduleNotificationsDeferred();
+      await _honorSupersededTransport(epoch);
       return;
     }
 
@@ -1010,6 +1083,7 @@ class PlaybackCoordinator {
       clips,
       nextIndex,
       fromSchedule: fromSchedule,
+      transportEpoch: epoch,
     );
     if (played == null && clips.isNotEmpty) {
       // Absolute fallback: restart the first playable clip so next never
@@ -1019,6 +1093,7 @@ class PlaybackCoordinator {
         clips,
         0,
         fromSchedule: fromSchedule,
+        transportEpoch: epoch,
       );
     }
     await _honorSupersededTransport(epoch);
@@ -1029,28 +1104,43 @@ class PlaybackCoordinator {
     List<AudioClip> clips,
     int index, {
     required bool fromSchedule,
+    int? transportEpoch,
   }) async {
     if (index < 0 || index >= clips.length) return;
+    if (transportEpoch != null && !_transportCurrent(transportEpoch)) return;
 
     final clip = clips[index];
     if (!_isPlayablePath(clip.filePath)) return;
 
-    final playlist = await _playlists.getById(playlistId);
+    // Hot path: reuse snapshot metadata instead of SQLite getById.
+    var playlistName = _snapshot.playlistName;
+    var shuffleEnabled = _snapshot.shuffleEnabled;
+    if (playlistName == null || playlistName.isEmpty) {
+      final playlist = await _playlists.getById(playlistId);
+      playlistName = playlist?.name;
+      shuffleEnabled = playlist?.shuffleEnabled ?? false;
+    }
+    if (transportEpoch != null && !_transportCurrent(transportEpoch)) return;
     _playbackGeneration++;
 
+    final swapping = _snapshot.state == AppPlaybackState.manualPlaying ||
+        _snapshot.state == AppPlaybackState.scheduledPlaying;
     try {
       await _audio.playFile(
         clip.filePath,
         title: clip.title,
-        playlistName: playlist?.name,
+        playlistName: playlistName,
         subtitle: fromSchedule
             ? RuntimeCopy.l10n.scheduledWhisper
             : RuntimeCopy.l10n.nowPlaying,
         playlistMode: clips.length > 1,
-        sourceSwap: _snapshot.state == AppPlaybackState.manualPlaying ||
-            _snapshot.state == AppPlaybackState.scheduledPlaying,
+        sourceSwap: swapping,
       );
     } catch (_) {
+      return;
+    }
+
+    if (transportEpoch != null && !_transportCurrent(transportEpoch)) {
       return;
     }
 
@@ -1062,15 +1152,15 @@ class PlaybackCoordinator {
             ? AppPlaybackState.scheduledPlaying
             : AppPlaybackState.manualPlaying,
         playlistId: playlistId,
-        playlistName: playlist?.name,
+        playlistName: playlistName,
         clipTitle: clip.title,
         isPlaying: true,
-        shuffleEnabled: playlist?.shuffleEnabled ?? false,
+        shuffleEnabled: shuffleEnabled,
         modalVisible: false,
         durationMs: clip.durationMs,
       ),
     );
-    await refreshScheduleNotifications?.call();
+    _refreshScheduleNotificationsDeferred();
   }
 
   Future<void> _deactivateFromNotification() async {
@@ -1103,6 +1193,11 @@ class PlaybackCoordinator {
       final playing = state.playing;
       if (playing != _snapshot.isPlaying &&
           state.processingState != ProcessingState.completed) {
+        // Round 45: after an optimistic pause, ExoPlayer can still emit
+        // playing:true for a frame or two. Do not undo the user's pause.
+        if (_userInitiatedPause && playing) {
+          return;
+        }
         _emit(_snapshot.copyWith(isPlaying: playing));
       }
     }
@@ -1252,11 +1347,23 @@ class PlaybackCoordinator {
     List<AudioClip> clips,
     int startIndex, {
     required bool fromSchedule,
+    int? transportEpoch,
   }) async {
-    final playlist = await _playlists.getById(playlistId);
+    var playlistName = _snapshot.playlistName;
+    var shuffleEnabled = _snapshot.shuffleEnabled;
+    if (playlistName == null || playlistName.isEmpty) {
+      final playlist = await _playlists.getById(playlistId);
+      playlistName = playlist?.name;
+      shuffleEnabled = playlist?.shuffleEnabled ?? false;
+    }
+    final swapping = _snapshot.state == AppPlaybackState.manualPlaying ||
+        _snapshot.state == AppPlaybackState.scheduledPlaying;
     final visited = <int>{};
     var index = startIndex;
     while (visited.add(index)) {
+      if (transportEpoch != null && !_transportCurrent(transportEpoch)) {
+        return null;
+      }
       if (index < 0 || index >= clips.length) break;
       final clip = clips[index];
       if (_isPlayablePath(clip.filePath)) {
@@ -1265,28 +1372,33 @@ class PlaybackCoordinator {
           await _audio.playFile(
             clip.filePath,
             title: clip.title,
-            playlistName: playlist?.name,
+            playlistName: playlistName,
             subtitle: fromSchedule
                 ? RuntimeCopy.l10n.scheduledWhisper
                 : RuntimeCopy.l10n.nowPlaying,
             playlistMode: clips.length > 1,
+            sourceSwap: swapping,
           );
+          if (transportEpoch != null && !_transportCurrent(transportEpoch)) {
+            return null;
+          }
           _playlistClipIndex = index;
+          _warmPlaylistNeighbors();
           _emit(
             _snapshot.copyWith(
               state: fromSchedule
                   ? AppPlaybackState.scheduledPlaying
                   : AppPlaybackState.manualPlaying,
               playlistId: playlistId,
-              playlistName: playlist?.name,
+              playlistName: playlistName,
               clipTitle: clip.title,
               isPlaying: true,
-              shuffleEnabled: playlist?.shuffleEnabled ?? false,
+              shuffleEnabled: shuffleEnabled,
               modalVisible: false,
               durationMs: clip.durationMs,
             ),
           );
-          await refreshScheduleNotifications?.call();
+          _refreshScheduleNotificationsDeferred();
           return index;
         } catch (_) {
           // Fall through to next index.
@@ -1796,15 +1908,9 @@ class PlaybackCoordinator {
       return;
     }
     // Best-effort: failure to refresh the schedule notifications must not
-    // crash the play tap. The notification will eventually self-correct on
-    // the next engine tick or app resume.
-    try {
-      await refreshScheduleNotifications?.call();
-    } catch (e, st) {
-      if (kDebugMode) {
-        debugPrint('playClip: schedule notif refresh failed: $e\n$st');
-      }
-    }
+    // crash the play tap. Keep it off the transport gate so skip/pause stay
+    // responsive.
+    _refreshScheduleNotificationsDeferred();
     if (transportEpoch != null) {
       await _honorSupersededTransport(transportEpoch);
     }
@@ -2075,6 +2181,15 @@ class PlaybackCoordinator {
           } else {
             await _audio.resume();
           }
+          return;
+        }
+
+        // Fast path: already in a play session (paused mid-clip). Resume
+        // ExoPlayer without re-running sleep/prayer GPS lookups — that was
+        // multi-hundred-ms lag on every pause→play tap.
+        if (_snapshot.state == AppPlaybackState.manualPlaying ||
+            _snapshot.state == AppPlaybackState.scheduledPlaying) {
+          await _audio.resume();
           return;
         }
 
