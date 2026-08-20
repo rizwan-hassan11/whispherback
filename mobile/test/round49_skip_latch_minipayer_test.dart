@@ -44,8 +44,9 @@ void main() {
       final idx = src.indexOf('void _onPlayerState(PlayerState state)');
       final end = src.indexOf('Future<void> _onClipCompleted(', idx);
       final body = src.substring(idx, end);
-      expect(body, contains('if (!playing) {\n          return;'));
-      expect(body, contains('_emit(_snapshot.copyWith(isPlaying: true))'));
+      // Round 51: transient false ignored only while skip latch is set.
+      expect(body, contains('if (_suppressTransientNotPlaying)'));
+      expect(body, contains('if (_userInitiatedPause)'));
     });
 
     test('handler clears sourceSwapInFlight when player is playing', () {
@@ -64,7 +65,7 @@ void main() {
       expect(bar, contains('final dartOwns = audio.currentPath != null'));
       expect(bar, contains('ValueKey<String>'));
       expect(bar, contains('key: progressKey'));
-      expect(bar, contains('displayPlaying = snapshot.isPlaying'));
+      expect(bar, contains('mediaSessionPlaying'));
       expect(bar, contains('audio.isPlayingClip || audio.isPlaying'));
     });
   });

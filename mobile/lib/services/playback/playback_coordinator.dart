@@ -799,6 +799,11 @@ class PlaybackCoordinator {
       }
       return Future<void>.value();
     }
+    // Round 51: in-app pause already flipped the snapshot. A second
+    // entry (legacy echo) must not preempt transport / revert skip titles.
+    if (_userInitiatedPause && !_snapshot.isPlaying) {
+      return Future<void>.value();
+    }
     return _serializeTransport(
       (epoch) async {
         if (!_transportCurrent(epoch)) return;
@@ -830,6 +835,10 @@ class PlaybackCoordinator {
   /// Lock-screen play after [WhisperAudioHandler.play] already resumed
   /// ExoPlayer — sync coordinator + native and cancel stale skips.
   Future<void> _handleNotificationPlay() {
+    // Round 51: in-app resume / playFile already owns the snapshot.
+    if (!_userInitiatedPause && _snapshot.isPlaying) {
+      return Future<void>.value();
+    }
     return _serializeTransport(
       (epoch) async {
         if (!_transportCurrent(epoch)) return;
@@ -1321,22 +1330,31 @@ class PlaybackCoordinator {
     if (_snapshot.state == AppPlaybackState.manualPlaying ||
         _snapshot.state == AppPlaybackState.scheduledPlaying) {
       final playing = state.playing;
-      if (playing && _suppressTransientNotPlaying && !_userInitiatedPause) {
-        _suppressTransientNotPlaying = false;
+
+      // Explicit user pause: confirm paused into the snapshot; never
+      // re-light isPlaying from a late playing:true (pre-pause race).
+      if (_userInitiatedPause) {
+        if (!playing && _snapshot.isPlaying) {
+          _emit(_snapshot.copyWith(isPlaying: false));
+        }
+        return;
       }
+
+      // Skip / source-swap latch: ignore transient playing:false from
+      // stop(); clear latch and sync true when the new clip is audible.
+      if (_suppressTransientNotPlaying) {
+        if (playing) {
+          _suppressTransientNotPlaying = false;
+          if (!_snapshot.isPlaying) {
+            _emit(_snapshot.copyWith(isPlaying: true));
+          }
+        }
+        return;
+      }
+
       if (playing != _snapshot.isPlaying &&
           state.processingState != ProcessingState.completed) {
-        if (_userInitiatedPause && playing) {
-          return;
-        }
-        // Round 50: NEVER auto-pause the snapshot from player events.
-        // Pause is only via coordinator.pause() / notification pause.
-        // Player-driven false was the persistent "skip pauses the clip"
-        // bug (stop()/MediaSession echo during source swap).
-        if (!playing) {
-          return;
-        }
-        _emit(_snapshot.copyWith(isPlaying: true));
+        _emit(_snapshot.copyWith(isPlaying: playing));
       }
     }
 

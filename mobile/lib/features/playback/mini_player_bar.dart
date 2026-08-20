@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui';
 
+import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,11 +12,13 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_icons.dart';
 import '../../core/theme/playlist_cover.dart';
 import '../../core/ux/tap_feedback.dart';
+import '../../domain/entities/playlist.dart';
 import '../../domain/playback/playback_state.dart';
 import '../../domain/playback/playlist_playback_badge.dart';
 import '../../l10n/app_localizations.dart';
 import '../../providers/playback_providers.dart';
 import '../../services/audio/audio_services.dart';
+import '../../services/playback/playback_coordinator.dart';
 import '../../services/scheduler/native_alarms_bridge.dart';
 
 /// True when progress must come from native MediaPlayer (scheduled fire),
@@ -65,6 +68,10 @@ void _safeCall(Future<void> Function() body, String tag) {
 }
 
 /// Compact now-playing bar above the bottom navigation (Spotify-style).
+///
+/// Round 51: title + play/pause follow the same live MediaSession streams
+/// as the system notification when Dart owns audio. Snapshot alone drifted
+/// (pause icon stuck, stale clip name) while the notification stayed correct.
 class MiniPlayerBar extends ConsumerWidget {
   const MiniPlayerBar({super.key});
 
@@ -74,13 +81,10 @@ class MiniPlayerBar extends ConsumerWidget {
     final snapshot = playback.valueOrNull;
     final coordinator = ref.read(playbackCoordinatorProvider);
     final audio = ref.read(audioPlaybackServiceProvider);
-    // Round 31: MUST watch the native provider so the bar rebuilds when
-    // AlarmManager starts MediaPlayer (prefs update → stateStream).
     final nativeAsync = ref.watch(nativePlaybackProvider);
     final native =
         nativeAsync.valueOrNull ?? NativeAlarmsBridge.instance.lastSnapshot;
 
-    // Keep coordinator / pause routing in sync with native reality.
     ref.listen<AsyncValue<NativePlaybackSnapshot>>(nativePlaybackProvider,
         (prev, next) {
       final n = next.valueOrNull;
@@ -88,13 +92,10 @@ class MiniPlayerBar extends ConsumerWidget {
       coordinator.applyNativePlaybackSnapshot(n);
     });
 
-    // Round 15/50: visibility — bar stays for the whole clip session.
     if (snapshot == null || snapshot.modalVisible) {
       return const SizedBox.shrink();
     }
     final nativeLive = native.isNativeActive;
-    // Match MainShell: keep session visible during source-swap gaps where
-    // isPlayingClip briefly flips while currentPath is still set.
     final dartClipActive = audio.currentPath != null &&
         (audio.isPlayingClip || audio.isPlaying);
     if (!snapshot.showsMiniPlayer(
@@ -104,11 +105,61 @@ class MiniPlayerBar extends ConsumerWidget {
       return const SizedBox.shrink();
     }
 
-    // Single display model: newest non-empty title wins. Prefer native when
-    // Dart has no clip path (scheduled MediaPlayer owns audio).
-    // Once showsMiniPlayer passed, NEVER shrink for missing titles — that
-    // made the Spotify bar vanish mid next/prev (QA: "invisible").
-    final dartOwns = audio.currentPath != null;
+    final dartOwns = audio.currentPath != null && !nativeLive;
+
+    return StreamBuilder<MediaItem?>(
+      stream: audio.mediaItemStream,
+      initialData: audio.mediaItem,
+      builder: (context, mediaSnap) {
+        return StreamBuilder<bool>(
+          stream: audio.playbackStateStream
+              .map((s) => s.playing)
+              .distinct(),
+          initialData: audio.mediaSessionPlaying,
+          builder: (context, playingSnap) {
+            return _MiniPlayerBody(
+              snapshot: snapshot,
+              native: native,
+              nativeLive: nativeLive,
+              dartOwns: dartOwns,
+              mediaItem: mediaSnap.data,
+              mediaSessionPlaying: playingSnap.data ?? false,
+              coordinator: coordinator,
+              audio: audio,
+              playlistsAsync: ref.watch(playlistsProvider),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+class _MiniPlayerBody extends StatelessWidget {
+  const _MiniPlayerBody({
+    required this.snapshot,
+    required this.native,
+    required this.nativeLive,
+    required this.dartOwns,
+    required this.mediaItem,
+    required this.mediaSessionPlaying,
+    required this.coordinator,
+    required this.audio,
+    required this.playlistsAsync,
+  });
+
+  final PlaybackSnapshot snapshot;
+  final NativePlaybackSnapshot native;
+  final bool nativeLive;
+  final bool dartOwns;
+  final MediaItem? mediaItem;
+  final bool mediaSessionPlaying;
+  final PlaybackCoordinator coordinator;
+  final AudioPlaybackService audio;
+  final AsyncValue<List<Playlist>> playlistsAsync;
+
+  @override
+  Widget build(BuildContext context) {
     final nativeTitle =
         (native.clipTitle != null && native.clipTitle!.trim().isNotEmpty)
             ? native.clipTitle!.trim()
@@ -119,42 +170,60 @@ class MiniPlayerBar extends ConsumerWidget {
             : null;
     final snapTitle = snapshot.clipTitle?.trim();
     final snapSubtitle = snapshot.playlistName?.trim();
+    final mediaTitle = mediaItem?.title.trim();
+    final mediaSubtitle = mediaItem?.album?.trim() ?? mediaItem?.artist?.trim();
+
+    // Dart owns: MediaItem (notification source) wins, then snapshot.
+    // Native owns: native prefs title wins.
     final title = dartOwns
-        ? (snapTitle?.isNotEmpty == true ? snapTitle : nativeTitle)
-        : (nativeTitle ?? snapTitle);
+        ? (mediaTitle?.isNotEmpty == true
+            ? mediaTitle
+            : (snapTitle?.isNotEmpty == true ? snapTitle : nativeTitle))
+        : (nativeTitle ??
+            (mediaTitle?.isNotEmpty == true ? mediaTitle : snapTitle));
     final subtitle = dartOwns
-        ? (snapSubtitle?.isNotEmpty == true ? snapSubtitle : nativeSubtitle)
-        : (nativeSubtitle ?? snapSubtitle);
+        ? (snapSubtitle?.isNotEmpty == true
+            ? snapSubtitle
+            : (mediaSubtitle?.isNotEmpty == true
+                ? mediaSubtitle
+                : nativeSubtitle))
+        : (nativeSubtitle ?? snapSubtitle ?? mediaSubtitle);
+
     final displayTitle = (title != null && title.isNotEmpty)
         ? title
         : (subtitle != null && subtitle.isNotEmpty ? subtitle : 'Now playing');
     final displaySubtitle = (subtitle != null && subtitle.isNotEmpty)
         ? subtitle
         : 'WhisperBack';
-    // Play icon follows coordinator snapshot only (skip forces isPlaying true).
-    final displayPlaying = snapshot.isPlaying;
+
+    // Play icon: MediaSession when Dart owns (matches notification);
+    // coordinator/native snapshot when scheduled MediaPlayer owns audio.
+    final displayPlaying = dartOwns
+        ? mediaSessionPlaying
+        : (nativeLive ? native.isPlaying : snapshot.isPlaying);
+
     final progressKey = ValueKey<String>(
-      'mini-$displayTitle-${snapshot.durationMs}-${dartOwns ? 'd' : 'n'}',
+      'mini-${mediaItem?.id ?? displayTitle}-${snapshot.durationMs}-'
+      '${dartOwns ? 'd' : 'n'}',
     );
     final l10n = context.l10n;
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final canSkip = coordinator.canSkipClips;
     final playlistId = snapshot.playlistId;
-    final coverMeta = playlistId == null
-        ? null
-        : ref.watch(
-            playlistsProvider.select((async) {
-              final list = async.valueOrNull;
-              if (list == null) return null;
-              final idx = list.indexWhere((p) => p.id == playlistId);
-              if (idx < 0) return null;
-              return PlaylistCoverMeta(
-                paletteIndex: idx,
-                hasSchedule: list[idx].hasSchedule,
-              );
-            }),
+    PlaylistCoverMeta? coverMeta;
+    if (playlistId != null) {
+      final list = playlistsAsync.valueOrNull;
+      if (list != null) {
+        final idx = list.indexWhere((p) => p.id == playlistId);
+        if (idx >= 0) {
+          coverMeta = PlaylistCoverMeta(
+            paletteIndex: idx,
+            hasSchedule: list[idx].hasSchedule,
           );
+        }
+      }
+    }
     List<Color>? coverColors;
     var hasSchedule = false;
     if (coverMeta != null) {
@@ -188,7 +257,7 @@ class MiniPlayerBar extends ConsumerWidget {
             child: Row(
               children: [
                 _MiniCover(
-                  isPlaying: snapshot.isPlaying,
+                  isPlaying: displayPlaying,
                   onTap: coordinator.showModal,
                   colors: coverColors,
                   hasSchedule: hasSchedule,
@@ -216,21 +285,6 @@ class MiniPlayerBar extends ConsumerWidget {
                           ),
                           StreamBuilder<Duration?>(
                             key: progressKey,
-                            // Round 27: scheduled clips play on the native
-                            // MediaPlayer, not just_audio. The Dart player's
-                            // durationStream still reports the 10-second
-                            // silence keep-alive file — which made the
-                            // mini-player show "0:03 / 0:10" and restart the
-                            // scrubber every 10s. When we're in a native
-                            // scheduled session (no Dart clip path), drive
-                            // progress from the native bridge instead.
-                            //
-                            // Round 47: do NOT OR bare `nativeLive` — stale
-                            // nativeActive with positionMs=0 stuck the bar
-                            // at 00:00 while ExoPlayer was actually playing.
-                            //
-                            // Round 49: ValueKey on clip title forces a fresh
-                            // StreamBuilder when next/prev changes the clip.
                             stream: _useNativeProgress(snapshot, audio)
                                 ? NativeAlarmsBridge.instance.stateStream
                                     .map<Duration?>((n) =>
@@ -326,12 +380,6 @@ class MiniPlayerBar extends ConsumerWidget {
                   color: isDark
                       ? AppColors.muted
                       : AppColors.ink.withValues(alpha: 0.55),
-                  // CRITICAL: cross icon pauses + hides — does NOT call
-                  // `stop()`. `stop()` tears down the audio_service FG
-                  // service which on Samsung / Vivo / Xiaomi also kills
-                  // the host Activity. QA report "tapping cross closes
-                  // the app" was that OEM activity-kill. dismissPlayer
-                  // keeps audio_service bound.
                   onPressed: () =>
                       _safeCall(coordinator.dismissPlayer, 'dismiss'),
                 ),

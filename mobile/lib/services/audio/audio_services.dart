@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:path/path.dart' as p;
@@ -291,20 +292,31 @@ class AudioPlaybackService {
     bool sourceSwap = false,
   }) async {
     _currentPath = path;
-    await _handler.playFile(
-      path,
-      title: title,
-      playlistName: playlistName,
-      subtitle: subtitle,
-      playlistMode: playlistMode,
-      sourceSwap: sourceSwap,
+    await _handler.runFromAppTransport(
+      () => _handler.playFile(
+        path,
+        title: title,
+        playlistName: playlistName,
+        subtitle: subtitle,
+        playlistMode: playlistMode,
+        sourceSwap: sourceSwap,
+      ),
     );
   }
 
   Future<void> warmFileCache(String path) => _handler.warmFileCache(path);
 
-  Future<void> pause() => _handler.pause();
-  Future<void> resume() => _handler.play();
+  Future<void> pause() => _handler.runFromAppTransport(_handler.pause);
+  Future<void> resume() => _handler.runFromAppTransport(_handler.play);
+
+  /// Same MediaItem the lock-screen / notification card uses — drive the
+  /// in-app mini-player title from this so it cannot drift from the card.
+  Stream<MediaItem?> get mediaItemStream => _handler.mediaItem;
+  MediaItem? get mediaItem => _handler.mediaItem.value;
+
+  /// audio_service playback flag (notification play/pause icon source).
+  Stream<PlaybackState> get playbackStateStream => _handler.playbackState;
+  bool get mediaSessionPlaying => _handler.playbackState.value.playing;
 
   /// Invalidates an in-flight playFile without stopping playback.
   void invalidateInFlightPlay() => _handler.invalidateInFlightPlay();

@@ -58,8 +58,9 @@ void main() {
       final idx = src.indexOf('void _onPlayerState(PlayerState state)');
       final end = src.indexOf('Future<void> _onClipCompleted(', idx);
       final body = src.substring(idx, end);
-      expect(body, contains('if (!playing) {\n          return;'));
-      expect(body, contains('_emit(_snapshot.copyWith(isPlaying: true))'));
+      // Round 51: skip latch still swallows transient false; user pause syncs.
+      expect(body, contains('if (_suppressTransientNotPlaying)'));
+      expect(body, isNot(contains('NEVER auto-pause')));
     });
 
     test('manualPlaying session always shows mini-player', () {
@@ -79,7 +80,7 @@ void main() {
         isFalse,
         reason: 'Title-gap shrink made the bar invisible mid skip.',
       );
-      expect(bar, contains("displayTitle = (title != null && title.isNotEmpty)"));
+      expect(bar, contains('mediaItemStream'));
       expect(bar, contains('audio.isPlayingClip || audio.isPlaying'));
     });
   });

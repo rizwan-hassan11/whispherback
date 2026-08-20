@@ -142,6 +142,24 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   /// look like pause (QA Round 48).
   bool _sourceSwapInFlight = false;
 
+  /// Depth of pause/play calls that already entered through the coordinator /
+  /// [AudioPlaybackService]. MediaSession still invokes [pause]/[play] with
+  /// depth 0 — those must notify the coordinator. In-app taps must NOT echo
+  /// back via [onPauseRequested]/[onPlayRequested] (that preempted transport,
+  /// reverted skip titles, and left the mini-player icon/title stale while
+  /// the notification stayed correct).
+  int _appTransportDepth = 0;
+
+  /// Runs [action] without firing coordinator transport callbacks.
+  Future<T> runFromAppTransport<T>(Future<T> Function() action) async {
+    _appTransportDepth++;
+    try {
+      return await action();
+    } finally {
+      _appTransportDepth--;
+    }
+  }
+
   void Function()? onStopRequested;
   void Function()? onStopClipRequested;
   void Function()? onPlayRequested;
@@ -1007,9 +1025,12 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
 
     try {
       await _player.play();
-      try {
-        onPlayRequested?.call();
-      } catch (_) {}
+      // Only MediaSession / external play should ping the coordinator.
+      if (_appTransportDepth == 0) {
+        try {
+          onPlayRequested?.call();
+        } catch (_) {}
+      }
     } catch (e, st) {
       if (kDebugMode) {
         debugPrint('handler.play: _player.play failed (handled): $e\n$st');
@@ -1099,9 +1120,14 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
         debugPrint('handler.pause: _player.pause failed (handled): $e\n$st');
       }
     }
-    try {
-      onPauseRequested?.call();
-    } catch (_) {}
+    // Only MediaSession / external pause should ping the coordinator.
+    // In-app coordinator.pause → audio.pause must not re-enter
+    // `_handleNotificationPause` (preempt + revertOptimisticSkip).
+    if (_appTransportDepth == 0) {
+      try {
+        onPauseRequested?.call();
+      } catch (_) {}
+    }
   }
 
   @override
