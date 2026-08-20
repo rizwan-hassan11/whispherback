@@ -96,16 +96,6 @@ class MiniPlayerBar extends ConsumerWidget {
       return const SizedBox.shrink();
     }
     final nativeLive = native.isNativeActive;
-    final dartClipActive = audio.currentPath != null &&
-        (audio.isPlayingClip || audio.isPlaying);
-    if (!snapshot.showsMiniPlayer(
-      nativeActive: nativeLive,
-      dartClipActive: dartClipActive,
-    )) {
-      return const SizedBox.shrink();
-    }
-
-    final dartOwns = audio.currentPath != null && !nativeLive;
 
     return StreamBuilder<MediaItem?>(
       stream: audio.mediaItemStream,
@@ -117,12 +107,25 @@ class MiniPlayerBar extends ConsumerWidget {
               .distinct(),
           initialData: audio.mediaSessionPlaying,
           builder: (context, playingSnap) {
+            final mediaItem = mediaSnap.data;
+            final dartClipActive = audio.currentPath != null &&
+                (audio.isPlayingClip || audio.isPlaying);
+            final hasMediaSessionClip =
+                audio.isPlayingClip && mediaItem != null;
+            if (!snapshot.showsMiniPlayer(
+              nativeActive: nativeLive,
+              dartClipActive: dartClipActive,
+              hasMediaSessionClip: hasMediaSessionClip,
+            )) {
+              return const SizedBox.shrink();
+            }
+            final dartOwns = audio.currentPath != null && !nativeLive;
             return _MiniPlayerBody(
               snapshot: snapshot,
               native: native,
               nativeLive: nativeLive,
               dartOwns: dartOwns,
-              mediaItem: mediaSnap.data,
+              mediaItem: mediaItem,
               mediaSessionPlaying: playingSnap.data ?? false,
               coordinator: coordinator,
               audio: audio,

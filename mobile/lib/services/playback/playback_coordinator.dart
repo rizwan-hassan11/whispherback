@@ -372,27 +372,28 @@ class PlaybackCoordinator {
     };
     // Soft-fail: if `playFile` returns successfully but the native player
     // sits in `idle` / `loading` for >5s without ever reaching a playable
-    // state, the handler fires this callback. We surface a snackbar AND
-    // tear down the optimistic snapshot so the user doesn't see a
-    // mini-player claiming to play when the audio session is wedged.
-    // The teardown is fired-and-forgotten: failure to clean up never
-    // re-throws to the caller.
+    // state, the handler fires this callback. Surface a snackbar ONLY —
+    // never call stop(). stop() emitted activeIdle and hid the Spotify
+    // mini-player while the notification card (and often the audio) kept
+    // running; tapping notification play brought the bar back (QA Round 52).
     _audio.onPlaybackStartFailure = (title) {
       if (_errorController.isClosed) return;
+      if (_userInitiatedPause) return;
+      if (_suppressTransientNotPlaying) return;
+      // Still audibly healthy — ignore a stale watchdog.
+      if (_audio.isPlayingClip && _audio.isPlaying) return;
+      if (_nativeOwnsPlayback) return;
       _errorController.add(PlaybackErrorEvent(
         PlaybackErrorReason.decodeFailed,
         clipTitle: title,
       ));
-      // Only roll the snapshot back if THIS clip is still the active
-      // one — by the time the 5s watchdog fires the user may have
-      // already tapped another clip that started fine.
-      final still = _snapshot.isPlaying && (_snapshot.clipTitle == title);
-      if (still) {
-        unawaited(() async {
-          try {
-            await stop();
-          } catch (_) {}
-        }());
+      // Keep the session (manualPlaying + titles) so the bar stays up;
+      // only clear the playing flag so the icon matches reality.
+      if (_snapshot.state == AppPlaybackState.manualPlaying ||
+          _snapshot.state == AppPlaybackState.scheduledPlaying) {
+        if (_snapshot.isPlaying) {
+          _emit(_snapshot.copyWith(isPlaying: false));
+        }
       }
     };
     _emit(
@@ -665,7 +666,9 @@ class PlaybackCoordinator {
         // next clip was still audible. Keep scheduledPlaying (just mark
         // not playing) unless Dart has no clip and no skip is in flight.
         if (_snapshot.state == AppPlaybackState.scheduledPlaying) {
-          final dartOwnsClip = _audio.currentPath != null;
+          final dartOwnsClip = _audio.currentPath != null ||
+              _audio.isPlayingClip ||
+              _audio.mediaItem != null;
           final skipInFlight =
               _optimisticSkipIndex != null || _suppressTransientNotPlaying;
           if (dartOwnsClip || skipInFlight) {
@@ -1068,7 +1071,22 @@ class PlaybackCoordinator {
       if (kDebugMode) {
         debugPrint('skip${next ? 'Next' : 'Previous'} failed: $e\n$st');
       }
-      if (!_errorController.isClosed) {
+      // Keep the Spotify bar up even when a swap times out — audio /
+      // MediaSession often still owns the previous or new clip.
+      if (_snapshot.state != AppPlaybackState.manualPlaying &&
+          _snapshot.state != AppPlaybackState.scheduledPlaying &&
+          (_snapshot.clipTitle != null || _audio.currentPath != null)) {
+        _emit(_snapshot.copyWith(
+          state: AppPlaybackState.manualPlaying,
+          modalVisible: false,
+        ));
+      }
+      // Don't spam "Playback failed" when the session is still healthy.
+      final stillLive = _audio.isPlayingClip ||
+          _audio.isPlaying ||
+          _nativeOwnsPlayback ||
+          NativeAlarmsBridge.instance.lastSnapshot.isNativeActive;
+      if (!stillLive && !_errorController.isClosed) {
         _errorController.add(PlaybackErrorEvent(
           PlaybackErrorReason.decodeFailed,
           clipTitle: _snapshot.clipTitle,

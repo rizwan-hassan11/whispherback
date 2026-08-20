@@ -635,23 +635,29 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
       // queues behind a dead future — that is the QA report "after some
       // time clips/playlists delete but don't play".
       //
-      // Round 47: always preload local files. Round 45's preload:false on
-      // sourceSwap left duration/position streams empty so the mini-player
-      // stuck at 00:00 while audio played. Keep a shorter timeout on swaps.
-      final sourceTimeout =
-          swapping ? const Duration(seconds: 4) : const Duration(seconds: 8);
+      // Round 52: on rapid next/prev, 4s was too aggressive on OEM
+      // ExoPlayer and threw TimeoutException → "Playback failed" while
+      // audio often continued. Give swaps the same budget as cold play.
+      const sourceTimeout = Duration(seconds: 8);
       try {
         await _player
             .setAudioSource(_clipFileSource(path), preload: true)
             .timeout(sourceTimeout);
       } on TimeoutException {
-        // The player is wedged. Force-stop so the next playFile can rebuild
-        // the source cleanly, and rethrow so the coordinator surfaces a
-        // decodeFailed snackbar instead of silently swallowing the failure.
+        // One retry after a hard stop — many Samsung devices recover.
         try {
           await _player.stop();
         } catch (_) {}
-        rethrow;
+        try {
+          await _player
+              .setAudioSource(_clipFileSource(path), preload: true)
+              .timeout(const Duration(seconds: 6));
+        } on TimeoutException {
+          try {
+            await _player.stop();
+          } catch (_) {}
+          rethrow;
+        }
       }
       if (playGen != _playFileGeneration) {
         return;
@@ -748,13 +754,18 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
 
   void _scheduleStartWatchdog() {
     _startWatchdog?.cancel();
+    final expectedGen = _playFileGeneration;
     final expectedTitle = _clipTitle;
     _startWatchdog = Timer(const Duration(seconds: 5), () {
-      // If the player did reach `ready` / `buffering` / `completed` or is
-      // actually playing, we're fine — no need to alarm the user. This
-      // catches the genuinely stuck case (audio focus denied, decoder
-      // crash, content URI revoked between picker and play).
+      // Superseded by a newer playFile / pause / cancel.
+      if (expectedGen != _playFileGeneration) return;
       if (!_playingClip) return;
+      // Paused clips are healthy — never treat pause as start failure.
+      if (!_player.playing &&
+          (_player.processingState == ProcessingState.ready ||
+              _player.processingState == ProcessingState.completed)) {
+        return;
+      }
       final ps = _player.processingState;
       if (ps == ProcessingState.ready ||
           ps == ProcessingState.buffering ||
@@ -762,7 +773,7 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
         return;
       }
       if (_player.playing) return;
-      // Still in `idle` or `loading` after 5s — surface as a soft warning.
+      // Still in `idle` or `loading` after 5s — soft warning only.
       onPlaybackStartFailure?.call(expectedTitle);
     });
   }
@@ -1099,6 +1110,12 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
       playing: false,
       processing: _player.processingState,
     );
+
+    // Round 52: a pause mid-load left the start watchdog armed. 5s later it
+    // fired onPlaybackStartFailure → coordinator.stop() → mini-player vanished
+    // while the notification card still showed the paused clip.
+    _startWatchdog?.cancel();
+    _startWatchdog = null;
 
     // Round 15 hardening: any failure from `_player.pause()` MUST be
     // swallowed locally. On Samsung One UI + just_audio, calling

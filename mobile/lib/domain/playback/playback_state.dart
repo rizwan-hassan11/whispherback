@@ -51,12 +51,13 @@ class PlaybackSnapshot extends Equatable {
   /// Shared by [MainShell] and [MiniPlayerBar] so layout reserve and
   /// visibility never disagree.
   ///
-  /// Contract (Round 50): the bar stays visible for the whole clip session
+  /// Contract (Round 50/52): the bar stays visible for the whole clip session
   /// (playing or paused) until dismiss/stop/inactive. It must never vanish
-  /// mid next/prev or while audio is still owned.
+  /// mid next/prev, after pause, or while MediaSession still owns a clip.
   bool showsMiniPlayer({
     bool nativeActive = false,
     bool dartClipActive = false,
+    bool hasMediaSessionClip = false,
   }) {
     if (modalVisible) return false;
     if (state == AppPlaybackState.inactive) return false;
@@ -64,7 +65,9 @@ class PlaybackSnapshot extends Equatable {
         state == AppPlaybackState.scheduledPlaying) {
       return true;
     }
-    if (nativeActive || dartClipActive || isPlaying) return true;
+    if (nativeActive || dartClipActive || hasMediaSessionClip || isPlaying) {
+      return true;
+    }
     if (clipTitle != null || playlistName != null) return true;
     return false;
   }
