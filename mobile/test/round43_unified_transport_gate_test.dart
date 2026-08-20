@@ -41,16 +41,16 @@ void main() {
 
     test('PlaybackSnapshot.showsMiniPlayer drives shell + bar visibility', () {
       final src = _read('lib/domain/playback/playback_state.dart');
-      expect(
-          src, contains('bool showsMiniPlayer({bool nativeActive = false})'));
+      expect(src, contains('bool showsMiniPlayer({'));
+      expect(src, contains('bool dartClipActive = false'));
 
       final shell = _read('lib/core/widgets/main_shell.dart');
-      expect(shell,
-          contains('showsMiniPlayer(nativeActive: native.isNativeActive)'));
+      expect(shell, contains('showsMiniPlayer('));
+      expect(shell, contains('dartClipActive:'));
 
       final bar = _read('lib/features/playback/mini_player_bar.dart');
-      expect(
-          bar, contains('snapshot.showsMiniPlayer(nativeActive: nativeLive)'));
+      expect(bar, contains('snapshot.showsMiniPlayer('));
+      expect(bar, contains('dartClipActive:'));
     });
   });
 }

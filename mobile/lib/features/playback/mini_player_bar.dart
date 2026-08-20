@@ -95,7 +95,12 @@ class MiniPlayerBar extends ConsumerWidget {
       return const SizedBox.shrink();
     }
     final nativeLive = native.isNativeActive;
-    if (!snapshot.showsMiniPlayer(nativeActive: nativeLive)) {
+    final dartClipActive =
+        audio.currentPath != null && (audio.isPlayingClip || audio.isPlaying);
+    if (!snapshot.showsMiniPlayer(
+      nativeActive: nativeLive,
+      dartClipActive: dartClipActive,
+    )) {
       return const SizedBox.shrink();
     }
     final title = snapshot.clipTitle ?? native.clipTitle;
@@ -192,29 +197,29 @@ class MiniPlayerBar extends ConsumerWidget {
                             // scrubber every 10s. When we're in a native
                             // scheduled session (no Dart clip path), drive
                             // progress from the native bridge instead.
-                            stream: _useNativeProgress(snapshot, audio) ||
-                                    nativeLive
+                            //
+                            // Round 47: do NOT OR bare `nativeLive` — stale
+                            // nativeActive with positionMs=0 stuck the bar
+                            // at 00:00 while ExoPlayer was actually playing.
+                            stream: _useNativeProgress(snapshot, audio)
                                 ? NativeAlarmsBridge.instance.stateStream
                                     .map<Duration?>((n) =>
                                         Duration(milliseconds: n.positionMs))
                                 : audio.positionStream,
-                            initialData: _useNativeProgress(snapshot, audio) ||
-                                    nativeLive
+                            initialData: _useNativeProgress(snapshot, audio)
                                 ? Duration(
                                     milliseconds: NativeAlarmsBridge
                                         .instance.lastSnapshot.positionMs)
                                 : null,
                             builder: (context, posSnap) {
                               return StreamBuilder<Duration?>(
-                                stream: _useNativeProgress(snapshot, audio) ||
-                                        nativeLive
+                                stream: _useNativeProgress(snapshot, audio)
                                     ? NativeAlarmsBridge.instance.stateStream
                                         .map<Duration?>((n) => Duration(
                                             milliseconds: n.durationMs))
                                     : audio.durationStream,
                                 initialData:
-                                    _useNativeProgress(snapshot, audio) ||
-                                            nativeLive
+                                    _useNativeProgress(snapshot, audio)
                                         ? Duration(
                                             milliseconds: NativeAlarmsBridge
                                                 .instance
@@ -226,12 +231,10 @@ class MiniPlayerBar extends ConsumerWidget {
                                   final dur = _resolveDisplayDuration(
                                     snapshot: snapshot,
                                     streamDuration: durSnap.data,
-                                    native:
-                                        _useNativeProgress(snapshot, audio) ||
-                                                nativeLive
-                                            ? NativeAlarmsBridge
-                                                .instance.lastSnapshot
-                                            : null,
+                                    native: _useNativeProgress(snapshot, audio)
+                                        ? NativeAlarmsBridge
+                                            .instance.lastSnapshot
+                                        : null,
                                   );
                                   final text = dur.inMilliseconds > 0
                                       ? '${_fmt(pos)} / ${_fmt(dur)}'

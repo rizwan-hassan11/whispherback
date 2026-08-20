@@ -177,6 +177,10 @@ class PlaybackCoordinator {
   /// skip / pause round-trips.
   static const _transportBodyTimeout = Duration(seconds: 12);
 
+  /// True when the newest transport op is pause/dismiss. Used so a
+  /// superseded skip body does not pause the clip the user just skipped to.
+  bool _latestTransportPausesPlayback = false;
+
   bool _transportCurrent(int epoch) => epoch == _transportEpoch;
 
   /// Stops an in-flight skip / playFile without tearing down the media session.
@@ -220,8 +224,10 @@ class PlaybackCoordinator {
     Future<T> Function(int epoch) body, {
     bool preempt = false,
     bool revertOptimisticSkip = false,
+    bool pausesPlayback = false,
   }) {
     final epoch = ++_transportEpoch;
+    _latestTransportPausesPlayback = pausesPlayback;
     final Future<void> previous;
     if (preempt) {
       final abort = _abortInFlightTransport(
@@ -280,9 +286,11 @@ class PlaybackCoordinator {
   }
 
   /// If a newer transport op superseded [epoch] after audio already started,
-  /// honor the user's latest intent (usually pause).
+  /// honor the user's latest intent — but ONLY when that intent is pause /
+  /// dismiss. Skip→skip must not pause the newer clip (Round 47).
   Future<void> _honorSupersededTransport(int epoch) async {
     if (_transportCurrent(epoch)) return;
+    if (!_latestTransportPausesPlayback) return;
     _userInitiatedPause = true;
     _emit(_snapshot.copyWith(isPlaying: false));
     if (_nativeOwnsPlayback ||
@@ -632,12 +640,23 @@ class PlaybackCoordinator {
         // Don't blow away the snapshot if the Dart side has since started
         // its own clip (e.g. user tapped Play); we only roll back our own
         // scheduledPlaying frame.
+        //
+        // Round 47: MediaPlayer often goes briefly idle between skip
+        // prepares. Demoting to activeIdle hid the mini-player while the
+        // next clip was still audible. Keep scheduledPlaying (just mark
+        // not playing) unless Dart has no clip and no skip is in flight.
         if (_snapshot.state == AppPlaybackState.scheduledPlaying) {
-          _emit(_snapshot.copyWith(
-            state: AppPlaybackState.activeIdle,
-            isPlaying: false,
-            modalVisible: false,
-          ));
+          final dartOwnsClip = _audio.currentPath != null;
+          final skipInFlight = _optimisticSkipIndex != null;
+          if (dartOwnsClip || skipInFlight) {
+            _emit(_snapshot.copyWith(isPlaying: false));
+          } else {
+            _emit(_snapshot.copyWith(
+              state: AppPlaybackState.activeIdle,
+              isPlaying: false,
+              modalVisible: false,
+            ));
+          }
         }
         // Round 35: stamp completion and AWAIT it before realigning
         // AlarmManager. `applySnapshot`'s STAGE 3 projection reads this
@@ -771,6 +790,7 @@ class PlaybackCoordinator {
       },
       preempt: true,
       revertOptimisticSkip: true,
+      pausesPlayback: true,
     );
   }
 
@@ -2001,7 +2021,7 @@ class PlaybackCoordinator {
               'pause: _audio.pause failed (UI already updated): $e\n$st');
         }
       }
-    }, preempt: true, revertOptimisticSkip: true);
+    }, preempt: true, revertOptimisticSkip: true, pausesPlayback: true);
   }
 
   /// Pauses the current clip AND hides the mini-player + modal — but does
@@ -2139,7 +2159,7 @@ class PlaybackCoordinator {
           debugPrint('dismissPlayer: notif refresh failed: $e\n$st');
         }
       }
-    }, preempt: true, revertOptimisticSkip: true);
+    }, preempt: true, revertOptimisticSkip: true, pausesPlayback: true);
   }
 
   Future<void> resume() {

@@ -582,7 +582,9 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     _startWatchdog?.cancel();
     _startWatchdog = null;
     if (swapping) {
-      unawaited(_player.stop().catchError((_) {}));
+      try {
+        await _player.stop();
+      } catch (_) {}
     } else if (_player.processingState != ProcessingState.idle ||
         _player.playing) {
       try {
@@ -608,14 +610,14 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     // queues behind a dead future — that is the QA report "after some
     // time clips/playlists delete but don't play".
     //
-    // Round 45: on mid-session sourceSwap use preload:false so local
-    // files return as soon as ExoPlayer accepts the source — preload:true
-    // was waiting on buffer fill and made next/prev feel multi-second.
+    // Round 47: always preload local files. Round 45's preload:false on
+    // sourceSwap left duration/position streams empty so the mini-player
+    // stuck at 00:00 while audio played. Keep a shorter timeout on swaps.
     final sourceTimeout =
         swapping ? const Duration(seconds: 4) : const Duration(seconds: 8);
     try {
       await _player
-          .setAudioSource(_clipFileSource(path), preload: !swapping)
+          .setAudioSource(_clipFileSource(path), preload: true)
           .timeout(sourceTimeout);
     } on TimeoutException {
       // The player is wedged. Force-stop so the next playFile can rebuild
@@ -632,9 +634,8 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     onClipSessionChanged?.call();
     await play();
     if (playGen != _playFileGeneration) {
-      try {
-        await _player.pause();
-      } catch (_) {}
+      // Round 47: do NOT pause here — the newer playFile already owns
+      // the player. Pausing would stop the clip the user just skipped to.
       return;
     }
 

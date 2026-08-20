@@ -51,16 +51,24 @@ class PlaybackSnapshot extends Equatable {
   /// Shared by [MainShell] and [MiniPlayerBar] so layout reserve and
   /// visibility never disagree (QA: bar completely missing while audio
   /// was still playing).
-  bool showsMiniPlayer({bool nativeActive = false}) {
+  ///
+  /// [dartClipActive] keeps the bar visible during handoff races where the
+  /// snapshot briefly leaves `manualPlaying`/`scheduledPlaying` while
+  /// ExoPlayer still owns a real clip path.
+  bool showsMiniPlayer({
+    bool nativeActive = false,
+    bool dartClipActive = false,
+  }) {
     if (modalVisible) return false;
     if (state == AppPlaybackState.inactive) return false;
+    final hasTitle = clipTitle != null || playlistName != null;
     if (state == AppPlaybackState.manualPlaying ||
         state == AppPlaybackState.scheduledPlaying) {
-      return clipTitle != null || playlistName != null || nativeActive;
+      return hasTitle || nativeActive || dartClipActive;
     }
-    if (nativeActive) {
-      return clipTitle != null || playlistName != null;
-    }
+    // Handoff: native idle demotion or transport race left us in
+    // activeIdle while audio is still owned somewhere.
+    if ((nativeActive || dartClipActive) && hasTitle) return true;
     return false;
   }
 

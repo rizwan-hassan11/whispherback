@@ -372,6 +372,7 @@ class AudioPlaybackService {
   set onStopRequested(void Function()? cb) => _handler.onStopRequested = cb;
 
   bool get isPlaying => _handler.player.playing;
+  bool get isPlayingClip => _handler.isPlayingClip;
   String? get currentPath => _currentPath;
 
   /// The handler lives for the whole app lifecycle; nothing to dispose here.
