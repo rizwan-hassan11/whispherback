@@ -288,6 +288,11 @@ class PlaybackCoordinator {
   /// True while next/prev / clip play is swapping sources. Transient
   /// ExoPlayer `playing:false` after stop() must not flip the mini-player
   /// to paused or hide the bar (QA Round 48).
+  ///
+  /// Round 49: do NOT clear this when the skip Future completes — a late
+  /// `ready`+`playing:false` after clear caused alternate pause/play on
+  /// successive next/prev taps. Cleared only when we observe playing:true
+  /// or the user explicitly pauses.
   bool _suppressTransientNotPlaying = false;
 
   /// If a newer transport op superseded [epoch] after audio already started,
@@ -296,6 +301,7 @@ class PlaybackCoordinator {
   Future<void> _honorSupersededTransport(int epoch) async {
     if (_transportCurrent(epoch)) return;
     if (!_latestTransportPausesPlayback) return;
+    _suppressTransientNotPlaying = false;
     _userInitiatedPause = true;
     _emit(_snapshot.copyWith(isPlaying: false));
     if (_nativeOwnsPlayback ||
@@ -545,6 +551,8 @@ class PlaybackCoordinator {
                 : _snapshot.durationMs,
             playlistId: native.playlistId ?? _snapshot.playlistId,
           ));
+          unawaited(_ensurePlaylistCache(
+              native.playlistId ?? _snapshot.playlistId));
           return;
         }
         final firstStart = !_nativeScheduledActive;
@@ -554,6 +562,8 @@ class PlaybackCoordinator {
           final startedAt = DateTime.now();
           _nativeActiveScheduleId = native.scheduleId;
           _stampNativeFireStart(native.scheduleId, startedAt);
+          unawaited(_ensurePlaylistCache(
+              native.playlistId ?? _snapshot.playlistId));
           unawaited(() async {
             try {
               await _audio.suspendSilenceForExternalPlayback();
@@ -962,6 +972,23 @@ class PlaybackCoordinator {
         _audio.warmFileCache(_playlistClipCache[(idx - 1 + n) % n].filePath));
   }
 
+  /// Load playlist clips so optimistic next/prev can resolve titles while
+  /// native MediaPlayer owns playback (cache is otherwise empty).
+  Future<void> _ensurePlaylistCache(String? playlistId) async {
+    if (playlistId == null || playlistId.isEmpty) return;
+    if (_playlistClipCache.isNotEmpty) return;
+    try {
+      final clips = await _playlists.getClips(playlistId);
+      if (clips.isNotEmpty && _playlistClipCache.isEmpty) {
+        _playlistClipCache = clips;
+      }
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint('ensurePlaylistCache failed: $e\n$st');
+      }
+    }
+  }
+
   /// Wraps `_skipPlaylistClip` in the unified transport gate AND
   /// a try/catch + error event so a thrown PlatformException from the
   /// native player never propagates out of a skip tap. The user perceives
@@ -970,19 +997,21 @@ class PlaybackCoordinator {
   /// controls.
   Future<void> _guardedSkip({required bool next}) async {
     _primeOptimisticSkip(next);
+    // Latch until playerState reports playing:true (or user pauses).
+    // Clearing in `finally` after await let a late ready+false pause every
+    // other skip (QA: change+pause, change+play, alternate).
     _suppressTransientNotPlaying = true;
     try {
       await _serializeTransport(
         (epoch) => _skipPlaylistClip(epoch, next: next),
         preempt: true,
       );
-      // Re-assert playing after swap so a raced playerState:false cannot
-      // leave next/prev looking paused.
+      if (_userInitiatedPause) return;
       if (_snapshot.state == AppPlaybackState.manualPlaying ||
           _snapshot.state == AppPlaybackState.scheduledPlaying) {
-        if (!_snapshot.isPlaying && !_userInitiatedPause) {
-          _emit(_snapshot.copyWith(isPlaying: true));
-        }
+        // Force a full UI refresh: title + playing. StreamBuilders keyed
+        // off clipTitle rebuild progress from the new clip.
+        _emit(_snapshot.copyWith(isPlaying: true));
       }
     } catch (e, st) {
       if (kDebugMode) {
@@ -994,8 +1023,6 @@ class PlaybackCoordinator {
           clipTitle: _snapshot.clipTitle,
         ));
       }
-    } finally {
-      _suppressTransientNotPlaying = false;
     }
   }
 
@@ -1252,6 +1279,10 @@ class PlaybackCoordinator {
     if (_snapshot.state == AppPlaybackState.manualPlaying ||
         _snapshot.state == AppPlaybackState.scheduledPlaying) {
       final playing = state.playing;
+      if (playing && _suppressTransientNotPlaying && !_userInitiatedPause) {
+        // Confirmed audible after skip — release the latch.
+        _suppressTransientNotPlaying = false;
+      }
       if (playing != _snapshot.isPlaying &&
           state.processingState != ProcessingState.completed) {
         // Round 45: after an optimistic pause, ExoPlayer can still emit
@@ -1259,11 +1290,13 @@ class PlaybackCoordinator {
         if (_userInitiatedPause && playing) {
           return;
         }
-        // Round 48: next/prev source swap calls `_player.stop()` which
-        // emits playing:false. Syncing that made the first skip look like
-        // pause and let the mini-player disappear after a few taps.
+        // Round 48/49: ignore ALL not-playing while the skip latch is
+        // armed — including ready+false after stop()/setAudioSource.
+        // That late event was the alternate pause/play bug.
+        if (!playing && !_userInitiatedPause && _suppressTransientNotPlaying) {
+          return;
+        }
         if (!playing && !_userInitiatedPause) {
-          if (_suppressTransientNotPlaying) return;
           final ps = state.processingState;
           if (ps == ProcessingState.loading ||
               ps == ProcessingState.buffering ||
@@ -1999,6 +2032,19 @@ class PlaybackCoordinator {
       await _honorSupersededTransport(transportEpoch);
     }
     _warmLibraryNeighbors();
+    if (skipSnapshotEmit &&
+        (transportEpoch == null || _transportCurrent(transportEpoch))) {
+      // Confirm title/duration after the swap so the mini-player cannot
+      // keep painting the previous clip metadata.
+      _emit(_snapshot.copyWith(
+        state: AppPlaybackState.manualPlaying,
+        playlistName: clip.title,
+        clipTitle: clip.title,
+        isPlaying: true,
+        durationMs: clip.durationMs,
+        modalVisible: false,
+      ));
+    }
   }
 
   /// True when the user is in any clip-playing context.
@@ -2029,6 +2075,7 @@ class PlaybackCoordinator {
   }
 
   Future<void> pause() {
+    _suppressTransientNotPlaying = false;
     if (_snapshot.isPlaying) {
       _userInitiatedPause = true;
       _emit(_snapshot.copyWith(isPlaying: false));

@@ -657,10 +657,12 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
       // launched immediately, and stuck-state detection happens out of band.
       _scheduleStartWatchdog();
     } finally {
-      // Only the active generation clears the flag. A superseded playFile
-      // must leave it set so the newer swap keeps publishing "playing".
-      if (playGen == _playFileGeneration) {
-        _sourceSwapInFlight = false;
+      // Round 49: do NOT clear `_sourceSwapInFlight` here — `await play()`
+      // often completes before the playing:true event. Clearing early lets
+      // a late ready+false publish paused on the notification. Cleared in
+      // `_broadcastState` when `_player.playing` becomes true (or cancel).
+      if (playGen != _playFileGeneration) {
+        // Superseded — leave the flag for the newer playFile.
       }
     }
   }
@@ -1271,10 +1273,17 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   /// Broadcasts state to the system notification + lock screen (official pattern).
   void _broadcastState(PlaybackEvent event) {
     if (!_playingClip) return;
-    // Round 48: during source swap, ExoPlayer briefly reports not-playing
-    // after stop(). Publishing that paused the notification / lock-screen
-    // right as next/prev changed the title — "skip pauses the new clip".
+    // Round 48/49: during source swap keep notification on "playing" until
+    // ExoPlayer actually reports playing — then clear the latch.
     if (_sourceSwapInFlight) {
+      if (_player.playing) {
+        _sourceSwapInFlight = false;
+        _publishClipControls(
+          playing: true,
+          processing: _player.processingState,
+        );
+        return;
+      }
       _publishClipControls(
         playing: true,
         processing: ProcessingState.loading,

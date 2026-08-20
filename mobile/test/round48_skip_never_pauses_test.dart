@@ -31,7 +31,7 @@ void main() {
       expect(onIdx, greaterThanOrEqualTo(0));
       final onEnd = src.indexOf('Future<void> _onClipCompleted(', onIdx);
       final body = src.substring(onIdx, onEnd);
-      expect(body, contains('if (_suppressTransientNotPlaying) return'));
+      expect(body, contains('if (!playing && !_userInitiatedPause && _suppressTransientNotPlaying)'));
       expect(body, contains('ProcessingState.idle'));
     });
 

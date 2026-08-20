@@ -103,13 +103,33 @@ class MiniPlayerBar extends ConsumerWidget {
     )) {
       return const SizedBox.shrink();
     }
-    final title = snapshot.clipTitle ?? native.clipTitle;
-    final subtitle = snapshot.playlistName ?? native.playlistName;
+    // Prefer native titles when native owns playback — snapshot often lags
+    // one skip behind (empty Dart playlist cache on scheduled fires).
+    final useNativeTitles = _useNativeProgress(snapshot, audio) ||
+        (nativeLive && audio.currentPath == null);
+    final nativeTitle =
+        (native.clipTitle != null && native.clipTitle!.isNotEmpty)
+            ? native.clipTitle
+            : null;
+    final nativeSubtitle =
+        (native.playlistName != null && native.playlistName!.isNotEmpty)
+            ? native.playlistName
+            : null;
+    final title = useNativeTitles
+        ? (nativeTitle ?? snapshot.clipTitle)
+        : (snapshot.clipTitle ?? nativeTitle);
+    final subtitle = useNativeTitles
+        ? (nativeSubtitle ?? snapshot.playlistName)
+        : (snapshot.playlistName ?? nativeSubtitle);
     if (title == null && subtitle == null && !nativeLive) {
       return const SizedBox.shrink();
     }
     final displayTitle = title ?? subtitle ?? 'Scheduled whisper';
     final displaySubtitle = subtitle ?? 'WhisperBack';
+    final progressKey = ValueKey<String>(
+      'mini-progress-${title ?? ''}-${snapshot.durationMs}-'
+      '${useNativeTitles ? 'n' : 'd'}',
+    );
     final l10n = context.l10n;
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
@@ -189,6 +209,7 @@ class MiniPlayerBar extends ConsumerWidget {
                             ),
                           ),
                           StreamBuilder<Duration?>(
+                            key: progressKey,
                             // Round 27: scheduled clips play on the native
                             // MediaPlayer, not just_audio. The Dart player's
                             // durationStream still reports the 10-second
@@ -201,6 +222,9 @@ class MiniPlayerBar extends ConsumerWidget {
                             // Round 47: do NOT OR bare `nativeLive` — stale
                             // nativeActive with positionMs=0 stuck the bar
                             // at 00:00 while ExoPlayer was actually playing.
+                            //
+                            // Round 49: ValueKey on clip title forces a fresh
+                            // StreamBuilder when next/prev changes the clip.
                             stream: _useNativeProgress(snapshot, audio)
                                 ? NativeAlarmsBridge.instance.stateStream
                                     .map<Duration?>((n) =>
@@ -210,7 +234,7 @@ class MiniPlayerBar extends ConsumerWidget {
                                 ? Duration(
                                     milliseconds: NativeAlarmsBridge
                                         .instance.lastSnapshot.positionMs)
-                                : null,
+                                : audio.player.position,
                             builder: (context, posSnap) {
                               return StreamBuilder<Duration?>(
                                 stream: _useNativeProgress(snapshot, audio)
@@ -225,7 +249,7 @@ class MiniPlayerBar extends ConsumerWidget {
                                                 .instance
                                                 .lastSnapshot
                                                 .durationMs)
-                                        : null,
+                                        : audio.player.duration,
                                 builder: (context, durSnap) {
                                   final pos = posSnap.data ?? Duration.zero;
                                   final dur = _resolveDisplayDuration(
