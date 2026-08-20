@@ -377,12 +377,12 @@ class PlaybackCoordinator {
     // mini-player while the notification card (and often the audio) kept
     // running; tapping notification play brought the bar back (QA Round 52).
     _audio.onPlaybackStartFailure = (title) {
-      if (_errorController.isClosed) return;
       if (_userInitiatedPause) return;
       if (_suppressTransientNotPlaying) return;
       // Still audibly healthy — ignore a stale watchdog.
       if (_audio.isPlayingClip && _audio.isPlaying) return;
       if (_nativeOwnsPlayback) return;
+      if (_errorController.isClosed) return;
       _errorController.add(PlaybackErrorEvent(
         PlaybackErrorReason.decodeFailed,
         clipTitle: title,

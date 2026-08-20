@@ -71,7 +71,11 @@ void main() {
       // The pause body must catch any error from _player.pause().
       final pauseIdx = src.indexOf('Future<void> pause() async');
       expect(pauseIdx, greaterThan(0));
-      final pauseBody = src.substring(pauseIdx, pauseIdx + 1600);
+      final pauseEnd = src.indexOf('Future<void> seek(', pauseIdx);
+      final pauseBody = src.substring(
+        pauseIdx,
+        pauseEnd > pauseIdx ? pauseEnd : pauseIdx + 4000,
+      );
       expect(
         pauseBody,
         contains('await _player.pause();'),
