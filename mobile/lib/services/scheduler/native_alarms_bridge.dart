@@ -414,6 +414,23 @@ class NativeAlarmsBridge {
     }
   }
 
+  /// Persists the Sleep Mode end time so native AlarmManager fires can
+  /// refuse scheduled audio even when Flutter is not running (BUG-002).
+  Future<void> setSleepBarrier({required int endMs}) async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _channel.invokeMethod<void>('setSleepBarrier', {'endMs': endMs});
+    } on MissingPluginException {
+      // Not running on Android — silently ignore.
+    } catch (e, st) {
+      if (kDebugMode) {
+        print('NativeAlarmsBridge.setSleepBarrier failed: $e\n$st');
+      }
+    }
+  }
+
+  Future<void> clearSleepBarrier() => setSleepBarrier(endMs: 0);
+
   /// Stops the in-flight scheduled clip and tears down the native FG
   /// service. The user can dismiss the playback notification by tapping
   /// "Stop" in the shade, which routes through the same path.

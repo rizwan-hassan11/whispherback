@@ -1026,6 +1026,21 @@ class PlaybackCoordinator {
   /// the exact symptom they reported on the mini-player and modal
   /// controls.
   Future<void> _guardedSkip({required bool next}) async {
+    // Invalidate in-flight completion BEFORE flushing so stop() cannot
+    // auto-advance the playlist (that looked like a skip to the wrong clip).
+    _playbackGeneration++;
+    // Flush the current stream BEFORE the title flips so next/prev cannot
+    // leave the old clip audible under the new metadata (BUG-001).
+    if (!_nativeOwnsPlayback &&
+        !NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
+      try {
+        await _audio.flushCurrentSource();
+      } catch (e, st) {
+        if (kDebugMode) {
+          debugPrint('skip: flush current source failed: $e\n$st');
+        }
+      }
+    }
     _primeOptimisticSkip(next);
     // Latch until we explicitly finish the skip as playing. MediaSession
     // pause echoes from stop() must not win over next/prev.
@@ -1692,6 +1707,10 @@ class PlaybackCoordinator {
       // query) instead of `getAll` so this extra check inside the play
       // gate stays sub-millisecond and never throttles legitimate fires.
       if (!await _appState.isActive()) return false;
+      final sleep = await _sleep.getActive();
+      if (_sleep.isSleepActive(sleep)) {
+        return false;
+      }
       final schedRepo = _schedules;
       if (scheduleId != null && schedRepo != null) {
         final fresh = await schedRepo.getForPlaylist(playlistId);
@@ -1875,6 +1894,10 @@ class PlaybackCoordinator {
       }
     }
     if (fromSchedule && !await _appState.isActive()) return false;
+    if (fromSchedule) {
+      final sleep = await _sleep.getActive();
+      if (_sleep.isSleepActive(sleep)) return false;
+    }
 
     final clips = await _playlists.getClips(playlistId);
     if (clips.isEmpty) {
@@ -2592,14 +2615,39 @@ class PlaybackCoordinator {
 
     final sleep = await _sleep.getActive();
     if (_sleep.isSleepActive(sleep)) {
-      // Round 30: never auto-pause an in-flight scheduled clip for sleep.
-      // Product contract — schedules only stop on completion or explicit
-      // user pause. Sleep still pauses Dart-side manual playback.
-      if (nativeOwns) return;
-      await _systemPause();
+      // BUG-002: Sleep Mode is a hard barrier. Stop native scheduled
+      // audio AND pause Dart playback for the rest of the window.
+      try {
+        await NativeAlarmsBridge.instance.setSleepBarrier(
+          endMs: sleep!.endTime.millisecondsSinceEpoch,
+        );
+      } catch (e, st) {
+        if (kDebugMode) {
+          debugPrint('refreshModeState: setSleepBarrier failed: $e\n$st');
+        }
+      }
+      if (nativeOwns) {
+        try {
+          await NativeAlarmsBridge.instance.stopNative();
+        } catch (e, st) {
+          if (kDebugMode) {
+            debugPrint('refreshModeState: stopNative for sleep failed: $e\n$st');
+          }
+        }
+        _nativeScheduledActive = false;
+      } else {
+        await _systemPause();
+      }
       _emit(_snapshot.copyWith(
           state: AppPlaybackState.sleepPaused, isPlaying: false));
       return;
+    }
+    try {
+      await NativeAlarmsBridge.instance.clearSleepBarrier();
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint('refreshModeState: clearSleepBarrier failed: $e\n$st');
+      }
     }
 
     final prayer =

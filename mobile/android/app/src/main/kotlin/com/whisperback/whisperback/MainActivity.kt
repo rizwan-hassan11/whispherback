@@ -185,6 +185,29 @@ class MainActivity : AudioServiceActivity() {
                             .apply()
                         result.success(null)
                     }
+                    "setSleepBarrier" -> {
+                        val raw = call.arguments
+                        val endMs = when (raw) {
+                            is Map<*, *> -> {
+                                val v = raw["endMs"]
+                                when (v) {
+                                    is Number -> v.toLong()
+                                    else -> 0L
+                                }
+                            }
+                            is Number -> raw.toLong()
+                            else -> 0L
+                        }
+                        applicationContext
+                            .getSharedPreferences(
+                                WhisperPlaybackService.STATE_PREFS,
+                                Context.MODE_PRIVATE,
+                            )
+                            .edit()
+                            .putLong(WhisperPlaybackService.KEY_SLEEP_END_MS, endMs)
+                            .apply()
+                        result.success(null)
+                    }
                     "getPlaybackState" -> {
                         val prefs = applicationContext.getSharedPreferences(
                             WhisperPlaybackService.STATE_PREFS,

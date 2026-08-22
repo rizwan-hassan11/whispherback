@@ -309,6 +309,10 @@ class AudioPlaybackService {
   Future<void> pause() => _handler.runFromAppTransport(_handler.pause);
   Future<void> resume() => _handler.runFromAppTransport(_handler.play);
 
+  /// Stops the current clip source immediately without ending the session.
+  Future<void> flushCurrentSource() =>
+      _handler.runFromAppTransport(_handler.flushCurrentSource);
+
   /// Same MediaItem the lock-screen / notification card uses — drive the
   /// in-app mini-player title from this so it cannot drift from the card.
   Stream<MediaItem?> get mediaItemStream => _handler.mediaItem;

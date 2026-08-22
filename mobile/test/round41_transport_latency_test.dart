@@ -82,23 +82,21 @@ void main() {
       );
     });
 
-    test('native skip notifies Flutter and posts playClip after the UI update',
-        () {
+    test('native skip flushes the current player before rebinding', () {
       final src = _read(
           'android/app/src/main/kotlin/com/whisperback/whisperback/alarms/WhisperPlaybackService.kt');
       final idx = src.indexOf('private fun handleSkipCommand(');
       expect(idx, greaterThanOrEqualTo(0));
-      final end = src.indexOf('\n    }\n', idx);
+      final end = src.indexOf('private fun flushPlayerForSkip(', idx);
       final body = src.substring(idx, end);
+      expect(body, contains('flushPlayerForSkip()'));
+      final flushIdx = body.indexOf('flushPlayerForSkip()');
       final notifyIdx = body.indexOf('notifyListener(STATE_PLAYING)');
-      final playIdx = body.indexOf('playClipAfterUiUpdate(');
-      expect(notifyIdx, greaterThanOrEqualTo(0));
-      expect(playIdx, greaterThan(notifyIdx),
-          reason: 'Flutter must hear about the new track before '
-              'setDataSource/prepareAsync block the main thread.');
-      expect(src, contains('player.reset()'),
-          reason: 'Skip should reuse MediaPlayer via reset() instead of '
-              'release()+new MediaPlayer() on every next/prev.');
+      final playIdx = body.indexOf('playClip(path)');
+      expect(flushIdx, greaterThanOrEqualTo(0));
+      expect(notifyIdx, greaterThan(flushIdx));
+      expect(playIdx, greaterThan(notifyIdx));
+      expect(src, contains('player.reset()'));
     });
 
     test('progress ticker and watchdog must not re-arm after a user pause', () {

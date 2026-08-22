@@ -124,6 +124,11 @@ class WhisperAlarmReceiver : BroadcastReceiver() {
                 return
             }
 
+            if (WhisperPlaybackService.isSleepActive(context)) {
+                Log.i(TAG, "Sleep Mode active; dropping alarm for $scheduleId")
+                return
+            }
+
             // Round 33: play even if late (up to 15 min). Skipping at 5 min
             // caused "schedule never played" when allowWhileIdle / Doze
             // delayed delivery past the old gate.

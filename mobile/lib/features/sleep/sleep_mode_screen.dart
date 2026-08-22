@@ -12,6 +12,7 @@ import '../../core/theme/app_theme.dart';
 import '../../l10n/app_localizations.dart';
 import '../../providers/playback_providers.dart';
 import '../../providers/repository_providers.dart';
+import '../../services/scheduler/native_alarms_bridge.dart';
 
 class SleepModeScreen extends ConsumerStatefulWidget {
   const SleepModeScreen({super.key});
@@ -36,13 +37,21 @@ class _SleepModeScreenState extends ConsumerState<SleepModeScreen> {
           endTime: end,
         );
     ref.invalidate(activeSleepProvider);
+    try {
+      await NativeAlarmsBridge.instance.setSleepBarrier(
+        endMs: end.millisecondsSinceEpoch,
+      );
+      await NativeAlarmsBridge.instance.stopNative();
+    } catch (e, st) {
+      debugPrint('startSleep: native sleep barrier failed: $e\n$st');
+    }
     await ref.read(playbackCoordinatorProvider).refreshModeState();
     if (mounted) {
       final locale = Localizations.localeOf(context).toString();
       final endLabel = DateFormat.jm(locale).format(end);
       final message = context.l10n.sleepModeUntil(endLabel);
-      context.go('/home');
       context.showShellSnackBar(message, icon: AppIcons.bedtime);
+      context.go('/home');
     }
   }
 
@@ -99,10 +108,23 @@ class _SleepModeScreenState extends ConsumerState<SleepModeScreen> {
                                       .read(sleepRepositoryProvider)
                                       .deactivateAll();
                                   ref.invalidate(activeSleepProvider);
+                                  try {
+                                    await NativeAlarmsBridge.instance
+                                        .clearSleepBarrier();
+                                  } catch (e, st) {
+                                    debugPrint(
+                                        'endSleep: clearSleepBarrier failed: $e\n$st');
+                                  }
                                   await ref
                                       .read(playbackCoordinatorProvider)
                                       .refreshModeState();
-                                  if (mounted) setState(() {});
+                                  if (mounted) {
+                                    context.showShellSnackBar(
+                                      context.l10n.sleepModeEnded,
+                                      icon: AppIcons.moon,
+                                    );
+                                    setState(() {});
+                                  }
                                 },
                               ),
                             );

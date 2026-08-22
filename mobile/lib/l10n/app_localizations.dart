@@ -1501,6 +1501,13 @@ class AppLocalizations {
       'Slaapmodus tot $time',
       'Mode veille jusqu\'à $time',
       'Chế độ ngủ đến $time');
+  String get sleepModeEnded => _s(
+      'Sleep mode ended. Scheduled whispers can play again.',
+      'نیند موڈ ختم۔ شیڈول سرگوشیاں دوبارہ چل سکتی ہیں۔',
+      'انتهى وضع النوم. يمكن تشغيل الهمسات المجدولة مجدداً.',
+      'Slaapmodus beëindigd. Geplande whispers kunnen weer spelen.',
+      'Mode veille terminé. Les murmures planifiés peuvent rejouer.',
+      'Đã tắt chế độ ngủ. Lịch thì thầm có thể phát lại.');
   String untilTime(String time) => _s('Until $time', '$time تک', 'حتى $time',
       'Tot $time', 'Jusqu\'à $time', 'Đến $time');
 
@@ -1850,6 +1857,27 @@ class AppLocalizations {
       'Batterij (onbeperkt)',
       'Batterie (non restreinte)',
       'Pin (không hạn chế)');
+  String get batteryGuideDialogTitle => _s(
+      'Allow background playback',
+      'پس منظر پلے بیک اجازت دیں',
+      'السماح بالتشغيل في الخلفية',
+      'Achtergrondweergave toestaan',
+      'Autoriser la lecture en arrière-plan',
+      'Cho phép phát nền');
+  String get batteryGuideDialogBody => _s(
+      'The next screen is your phone settings. Find WhisperBack and set battery to Unrestricted (or Allow background usage / No restrictions). The label differs by Samsung, Xiaomi, Oppo, and Realme.',
+      'اگلی اسکرین فون کی سیٹنگز ہے۔ WhisperBack تلاش کریں اور بیٹری Unrestricted (یا Allow background usage) کریں۔ نام Samsung، Xiaomi، Oppo اور Realme پر مختلف ہوتا ہے۔',
+      'الشاشة التالية إعدادات هاتفك. ابحث عن WhisperBack واختر Unrestricted أو السماح بالاستخدام في الخلفية. يختلف الاسم حسب الشركة.',
+      'Het volgende scherm is uw telefooninstellingen. Zoek WhisperBack en kies Onbeperkt of Achtergrondgebruik toestaan. De naam verschilt per merk.',
+      'L\'écran suivant est Réglages. Trouvez WhisperBack et choisissez Non restreinte ou Autoriser l\'usage en arrière-plan. Le libellé varie selon la marque.',
+      'Màn hình tiếp theo là Cài đặt. Tìm WhisperBack và chọn Không hạn chế hoặc Cho phép dùng nền. Nhãn khác nhau theo hãng.');
+  String get batteryGuideDialogPath => _s(
+      'Look for: Unrestricted · Allow background usage · No restrictions · Don\'t optimize',
+      'تلاش کریں: Unrestricted · Allow background usage · No restrictions · Don\'t optimize',
+      'ابحث عن: Unrestricted · Allow background usage · No restrictions · Don\'t optimize',
+      'Zoek naar: Onbeperkt · Achtergrondgebruik · Geen beperkingen · Niet optimaliseren',
+      'Cherchez: Non restreinte · Usage arrière-plan · Aucune restriction · Ne pas optimiser',
+      'Tìm: Không hạn chế · Cho phép dùng nền · Không tối ưu hóa');
   String get permissionAudioTitle => _s(
       'Audio access required',
       'آڈیو رسائی درکار',

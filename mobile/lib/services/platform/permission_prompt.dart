@@ -255,7 +255,26 @@ Future<void> promptMissingSchedulingPermissions(
     openSettingsLabel: l10n.permissionOpenSettings,
     notNowLabel: l10n.permissionNotNow,
   );
-  if (openSettings) await openAppSettings();
+  if (openSettings) {
+    if (!permissions.batteryUnrestricted && context.mounted) {
+      final proceed = await showBatteryOptimizationGuideDialog(context);
+      if (!proceed || !context.mounted) return;
+    }
+    await openAppSettings();
+  }
+}
+
+/// Explains the OEM battery toggle before leaving the app (BUG-003).
+Future<bool> showBatteryOptimizationGuideDialog(BuildContext context) {
+  final l10n = context.l10n;
+  return showPermissionRequiredDialog(
+    context,
+    title: l10n.batteryGuideDialogTitle,
+    body: l10n.batteryGuideDialogBody,
+    settingsPath: l10n.batteryGuideDialogPath,
+    openSettingsLabel: l10n.permissionOpenSettings,
+    notNowLabel: l10n.permissionNotNow,
+  );
 }
 
 /// Guided setup when the user turns **Active ON**.
@@ -303,12 +322,10 @@ Future<void> runSchedulingSetupWizard(BuildContext context) async {
 
   perms = await ensureAndroidSchedulingPermissions();
   if (!perms.batteryUnrestricted && context.mounted) {
-    // One-time, best-effort. We do NOT auto-open the OEM battery screen on
-    // repeat runs — that caused the "toggle keeps jumping to App battery
-    // usage" nag on Samsung / Xiaomi (whose status false-negatives even
-    // after background usage is allowed). If it's still missing, the
-    // summary dialog below offers a single user-initiated "Open Settings".
-    await requestBatteryExemptionOnce();
+    final proceed = await showBatteryOptimizationGuideDialog(context);
+    if (proceed && context.mounted) {
+      await requestBatteryExemptionOnce();
+    }
   }
 
   if (!context.mounted) return;

@@ -209,14 +209,14 @@ class _NavItem extends StatelessWidget {
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 220),
             curve: Curves.easeOutCubic,
-            padding: EdgeInsets.fromLTRB(4, 7, 4, showLabel ? 8 : 7),
-            constraints: const BoxConstraints(minHeight: 50),
+            padding: const EdgeInsets.fromLTRB(4, 8, 4, 8),
+            constraints: const BoxConstraints(minHeight: 52),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 AnimatedScale(
-                  scale: selected ? 1.08 : 1,
+                  scale: selected ? 1.06 : 1,
                   duration: const Duration(milliseconds: 220),
                   curve: Curves.easeOutCubic,
                   child: Icon(
@@ -233,29 +233,24 @@ class _NavItem extends StatelessWidget {
                         : null,
                   ),
                 ),
-                AnimatedSize(
-                  duration: const Duration(milliseconds: 220),
-                  curve: Curves.easeOutCubic,
-                  child: showLabel
-                      ? Padding(
-                          padding: const EdgeInsets.only(top: 3),
-                          child: AnimatedDefaultTextStyle(
-                            duration: const Duration(milliseconds: 200),
-                            style: TextStyle(
-                              fontSize: compact ? 9 : 10,
-                              fontWeight:
-                                  selected ? FontWeight.w700 : FontWeight.w500,
-                              letterSpacing: 0.2,
-                              color: selected ? activeColor : inactiveColor,
-                            ),
-                            child: Text(
-                              destination.label,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        )
-                      : const SizedBox.shrink(),
+                const SizedBox(height: 3),
+                SizedBox(
+                  height: compact ? 12 : 13,
+                  child: AnimatedDefaultTextStyle(
+                    duration: const Duration(milliseconds: 200),
+                    style: TextStyle(
+                      fontSize: compact ? 9 : 10,
+                      fontWeight:
+                          selected ? FontWeight.w700 : FontWeight.w500,
+                      letterSpacing: 0.2,
+                      color: selected ? activeColor : inactiveColor,
+                    ),
+                    child: Text(
+                      showLabel ? destination.label : '',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                 ),
               ],
             ),

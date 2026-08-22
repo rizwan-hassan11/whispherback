@@ -99,6 +99,18 @@ class WhisperPlaybackService : Service() {
         /// Set true while MediaPlayer owns the stream so Dart/Kotlin
         /// keep-alive can refuse to restart ExoPlayer silence underneath.
         const val KEY_NATIVE_ACTIVE = "native_playback_active"
+        const val KEY_SLEEP_END_MS = "sleep_end_ms"
+
+        fun isSleepActive(context: Context): Boolean {
+            return try {
+                val endMs = context.applicationContext
+                    .getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)
+                    .getLong(KEY_SLEEP_END_MS, 0L)
+                endMs > System.currentTimeMillis()
+            } catch (t: Throwable) {
+                false
+            }
+        }
         const val KEY_CLIP_QUEUE_JSON = "clip_queue_json"
         const val KEY_SLOT_EPOCH_MS = "slot_epoch_ms"
         const val KEY_PLAY_SINGLE_CLIP = "play_single_clip"
@@ -277,6 +289,13 @@ class WhisperPlaybackService : Service() {
             return
         }
 
+        // BUG-002: Sleep Mode is a hard barrier for scheduled whispers.
+        if (isSleepActive(this)) {
+            Log.i(TAG, "Sleep Mode active; suppressing scheduled PLAY_CLIP")
+            stopSelfSafely()
+            return
+        }
+
         // Round 31: if this exact clip is already playing, ignore the
         // duplicate PLAY_CLIP (OEM redelivery / overlapping schedule)
         // instead of releasePlayer() which sounded like auto-pause.
@@ -418,6 +437,9 @@ class WhisperPlaybackService : Service() {
     private fun handleSkipCommand(next: Boolean) {
         try {
             rehydrateFromPrefsIfNeeded()
+            // BUG-001: flush the current stream BEFORE metadata updates so
+            // the previous clip cannot keep playing under the new title.
+            flushPlayerForSkip()
             if (clipQueue.isEmpty()) {
                 val path = currentClipPath
                 if (!path.isNullOrBlank() && File(path).exists()) {
@@ -426,7 +448,7 @@ class WhisperPlaybackService : Service() {
                     writeState(STATE_PLAYING)
                     notifyListener(STATE_PLAYING)
                     postPlaybackNotification(isPlaying = true)
-                    playClipAfterUiUpdate(path)
+                    playClip(path)
                 } else {
                     Log.w(TAG, "skip requested with empty queue and no path")
                 }
@@ -450,17 +472,30 @@ class WhisperPlaybackService : Service() {
                 userPaused = false
                 wantPlaying = true
                 writeState(STATE_PLAYING)
-                // Tell Flutter the new track NOW, before prepareAsync.
-                // Waiting until onPrepared made next/prev feel laggy
-                // (and like a miss) for 200–800ms on OEM MediaPlayer.
                 notifyListener(STATE_PLAYING)
                 postPlaybackNotification(isPlaying = true)
-                playClipAfterUiUpdate(path)
+                playClip(path)
                 return
             }
             Log.w(TAG, "skip: no playable file in queue of $size")
         } catch (t: Throwable) {
             Log.e(TAG, "handleSkipCommand failed", t)
+        }
+    }
+
+    private fun flushPlayerForSkip() {
+        skipGeneration++
+        pendingPlayPath = null
+        stopProgressTicker()
+        stopWatchdog()
+        val player = mediaPlayer
+        if (player == null) return
+        try {
+            if (player.isPlaying) player.stop()
+            player.reset()
+        } catch (t: Throwable) {
+            Log.w(TAG, "flushPlayerForSkip failed; releasing", t)
+            releasePlayer()
         }
     }
 

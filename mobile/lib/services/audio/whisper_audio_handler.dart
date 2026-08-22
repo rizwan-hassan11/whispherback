@@ -553,6 +553,35 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
 
     final playGen = ++_playFileGeneration;
     final swapping = sourceSwap && _playingClip;
+    final previousBind = _playFileTail;
+    final bindDone = Completer<void>();
+    _playFileTail = bindDone.future;
+    try {
+      await previousBind.catchError((Object _, StackTrace __) {});
+      if (playGen != _playFileGeneration) return;
+      await _playFileBound(
+        path: path,
+        title: title,
+        playlistName: playlistName,
+        subtitle: subtitle,
+        playlistMode: playlistMode,
+        swapping: swapping,
+        playGen: playGen,
+      );
+    } finally {
+      if (!bindDone.isCompleted) bindDone.complete();
+    }
+  }
+
+  Future<void> _playFileBound({
+    required String path,
+    required String title,
+    required String? playlistName,
+    required String? subtitle,
+    required bool playlistMode,
+    required bool swapping,
+    required int playGen,
+  }) async {
 
     if (!swapping) {
       await _ensureAudioSession();
@@ -568,59 +597,21 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     if (!_keepAlive) _standalonePlayback = true;
     _sourceSwapInFlight = swapping;
 
-    final item = _clipMediaItem(
-      path: path,
-      title: title,
-      playlistName: playlistName,
-      subtitle: subtitle,
-    );
-    mediaItem.add(item);
-    queue.add([item]);
+    // Round 53 (BUG-001): do NOT publish MediaItem until the new file is
+    // bound. Publishing first made next/prev show the new title while
+    // ExoPlayer kept the previous source (QA: metadata and audio diverge).
     _publishClipControls(
       playing: true,
       processing: ProcessingState.loading,
     );
-
-    if (!swapping) {
-      // Round 16: publish loading state before first source bind.
-      try {
-        playbackState.add(
-          playbackState.value.copyWith(
-            processingState: AudioProcessingState.loading,
-            playing: true,
-            controls: const [MediaControl.pause, _stopControl],
-            systemActions: const {
-              MediaAction.seek,
-              MediaAction.play,
-              MediaAction.pause,
-              MediaAction.stop,
-            },
-            androidCompactActionIndices: const [0],
-          ),
-        );
-      } catch (_) {}
-    }
 
     // Swap path: stop the ExoPlayer source ONLY — never `stopClip()`, which
     // restarts the silence keep-alive and races the incoming setAudioSource.
     _startWatchdog?.cancel();
     _startWatchdog = null;
     try {
-      if (swapping) {
-        try {
-          await _player.stop();
-        } catch (_) {}
-      } else if (_player.processingState != ProcessingState.idle ||
-          _player.playing) {
-        try {
-          await _player.stop();
-        } catch (_) {}
-      } else if (_player.processingState == ProcessingState.loading ||
-          _player.processingState == ProcessingState.buffering) {
-        try {
-          await _player.stop();
-        } catch (_) {}
-      }
+      await _flushPlayerSource();
+      if (playGen != _playFileGeneration) return;
 
       if (!swapping) {
         await _player.setVolume(1);
@@ -662,6 +653,14 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
       if (playGen != _playFileGeneration) {
         return;
       }
+      final item = _clipMediaItem(
+        path: path,
+        title: title,
+        playlistName: playlistName,
+        subtitle: subtitle,
+      );
+      mediaItem.add(item);
+      queue.add([item]);
       onClipSessionChanged?.call();
       await play();
       if (playGen != _playFileGeneration) {
@@ -700,9 +699,32 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   /// superseded load never calls `play()` after the user tapped pause.
   int _playFileGeneration = 0;
 
+  /// Serializes setAudioSource so two next/prev taps cannot interleave
+  /// binds on the same ExoPlayer (late bind of clip A after title B).
+  Future<void> _playFileTail = Future<void>.value();
+
   AudioPlayer? _cacheWarmer;
 
   AudioSource _clipFileSource(String path) => AudioSource.file(path);
+
+  /// Stops the current ExoPlayer source without tearing down the session.
+  /// Used on next/prev so the previous track cannot keep playing under a
+  /// new title (BUG-001).
+  Future<void> flushCurrentSource() async {
+    await _flushPlayerSource();
+  }
+
+  Future<void> _flushPlayerSource() async {
+    try {
+      if (_player.playing ||
+          _player.processingState == ProcessingState.ready ||
+          _player.processingState == ProcessingState.loading ||
+          _player.processingState == ProcessingState.buffering ||
+          _player.processingState == ProcessingState.completed) {
+        await _player.stop();
+      }
+    } catch (_) {}
+  }
 
   /// Preloads the next/prev neighbor so the OS file cache is warm before skip.
   Future<void> warmFileCache(String path) async {
@@ -712,6 +734,10 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
       await _cacheWarmer!
           .setAudioSource(_clipFileSource(path), preload: true)
           .timeout(const Duration(seconds: 4));
+      // Preload must never become audible.
+      try {
+        await _cacheWarmer!.pause();
+      } catch (_) {}
     } catch (_) {}
   }
 

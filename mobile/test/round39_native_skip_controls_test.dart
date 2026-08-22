@@ -87,10 +87,14 @@ void main() {
       expect(handleSkipBody, contains('clipQueueIndex'),
           reason: 'The handler must move the native clip-queue index, '
               'the same state onCompletionListener auto-advances.');
-      expect(handleSkipBody, contains('playClipAfterUiUpdate('),
-          reason: 'After moving the index the handler must actually '
-              'start the newly-targeted clip. The start is posted so '
-              'Flutter is notified before MediaPlayer.setDataSource.');
+      expect(handleSkipBody, contains('flushPlayerForSkip()'),
+          reason: 'Skip must stop the current stream before the new title.');
+      expect(
+        handleSkipBody.contains('playClip(path)') ||
+            handleSkipBody.contains('playClipAfterUiUpdate('),
+        isTrue,
+        reason: 'After moving the index the handler must start the new clip.',
+      );
       expect(handleSkipBody, contains('notifyListener(STATE_PLAYING)'),
           reason: 'Skip must push the new title/playing state to Flutter '
               'before prepareAsync, otherwise next/prev feels laggy.');

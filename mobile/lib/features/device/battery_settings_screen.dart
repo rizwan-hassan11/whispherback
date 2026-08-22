@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/layout/shell_messenger.dart';
+import '../../services/platform/permission_prompt.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_icons.dart';
 import '../../core/theme/app_radii.dart';
@@ -191,6 +192,9 @@ class BatterySettingsScreen extends StatelessWidget {
                       const SizedBox(height: 16),
                       FilledButton.icon(
                         onPressed: () async {
+                          final proceed =
+                              await showBatteryOptimizationGuideDialog(context);
+                          if (!proceed || !context.mounted) return;
                           await openAppSettings();
                           if (context.mounted) {
                             context.showShellSnackBar(
