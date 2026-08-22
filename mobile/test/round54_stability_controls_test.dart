@@ -87,7 +87,13 @@ void main() {
       final splash = _read('lib/features/splash/splash_screen.dart');
       expect(splash, contains('_bootstrapTimeout'));
       expect(splash, contains('Duration(seconds: 8)'));
-      expect(splash, contains('.timeout(_bootstrapTimeout)'));
+      expect(splash, contains('_ensureReadyWithCap'));
+      expect(splash, contains('_bootstrapCap?.cancel()'));
+      expect(
+        splash.contains('.timeout(_bootstrapTimeout)'),
+        isFalse,
+        reason: 'Future.timeout leaves a pending Timer that breaks widget_test.',
+      );
 
       final boot = _read('lib/core/bootstrap/app_bootstrap.dart');
       expect(boot, contains('reconcileOrphanClipFiles'));

@@ -63,9 +63,9 @@ class _WhisperBackAppState extends ConsumerState<WhisperBackApp>
       // silence under an in-flight MediaPlayer and hide the mini-player.
       unawaited(() async {
         try {
-          await NativeAlarmsBridge.instance
-              .fetchPlaybackState()
-              .timeout(const Duration(seconds: 2));
+          await NativeAlarmsBridge.instance.fetchPlaybackState().timeout(
+                const Duration(seconds: 2),
+              );
         } catch (_) {}
         if (!mounted) return;
         await _refreshPermissionsAndSync();
