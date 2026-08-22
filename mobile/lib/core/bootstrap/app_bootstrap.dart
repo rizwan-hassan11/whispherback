@@ -1,3 +1,7 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+
 import '../../data/database/database_helper.dart';
 import '../../data/database/seed_service.dart';
 import '../../data/repositories/clip_repository.dart';
@@ -25,9 +29,15 @@ abstract final class AppBootstrap {
     await ClipPathGuard.ensureLoaded();
     await ScheduleLastFiredStore.ensureLoaded();
     // Clean up `.m4a` files left behind by process-death mid-recording or
-    // import failures. Best-effort: never blocks startup if it fails.
-    await reconcileOrphanClipFiles(
-      ClipRepository(DatabaseHelper.instance),
-    );
+    // import failures. Best-effort: never blocks startup if it fails or hangs.
+    try {
+      await reconcileOrphanClipFiles(
+        ClipRepository(DatabaseHelper.instance),
+      ).timeout(const Duration(seconds: 3));
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint('AppBootstrap: orphan reconcile skipped: $e\n$st');
+      }
+    }
   }
 }

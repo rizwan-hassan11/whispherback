@@ -474,7 +474,8 @@ class NativeAlarmsBridge {
     if (!Platform.isAndroid) return NativePlaybackSnapshot.idle();
     try {
       final raw = await _channel
-          .invokeMethod<Map<Object?, Object?>>('getPlaybackState');
+          .invokeMethod<Map<Object?, Object?>>('getPlaybackState')
+          .timeout(const Duration(seconds: 2));
       if (raw == null) return NativePlaybackSnapshot.idle();
       final snapshot = NativePlaybackSnapshot(
         state: (raw['state'] as String?) ?? NativePlaybackState.idle,
@@ -494,6 +495,11 @@ class NativeAlarmsBridge {
       return snapshot;
     } on MissingPluginException {
       return NativePlaybackSnapshot.idle();
+    } on TimeoutException {
+      if (kDebugMode) {
+        print('NativeAlarmsBridge.fetchPlaybackState timed out');
+      }
+      return _lastSnapshot;
     } catch (e, st) {
       if (kDebugMode) {
         print('NativeAlarmsBridge.fetchPlaybackState failed: $e\n$st');

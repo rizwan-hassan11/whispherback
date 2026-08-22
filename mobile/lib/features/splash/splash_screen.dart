@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -16,6 +17,10 @@ class SplashScreen extends ConsumerStatefulWidget {
 class _SplashScreenState extends ConsumerState<SplashScreen> {
   static const _minDisplay = Duration(milliseconds: 400);
 
+  /// Cap bootstrap wait so a stuck SQLite / orphan reconcile never leaves
+  /// the user on a black splash after a force-close reopen (QA Aug 22).
+  static const _bootstrapTimeout = Duration(seconds: 8);
+
   @override
   void initState() {
     super.initState();
@@ -24,7 +29,13 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
 
   Future<void> _goHomeWhenReady() async {
     final started = DateTime.now();
-    await AppBootstrap.ensureReady();
+    try {
+      await AppBootstrap.ensureReady().timeout(_bootstrapTimeout);
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint('Splash: bootstrap timed out or failed — home anyway: $e\n$st');
+      }
+    }
     final elapsed = DateTime.now().difference(started);
     if (elapsed < _minDisplay) {
       await Future<void>.delayed(_minDisplay - elapsed);

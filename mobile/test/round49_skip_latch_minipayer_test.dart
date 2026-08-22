@@ -32,8 +32,19 @@ void main() {
       final end = src.indexOf('Future<void> _skipPlaylistClip(', idx);
       final body = src.substring(idx, end);
       expect(body, contains('_suppressTransientNotPlaying = true'));
-      expect(body.contains('} finally {'), isFalse,
-          reason: 'Clearing in finally reintroduced alternate pause/play.');
+      // Round 54 may use `finally` to clear `_skipInFlight` — that is fine.
+      // The Round 49 bug was clearing `_suppressTransientNotPlaying` there.
+      final finallyIdx = body.indexOf('} finally {');
+      if (finallyIdx >= 0) {
+        final finallyBody = body.substring(finallyIdx);
+        expect(
+          finallyBody.contains('_suppressTransientNotPlaying'),
+          isFalse,
+          reason: 'Clearing the skip latch in finally reintroduced '
+              'alternate pause/play.',
+        );
+        expect(finallyBody, contains('_skipInFlight = false'));
+      }
       // Native-only clear after emit is OK — Dart keeps latch until playing:true.
       expect(body, contains('isPlaying: true'));
       expect(body, contains('await _audio.resume()'));

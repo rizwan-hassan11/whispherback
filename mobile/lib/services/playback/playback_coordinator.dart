@@ -177,11 +177,50 @@ class PlaybackCoordinator {
   /// skip / pause round-trips.
   static const _transportBodyTimeout = Duration(seconds: 12);
 
+  /// QA Aug 22 Issue 3: collapse rapid play/skip taps into one intentional
+  /// command. 400ms sits in the recommended 300–500ms window.
+  static const _controlDebounce = Duration(milliseconds: 400);
+
+  DateTime? _lastSkipControlAt;
+  DateTime? _lastPlayPauseControlAt;
+
+  /// True while [_guardedSkip] is running (flush → prime → transport body →
+  /// force-resume). A second next/prev must not prime again — on a 2-clip
+  /// queue that double-prime wraps back to the same track (Issue 2).
+  bool _skipInFlight = false;
+
   /// True when the newest transport op is pause/dismiss. Used so a
   /// superseded skip body does not pause the clip the user just skipped to.
   bool _latestTransportPausesPlayback = false;
 
   bool _transportCurrent(int epoch) => epoch == _transportEpoch;
+
+  /// Accepts a next/prev tap only when no skip is in flight and the debounce
+  /// window since the last accepted skip has elapsed. Discarded taps must
+  /// not call [_primeOptimisticSkip] (that advances the queue pointer).
+  bool _acceptSkipControl() {
+    if (_skipInFlight) return false;
+    final now = DateTime.now();
+    final last = _lastSkipControlAt;
+    if (last != null && now.difference(last) < _controlDebounce) {
+      return false;
+    }
+    _lastSkipControlAt = now;
+    return true;
+  }
+
+  /// Debounces play/pause so a double-tap cannot toggle twice into an
+  /// undefined state. Pause is never blocked by [_skipInFlight] so the user
+  /// can still stop audio during a slow skip.
+  bool _acceptPlayPauseControl() {
+    final now = DateTime.now();
+    final last = _lastPlayPauseControlAt;
+    if (last != null && now.difference(last) < _controlDebounce) {
+      return false;
+    }
+    _lastPlayPauseControlAt = now;
+    return true;
+  }
 
   /// Stops an in-flight skip / playFile without tearing down the media session.
   ///
@@ -1026,87 +1065,96 @@ class PlaybackCoordinator {
   /// the exact symptom they reported on the mini-player and modal
   /// controls.
   Future<void> _guardedSkip({required bool next}) async {
-    // Invalidate in-flight completion BEFORE flushing so stop() cannot
-    // auto-advance the playlist (that looked like a skip to the wrong clip).
-    _playbackGeneration++;
-    // Flush the current stream BEFORE the title flips so next/prev cannot
-    // leave the old clip audible under the new metadata (BUG-001).
-    if (!_nativeOwnsPlayback &&
-        !NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
-      try {
-        await _audio.flushCurrentSource();
-      } catch (e, st) {
-        if (kDebugMode) {
-          debugPrint('skip: flush current source failed: $e\n$st');
-        }
-      }
-    }
-    _primeOptimisticSkip(next);
-    // Latch until we explicitly finish the skip as playing. MediaSession
-    // pause echoes from stop() must not win over next/prev.
-    _suppressTransientNotPlaying = true;
-    _userInitiatedPause = false;
+    // Issue 2 + 3 (Aug 22): discard rapid / overlapping next-prev before any
+    // index mutation. Priming outside the gate used to advance twice on a
+    // double-tap and wrap a 2-clip queue back onto the same track.
+    if (!_acceptSkipControl()) return;
+    _skipInFlight = true;
     try {
-      await _serializeTransport(
-        (epoch) => _skipPlaylistClip(epoch, next: next),
-        preempt: true,
-      );
-      // Spotify contract: skip always leaves the new clip PLAYING.
-      if (_latestTransportPausesPlayback) return;
-      _userInitiatedPause = false;
-      if (_snapshot.state == AppPlaybackState.manualPlaying ||
-          _snapshot.state == AppPlaybackState.scheduledPlaying ||
-          _snapshot.clipTitle != null) {
+      // Invalidate in-flight completion BEFORE flushing so stop() cannot
+      // auto-advance the playlist (that looked like a skip to the wrong clip).
+      _playbackGeneration++;
+      // Flush the current stream BEFORE the title flips so next/prev cannot
+      // leave the old clip audible under the new metadata (BUG-001).
+      if (!_nativeOwnsPlayback &&
+          !NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
         try {
-          if (!_nativeOwnsPlayback &&
-              !NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
-            await _audio.resume();
-          }
+          await _audio.flushCurrentSource();
         } catch (e, st) {
           if (kDebugMode) {
-            debugPrint('skip: force-resume failed: $e\n$st');
+            debugPrint('skip: flush current source failed: $e\n$st');
           }
         }
-        _emit(_snapshot.copyWith(
-          state: _snapshot.state == AppPlaybackState.scheduledPlaying ||
-                  _nativeOwnsPlayback
-              ? AppPlaybackState.scheduledPlaying
-              : AppPlaybackState.manualPlaying,
-          isPlaying: true,
-          modalVisible: false,
-        ));
-        // Native skips never hit Dart playerState — clear latch here.
-        // Dart skips keep the latch until playing:true (MediaSession echo).
-        if (_nativeOwnsPlayback ||
-            NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
-          _suppressTransientNotPlaying = false;
+      }
+      _primeOptimisticSkip(next);
+      // Latch until we explicitly finish the skip as playing. MediaSession
+      // pause echoes from stop() must not win over next/prev.
+      _suppressTransientNotPlaying = true;
+      _userInitiatedPause = false;
+      try {
+        await _serializeTransport(
+          (epoch) => _skipPlaylistClip(epoch, next: next),
+          preempt: true,
+        );
+        // Spotify contract: skip always leaves the new clip PLAYING.
+        if (_latestTransportPausesPlayback) return;
+        _userInitiatedPause = false;
+        if (_snapshot.state == AppPlaybackState.manualPlaying ||
+            _snapshot.state == AppPlaybackState.scheduledPlaying ||
+            _snapshot.clipTitle != null) {
+          try {
+            if (!_nativeOwnsPlayback &&
+                !NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
+              await _audio.resume();
+            }
+          } catch (e, st) {
+            if (kDebugMode) {
+              debugPrint('skip: force-resume failed: $e\n$st');
+            }
+          }
+          _emit(_snapshot.copyWith(
+            state: _snapshot.state == AppPlaybackState.scheduledPlaying ||
+                    _nativeOwnsPlayback
+                ? AppPlaybackState.scheduledPlaying
+                : AppPlaybackState.manualPlaying,
+            isPlaying: true,
+            modalVisible: false,
+          ));
+          // Native skips never hit Dart playerState — clear latch here.
+          // Dart skips keep the latch until playing:true (MediaSession echo).
+          if (_nativeOwnsPlayback ||
+              NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
+            _suppressTransientNotPlaying = false;
+          }
+        }
+      } catch (e, st) {
+        if (kDebugMode) {
+          debugPrint('skip${next ? 'Next' : 'Previous'} failed: $e\n$st');
+        }
+        // Keep the Spotify bar up even when a swap times out — audio /
+        // MediaSession often still owns the previous or new clip.
+        if (_snapshot.state != AppPlaybackState.manualPlaying &&
+            _snapshot.state != AppPlaybackState.scheduledPlaying &&
+            (_snapshot.clipTitle != null || _audio.currentPath != null)) {
+          _emit(_snapshot.copyWith(
+            state: AppPlaybackState.manualPlaying,
+            modalVisible: false,
+          ));
+        }
+        // Don't spam "Playback failed" when the session is still healthy.
+        final stillLive = _audio.isPlayingClip ||
+            _audio.isPlaying ||
+            _nativeOwnsPlayback ||
+            NativeAlarmsBridge.instance.lastSnapshot.isNativeActive;
+        if (!stillLive && !_errorController.isClosed) {
+          _errorController.add(PlaybackErrorEvent(
+            PlaybackErrorReason.decodeFailed,
+            clipTitle: _snapshot.clipTitle,
+          ));
         }
       }
-    } catch (e, st) {
-      if (kDebugMode) {
-        debugPrint('skip${next ? 'Next' : 'Previous'} failed: $e\n$st');
-      }
-      // Keep the Spotify bar up even when a swap times out — audio /
-      // MediaSession often still owns the previous or new clip.
-      if (_snapshot.state != AppPlaybackState.manualPlaying &&
-          _snapshot.state != AppPlaybackState.scheduledPlaying &&
-          (_snapshot.clipTitle != null || _audio.currentPath != null)) {
-        _emit(_snapshot.copyWith(
-          state: AppPlaybackState.manualPlaying,
-          modalVisible: false,
-        ));
-      }
-      // Don't spam "Playback failed" when the session is still healthy.
-      final stillLive = _audio.isPlayingClip ||
-          _audio.isPlaying ||
-          _nativeOwnsPlayback ||
-          NativeAlarmsBridge.instance.lastSnapshot.isNativeActive;
-      if (!stillLive && !_errorController.isClosed) {
-        _errorController.add(PlaybackErrorEvent(
-          PlaybackErrorReason.decodeFailed,
-          clipTitle: _snapshot.clipTitle,
-        ));
-      }
+    } finally {
+      _skipInFlight = false;
     }
   }
 
@@ -2166,6 +2214,7 @@ class PlaybackCoordinator {
   }
 
   Future<void> pause() {
+    if (!_acceptPlayPauseControl()) return Future<void>.value();
     _suppressTransientNotPlaying = false;
     if (_snapshot.isPlaying) {
       _userInitiatedPause = true;
@@ -2340,6 +2389,7 @@ class PlaybackCoordinator {
   }
 
   Future<void> resume() {
+    if (!_acceptPlayPauseControl()) return Future<void>.value();
     if (!_snapshot.isPlaying && _snapshot.state != AppPlaybackState.inactive) {
       _userInitiatedPause = false;
       _emit(_snapshot.copyWith(isPlaying: true));

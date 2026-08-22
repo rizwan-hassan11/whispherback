@@ -125,7 +125,6 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   bool _standalonePlayback = false;
   bool _audioSessionReady = false;
   bool _playingClip = false;
-  bool _playlistMode = false;
 
   /// True while native [WhisperPlaybackService] owns the audible clip.
   /// Prevents the silence keep-alive (and the engine's 5-second heartbeat
@@ -484,7 +483,6 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     _keepAliveRunning = false;
     _playingClip = false;
     _standalonePlayback = false;
-    _playlistMode = false;
     _silenceSuspendedForExternal = false;
     _clipTitle = null;
     // Each call is independently try/caught so the master Active
@@ -593,7 +591,6 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
 
     _playingClip = true;
     _clipTitle = title;
-    _playlistMode = playlistMode;
     if (!_keepAlive) _standalonePlayback = true;
     _sourceSwapInFlight = swapping;
 
@@ -852,7 +849,6 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
 
     _playingClip = false;
     _clipTitle = null;
-    _playlistMode = false;
 
     // EVERY native bridge call below is independently try/caught.
     // `_player.stop()`, `mediaItem.add(null)`, `queue.add([])`,
@@ -1307,15 +1303,19 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> skipToNext() async {
     if (!_playingClip) return;
 
-    if (_playlistMode) {
-      await onSkipToNextRequested?.call();
+    // Always prefer the coordinator when wired. Relying on a local
+    // playlistMode flag alone caused lock-screen / compact next to seek(0)
+    // and replay the current clip after mode was cleared mid-session
+    // (QA Aug 22 Issue 2). The coordinator owns the queue pointer and
+    // already restarts on a single-clip queue.
+    final onNext = onSkipToNextRequested;
+    if (onNext != null) {
+      await onNext();
       return;
     }
 
-    // Single-clip context (library preview or one-track playlist):
-    // restart from the top instead of silently doing nothing — matches
-    // the in-app mini-player + modal behaviour after Round 9 and keeps
-    // the lock-screen "next" button feeling alive.
+    // Fallback when no coordinator is attached (tests / early init):
+    // restart from the top so the lock-screen next button still feels alive.
     await _player.seek(Duration.zero);
     if (!_player.playing) {
       await play();
@@ -1326,8 +1326,9 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> skipToPrevious() async {
     if (!_playingClip) return;
 
-    if (_playlistMode) {
-      await onSkipToPreviousRequested?.call();
+    final onPrev = onSkipToPreviousRequested;
+    if (onPrev != null) {
+      await onPrev();
       return;
     }
 
