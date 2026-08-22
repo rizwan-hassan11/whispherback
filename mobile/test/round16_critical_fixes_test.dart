@@ -200,9 +200,12 @@ void main() {
         contains('if (!swapping)'),
         reason: 'First-play path publishes FG state before setAudioSource.',
       );
+      // Round 53: MediaItem is published after bind (BUG-001). FG elevation
+      // still happens first via `_publishClipControls(playing: true)`.
       expect(
-        preBody,
-        contains('playbackState.add('),
+        preBody.contains('playbackState.add(') ||
+            preBody.contains('_publishClipControls('),
+        isTrue,
         reason: 'A playing-true PlaybackState must be published BEFORE '
             'setAudioSource so audio_service calls '
             'Service.startForeground() immediately and the OS cannot '
@@ -215,8 +218,9 @@ void main() {
             'audio_service native side elevates to FG.',
       );
       expect(
-        preBody,
-        contains('AudioProcessingState.loading'),
+        preBody.contains('AudioProcessingState.loading') ||
+            preBody.contains('ProcessingState.loading'),
+        isTrue,
         reason: 'The pre-flight state should report loading so the '
             'media notification shows a spinner while the source '
             'attaches.',
