@@ -21,26 +21,24 @@ String _read(String relPath) {
 
 void main() {
   group('Round 54 — crash / skip / double-tap stability', () {
-    test('skip queues overlapping taps and debounces only same-frame bounce',
-        () {
+    test('skip queues overlapping taps; no time debounce on skip', () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
       expect(src, contains('static const _controlDebounce'));
-      expect(src, contains('static const _skipDebounce'));
-      expect(src, contains('Duration(milliseconds: 150)'));
       expect(src, contains('bool _skipInFlight = false'));
       expect(src, contains('bool? _pendingSkipNext'));
-      expect(src, contains('bool _acceptSkipControl()'));
+      expect(src, contains('bool get skipTransportActive'));
       expect(src, contains('bool _acceptPlayPauseControl()'));
+      expect(src.contains('_acceptSkipControl'), isFalse);
 
       final runIdx = src.indexOf('Future<void> _runOneSkip(');
       expect(runIdx, greaterThanOrEqualTo(0));
       final runEnd = src.indexOf('\n  Future<void> _skipPlaylistClip(', runIdx);
       final runBody = src.substring(runIdx, runEnd);
       expect(runBody, contains('_primeOptimisticSkip(next);'));
-      expect(runBody, contains('flushCurrentSource'));
+      expect(runBody.contains('flushCurrentSource'), isFalse);
       final primeIdx = runBody.indexOf('_primeOptimisticSkip(next);');
-      final flushIdx = runBody.indexOf('flushCurrentSource');
-      expect(flushIdx, greaterThan(primeIdx));
+      final transportIdx = runBody.indexOf('_serializeTransport');
+      expect(transportIdx, greaterThan(primeIdx));
     });
 
     test('pause and resume share a play/pause debounce gate', () {

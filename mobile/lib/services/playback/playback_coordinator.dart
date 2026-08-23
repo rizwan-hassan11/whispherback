@@ -180,15 +180,15 @@ class PlaybackCoordinator {
   /// Collapse accidental double-taps on play/pause (QA Aug 22 Issue 3).
   static const _controlDebounce = Duration(milliseconds: 400);
 
-  /// Skip uses a shorter window — only same-frame bounce. A longer debounce
-  /// made retries feel dead while a multi-second swap was still running.
-  static const _skipDebounce = Duration(milliseconds: 150);
-
-  DateTime? _lastSkipControlAt;
   DateTime? _lastPlayPauseControlAt;
 
   /// True while [_runOneSkip] is running (flush → transport → force-resume).
   bool _skipInFlight = false;
+
+  /// Exposed so the mini-player can show optimistic skip titles immediately.
+  /// MediaItem (notification) updates only after playFile binds — without
+  /// this the first next/prev tap looks dead even when skip is in progress.
+  bool get skipTransportActive => _skipInFlight;
 
   /// When the user taps next/prev during an in-flight swap, remember the
   /// latest direction and run it once the current skip finishes — never drop
@@ -200,18 +200,6 @@ class PlaybackCoordinator {
   bool _latestTransportPausesPlayback = false;
 
   bool _transportCurrent(int epoch) => epoch == _transportEpoch;
-
-  /// Accepts an idle next/prev tap (not while a skip body is already running).
-  /// Taps during an in-flight swap are queued via [_pendingSkipNext] instead.
-  bool _acceptSkipControl() {
-    final now = DateTime.now();
-    final last = _lastSkipControlAt;
-    if (last != null && now.difference(last) < _skipDebounce) {
-      return false;
-    }
-    _lastSkipControlAt = now;
-    return true;
-  }
 
   /// Debounces play/pause so a double-tap cannot toggle twice into an
   /// undefined state. Pause is never blocked by [_skipInFlight] so the user
@@ -1074,7 +1062,6 @@ class PlaybackCoordinator {
       _pendingSkipNext = next;
       return;
     }
-    if (!_acceptSkipControl()) return;
 
     await _runOneSkip(next);
     while (_pendingSkipNext != null) {
@@ -1088,27 +1075,18 @@ class PlaybackCoordinator {
   Future<void> _runOneSkip(bool next) async {
     _skipInFlight = true;
     try {
-      // Instant mini-player / notification title flip — BEFORE flush I/O.
-      // Priming after flush made the first tap look dead for hundreds of ms.
+      if (_snapshot.playlistId != null) {
+        await _ensurePlaylistCache(_snapshot.playlistId);
+      }
+
+      // Instant coordinator snapshot for modal + skipUiPending mini-player path.
       _primeOptimisticSkip(next);
 
-      // Invalidate in-flight completion BEFORE flushing so stop() cannot
-      // auto-advance the playlist (that looked like a skip to the wrong clip).
+      // Invalidate in-flight completion BEFORE the transport body so stop()
+      // cannot auto-advance the playlist (that looked like skip to wrong clip).
       _playbackGeneration++;
-      // Flush the current stream BEFORE bind so next/prev cannot leave the old
-      // clip audible under the new metadata (Round 53 BUG-001).
-      if (!_nativeOwnsPlayback &&
-          !NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
-        try {
-          await _audio.flushCurrentSource();
-        } catch (e, st) {
-          if (kDebugMode) {
-            debugPrint('skip: flush current source failed: $e\n$st');
-          }
-        }
-      }
-      // Latch until we explicitly finish the skip as playing. MediaSession
-      // pause echoes from stop() must not win over next/prev.
+      // playFile(sourceSwap: true) flushes inside the handler — a coordinator
+      // flush here doubled I/O and made every next/prev feel laggy (QA Aug 23).
       _suppressTransientNotPlaying = true;
       _userInitiatedPause = false;
       try {

@@ -174,12 +174,13 @@ class _MiniPlayerBody extends StatelessWidget {
     final mediaTitle = mediaItem?.title.trim();
     final mediaSubtitle = mediaItem?.album?.trim() ?? mediaItem?.artist?.trim();
 
-    // Dart owns: MediaItem (notification source) wins, then snapshot.
-    // Native owns: native prefs title wins.
+    // Dart owns: prefer snapshot while a skip swap is in flight (MediaItem
+    // lags until playFile binds). Otherwise MediaItem wins (Round 51).
+    final skipPending = coordinator.skipTransportActive;
     final title = dartOwns
-        ? (mediaTitle?.isNotEmpty == true
-            ? mediaTitle
-            : (snapTitle?.isNotEmpty == true ? snapTitle : nativeTitle))
+        ? (skipPending && snapTitle?.isNotEmpty == true
+            ? snapTitle
+            : (mediaTitle?.isNotEmpty == true ? mediaTitle : snapTitle))
         : (nativeTitle ??
             (mediaTitle?.isNotEmpty == true ? mediaTitle : snapTitle));
     final subtitle = dartOwns
@@ -196,10 +197,9 @@ class _MiniPlayerBody extends StatelessWidget {
     final displaySubtitle =
         (subtitle != null && subtitle.isNotEmpty) ? subtitle : 'WhisperBack';
 
-    // Play icon: MediaSession when Dart owns (matches notification);
-    // coordinator/native snapshot when scheduled MediaPlayer owns audio.
+    // Play icon: snapshot while skip pending; MediaSession when stable (Round 51).
     final displayPlaying = dartOwns
-        ? mediaSessionPlaying
+        ? (skipPending ? snapshot.isPlaying : mediaSessionPlaying)
         : (nativeLive ? native.isPlaying : snapshot.isPlaying);
 
     final progressKey = ValueKey<String>(

@@ -19,7 +19,7 @@ String _read(String relPath) {
 
 void main() {
   group('Round 55 — skip must respond on first tap', () {
-    test('optimistic prime runs before flush I/O', () {
+    test('optimistic prime runs before transport I/O', () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
       final idx = src.indexOf('Future<void> _runOneSkip(');
       expect(idx, greaterThanOrEqualTo(0));
@@ -27,11 +27,12 @@ void main() {
       final body = src.substring(idx, end);
 
       final primeIdx = body.indexOf('_primeOptimisticSkip(next);');
-      final flushIdx = body.indexOf('flushCurrentSource');
+      final transportIdx = body.indexOf('_serializeTransport');
       expect(primeIdx, greaterThanOrEqualTo(0));
-      expect(flushIdx, greaterThan(primeIdx),
+      expect(transportIdx, greaterThan(primeIdx),
           reason:
-              'Title must flip before flush so the first tap feels instant.');
+              'Title must flip before transport so the first tap feels instant.');
+      expect(body.contains('flushCurrentSource'), isFalse);
     });
 
     test('in-flight taps queue instead of being discarded', () {
@@ -48,19 +49,18 @@ void main() {
       expect(guarded, contains('while (_pendingSkipNext != null)'));
 
       final acceptMethod = src.substring(
-        src.indexOf('bool _acceptSkipControl()'),
-        src.indexOf('\n  /// Debounces play/pause'),
+        src.indexOf('bool _acceptPlayPauseControl()'),
+        src.indexOf('\n  /// Stops an in-flight'),
       );
-      expect(acceptMethod.contains('_skipInFlight'), isFalse,
-          reason: 'Idle debounce must not block queued in-flight retries.');
+      expect(acceptMethod.contains('_skipInFlight'), isFalse);
     });
 
-    test('skip debounce is shorter than play/pause debounce', () {
+    test('skip debounce removed; play/pause still debounced', () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
-      expect(src, contains('_skipDebounce'));
-      expect(src, contains('Duration(milliseconds: 150)'));
       expect(src, contains('_controlDebounce'));
       expect(src, contains('Duration(milliseconds: 400)'));
+      expect(src.contains('_skipDebounce'), isFalse);
+      expect(src.contains('_acceptSkipControl'), isFalse);
     });
   });
 }

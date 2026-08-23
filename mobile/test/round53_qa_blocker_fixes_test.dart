@@ -32,21 +32,27 @@ void main() {
       expect(body, contains('await _flushPlayerSource()'));
     });
 
-    test('skip flushes Dart source before playFile bind (title may flip first)',
-        () {
-      final src = _read('lib/services/playback/playback_coordinator.dart');
-      final idx = src.indexOf('Future<void> _runOneSkip(');
-      final end = src.indexOf('Future<void> _skipPlaylistClip(', idx);
-      final body = src.substring(idx, end);
-      expect(body, contains('flushCurrentSource()'));
-      expect(body, contains('_serializeTransport'));
+    test('skip flushes in handler playFile before MediaItem bind', () {
+      final handler = _read('lib/services/audio/whisper_audio_handler.dart');
+      final idx = handler.indexOf('Future<void> _playFileBound(');
+      final end = handler.indexOf('void _scheduleStartWatchdog()', idx);
+      final body = handler.substring(idx, end);
+      expect(body, contains('await _flushPlayerSource()'));
+      final flushIdx = body.indexOf('await _flushPlayerSource()');
+      final bindIdx = body.indexOf('setAudioSource(_clipFileSource(path)');
+      expect(flushIdx, lessThan(bindIdx));
+
+      final coord = _read('lib/services/playback/playback_coordinator.dart');
+      final runIdx = coord.indexOf('Future<void> _runOneSkip(');
+      final runEnd =
+          coord.indexOf('\n  Future<void> _skipPlaylistClip(', runIdx);
+      final runBody = coord.substring(runIdx, runEnd);
       expect(
-        body.indexOf('flushCurrentSource()'),
-        lessThan(body.indexOf('_serializeTransport')),
-        reason: 'Old audio must stop before the skip body binds the new file.',
+        runBody.contains('flushCurrentSource'),
+        isFalse,
+        reason: 'Coordinator must not double-flush — handler owns swap flush.',
       );
-      // Round 55: coordinator title may flip before flush for instant feedback;
-      // handler still publishes MediaItem only after setAudioSource (above).
+      expect(runBody, contains('_ensurePlaylistCache'));
     });
 
     test('native alarm receiver and service refuse Sleep Mode fires', () {
