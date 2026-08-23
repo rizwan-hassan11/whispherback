@@ -21,29 +21,25 @@ String _read(String relPath) {
 
 void main() {
   group('Round 54 — crash / skip / double-tap stability', () {
-    test('skip rejects overlapping taps before priming the queue', () {
+    test('skip queues overlapping taps and debounces only same-frame bounce', () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
       expect(src, contains('static const _controlDebounce'));
-      expect(src, contains('Duration(milliseconds: 400)'));
+      expect(src, contains('static const _skipDebounce'));
+      expect(src, contains('Duration(milliseconds: 150)'));
       expect(src, contains('bool _skipInFlight = false'));
+      expect(src, contains('bool? _pendingSkipNext'));
       expect(src, contains('bool _acceptSkipControl()'));
       expect(src, contains('bool _acceptPlayPauseControl()'));
 
-      final guardedIdx = src.indexOf('Future<void> _guardedSkip(');
-      expect(guardedIdx, greaterThanOrEqualTo(0));
-      final guardedEnd = src.indexOf(
-        '\n  Future<void> _skipPlaylistClip(',
-        guardedIdx,
-      );
-      final body = src.substring(guardedIdx, guardedEnd);
-      expect(body, contains('if (!_acceptSkipControl()) return;'));
-      expect(body, contains('_skipInFlight = true;'));
-      expect(body, contains('_skipInFlight = false;'));
-      // Prime must come AFTER the accept gate so discarded taps never advance.
-      final acceptIdx = body.indexOf('if (!_acceptSkipControl()) return;');
-      final primeIdx = body.indexOf('_primeOptimisticSkip(next);');
-      expect(acceptIdx, greaterThanOrEqualTo(0));
-      expect(primeIdx, greaterThan(acceptIdx));
+      final runIdx = src.indexOf('Future<void> _runOneSkip(');
+      expect(runIdx, greaterThanOrEqualTo(0));
+      final runEnd = src.indexOf('\n  Future<void> _skipPlaylistClip(', runIdx);
+      final runBody = src.substring(runIdx, runEnd);
+      expect(runBody, contains('_primeOptimisticSkip(next);'));
+      expect(runBody, contains('flushCurrentSource'));
+      final primeIdx = runBody.indexOf('_primeOptimisticSkip(next);');
+      final flushIdx = runBody.indexOf('flushCurrentSource');
+      expect(flushIdx, greaterThan(primeIdx));
     });
 
     test('pause and resume share a play/pause debounce gate', () {

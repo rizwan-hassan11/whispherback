@@ -177,17 +177,23 @@ class PlaybackCoordinator {
   /// skip / pause round-trips.
   static const _transportBodyTimeout = Duration(seconds: 12);
 
-  /// QA Aug 22 Issue 3: collapse rapid play/skip taps into one intentional
-  /// command. 400ms sits in the recommended 300–500ms window.
+  /// Collapse accidental double-taps on play/pause (QA Aug 22 Issue 3).
   static const _controlDebounce = Duration(milliseconds: 400);
+
+  /// Skip uses a shorter window — only same-frame bounce. A longer debounce
+  /// made retries feel dead while a multi-second swap was still running.
+  static const _skipDebounce = Duration(milliseconds: 150);
 
   DateTime? _lastSkipControlAt;
   DateTime? _lastPlayPauseControlAt;
 
-  /// True while [_guardedSkip] is running (flush → prime → transport body →
-  /// force-resume). A second next/prev must not prime again — on a 2-clip
-  /// queue that double-prime wraps back to the same track (Issue 2).
+  /// True while [_runOneSkip] is running (flush → transport → force-resume).
   bool _skipInFlight = false;
+
+  /// When the user taps next/prev during an in-flight swap, remember the
+  /// latest direction and run it once the current skip finishes — never drop
+  /// taps silently (QA Aug 23 skip unresponsiveness).
+  bool? _pendingSkipNext;
 
   /// True when the newest transport op is pause/dismiss. Used so a
   /// superseded skip body does not pause the clip the user just skipped to.
@@ -195,14 +201,12 @@ class PlaybackCoordinator {
 
   bool _transportCurrent(int epoch) => epoch == _transportEpoch;
 
-  /// Accepts a next/prev tap only when no skip is in flight and the debounce
-  /// window since the last accepted skip has elapsed. Discarded taps must
-  /// not call [_primeOptimisticSkip] (that advances the queue pointer).
+  /// Accepts an idle next/prev tap (not while a skip body is already running).
+  /// Taps during an in-flight swap are queued via [_pendingSkipNext] instead.
   bool _acceptSkipControl() {
-    if (_skipInFlight) return false;
     final now = DateTime.now();
     final last = _lastSkipControlAt;
-    if (last != null && now.difference(last) < _controlDebounce) {
+    if (last != null && now.difference(last) < _skipDebounce) {
       return false;
     }
     _lastSkipControlAt = now;
@@ -1065,17 +1069,35 @@ class PlaybackCoordinator {
   /// the exact symptom they reported on the mini-player and modal
   /// controls.
   Future<void> _guardedSkip({required bool next}) async {
-    // Issue 2 + 3 (Aug 22): discard rapid / overlapping next-prev before any
-    // index mutation. Priming outside the gate used to advance twice on a
-    // double-tap and wrap a 2-clip queue back onto the same track.
+    // Queue instead of dropping — a slow flush/playFile swap used to hold
+    // _skipInFlight for seconds and every retry tap was silently ignored.
+    if (_skipInFlight) {
+      _pendingSkipNext = next;
+      return;
+    }
     if (!_acceptSkipControl()) return;
+
+    await _runOneSkip(next);
+    while (_pendingSkipNext != null) {
+      final pending = _pendingSkipNext!;
+      _pendingSkipNext = null;
+      await _runOneSkip(pending);
+    }
+  }
+
+  /// One next/prev execution: optimistic UI first, then flush + bind.
+  Future<void> _runOneSkip(bool next) async {
     _skipInFlight = true;
     try {
+      // Instant mini-player / notification title flip — BEFORE flush I/O.
+      // Priming after flush made the first tap look dead for hundreds of ms.
+      _primeOptimisticSkip(next);
+
       // Invalidate in-flight completion BEFORE flushing so stop() cannot
       // auto-advance the playlist (that looked like a skip to the wrong clip).
       _playbackGeneration++;
-      // Flush the current stream BEFORE the title flips so next/prev cannot
-      // leave the old clip audible under the new metadata (BUG-001).
+      // Flush the current stream BEFORE bind so next/prev cannot leave the old
+      // clip audible under the new metadata (Round 53 BUG-001).
       if (!_nativeOwnsPlayback &&
           !NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
         try {
@@ -1086,7 +1108,6 @@ class PlaybackCoordinator {
           }
         }
       }
-      _primeOptimisticSkip(next);
       // Latch until we explicitly finish the skip as playing. MediaSession
       // pause echoes from stop() must not win over next/prev.
       _suppressTransientNotPlaying = true;

@@ -32,16 +32,20 @@ void main() {
       expect(body, contains('await _flushPlayerSource()'));
     });
 
-    test('skip flushes the current Dart source before optimistic title', () {
+    test('skip flushes Dart source before playFile bind (title may flip first)', () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
-      final idx = src.indexOf('Future<void> _guardedSkip(');
+      final idx = src.indexOf('Future<void> _runOneSkip(');
       final end = src.indexOf('Future<void> _skipPlaylistClip(', idx);
       final body = src.substring(idx, end);
       expect(body, contains('flushCurrentSource()'));
+      expect(body, contains('_serializeTransport'));
       expect(
         body.indexOf('flushCurrentSource()'),
-        lessThan(body.indexOf('_primeOptimisticSkip')),
+        lessThan(body.indexOf('_serializeTransport')),
+        reason: 'Old audio must stop before the skip body binds the new file.',
       );
+      // Round 55: coordinator title may flip before flush for instant feedback;
+      // handler still publishes MediaItem only after setAudioSource (above).
     });
 
     test('native alarm receiver and service refuse Sleep Mode fires', () {
