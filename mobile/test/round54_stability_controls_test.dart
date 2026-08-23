@@ -21,7 +21,8 @@ String _read(String relPath) {
 
 void main() {
   group('Round 54 — crash / skip / double-tap stability', () {
-    test('skip queues overlapping taps and debounces only same-frame bounce', () {
+    test('skip queues overlapping taps and debounces only same-frame bounce',
+        () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
       expect(src, contains('static const _controlDebounce'));
       expect(src, contains('static const _skipDebounce'));
@@ -88,7 +89,8 @@ void main() {
       expect(
         splash.contains('.timeout(_bootstrapTimeout)'),
         isFalse,
-        reason: 'Future.timeout leaves a pending Timer that breaks widget_test.',
+        reason:
+            'Future.timeout leaves a pending Timer that breaks widget_test.',
       );
 
       final boot = _read('lib/core/bootstrap/app_bootstrap.dart');
@@ -96,7 +98,8 @@ void main() {
       expect(boot, contains('.timeout(const Duration(seconds: 3))'));
 
       final bridge = _read('lib/services/scheduler/native_alarms_bridge.dart');
-      final fetchIdx = bridge.indexOf('Future<NativePlaybackSnapshot> fetchPlaybackState');
+      final fetchIdx =
+          bridge.indexOf('Future<NativePlaybackSnapshot> fetchPlaybackState');
       expect(fetchIdx, greaterThanOrEqualTo(0));
       final fetchBody = bridge.substring(fetchIdx, fetchIdx + 900);
       expect(fetchBody, contains('.timeout(const Duration(seconds: 2))'));

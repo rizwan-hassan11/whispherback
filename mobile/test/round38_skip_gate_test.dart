@@ -137,11 +137,17 @@ void main() {
           reason:
               'Skip/pause/resume/play must share one FIFO gate (Round 43).');
 
-      final guardedSkipIdx = src.indexOf('Future<void> _guardedSkip(');
-      expect(guardedSkipIdx, greaterThanOrEqualTo(0));
-      final guardedSkipEnd = src.indexOf('\n  }\n', guardedSkipIdx);
-      final guardedSkipBody = src.substring(guardedSkipIdx, guardedSkipEnd);
-      expect(guardedSkipBody, contains('_serializeTransport('),
+      // Round 55: `_guardedSkip` queues / debounces; `_runOneSkip` owns the
+      // transport body that must still go through `_serializeTransport`.
+      expect(src, contains('Future<void> _guardedSkip('));
+      final runSkipIdx = src.indexOf('Future<void> _runOneSkip(');
+      expect(runSkipIdx, greaterThanOrEqualTo(0));
+      final runSkipEnd = src.indexOf(
+        '\n  Future<void> _skipPlaylistClip(',
+        runSkipIdx,
+      );
+      final runSkipBody = src.substring(runSkipIdx, runSkipEnd);
+      expect(runSkipBody, contains('_serializeTransport('),
           reason: 'The in-app mini-player / modal skip path must go through '
               'the unified transport gate.');
 

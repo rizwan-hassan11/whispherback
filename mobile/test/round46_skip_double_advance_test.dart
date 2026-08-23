@@ -33,14 +33,14 @@ void main() {
 
       final skipIdx = src.indexOf('Future<void> _skipPlaylistClip(');
       expect(skipIdx, greaterThanOrEqualTo(0));
-      final skipEnd = src.indexOf('\n  Future<void> _playClipAtIndex(', skipIdx);
+      final skipEnd =
+          src.indexOf('\n  Future<void> _playClipAtIndex(', skipIdx);
       final body = src.substring(skipIdx, skipEnd);
 
       // Must not re-advance from the already-primed library/playlist index
       // with another `(currentIndex + 1) %` before reading `primed`.
       expect(
-        body.contains(
-            'final nextIndex = next\n          ? (currentIndex + 1)'),
+        body.contains('final nextIndex = next\n          ? (currentIndex + 1)'),
         isFalse,
         reason: 'Re-computing next after prime double-advances the queue.',
       );
@@ -51,7 +51,8 @@ void main() {
     test('soft abort invalidates generation without stopping ExoPlayer', () {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
       final abortIdx = coord.indexOf('Future<void> _abortInFlightTransport(');
-      final abortEnd = coord.indexOf('\n  Future<T> _serializeTransport', abortIdx);
+      final abortEnd =
+          coord.indexOf('\n  Future<T> _serializeTransport', abortIdx);
       final abortBody = coord.substring(abortIdx, abortEnd);
       expect(abortBody, contains('_audio.invalidateInFlightPlay()'));
       expect(

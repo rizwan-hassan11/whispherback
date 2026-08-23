@@ -102,9 +102,7 @@ class MiniPlayerBar extends ConsumerWidget {
       initialData: audio.mediaItem,
       builder: (context, mediaSnap) {
         return StreamBuilder<bool>(
-          stream: audio.playbackStateStream
-              .map((s) => s.playing)
-              .distinct(),
+          stream: audio.playbackStateStream.map((s) => s.playing).distinct(),
           initialData: audio.mediaSessionPlaying,
           builder: (context, playingSnap) {
             final mediaItem = mediaSnap.data;
@@ -195,9 +193,8 @@ class _MiniPlayerBody extends StatelessWidget {
     final displayTitle = (title != null && title.isNotEmpty)
         ? title
         : (subtitle != null && subtitle.isNotEmpty ? subtitle : 'Now playing');
-    final displaySubtitle = (subtitle != null && subtitle.isNotEmpty)
-        ? subtitle
-        : 'WhisperBack';
+    final displaySubtitle =
+        (subtitle != null && subtitle.isNotEmpty) ? subtitle : 'WhisperBack';
 
     // Play icon: MediaSession when Dart owns (matches notification);
     // coordinator/native snapshot when scheduled MediaPlayer owns audio.
@@ -305,14 +302,11 @@ class _MiniPlayerBody extends StatelessWidget {
                                         .map<Duration?>((n) => Duration(
                                             milliseconds: n.durationMs))
                                     : audio.durationStream,
-                                initialData:
-                                    _useNativeProgress(snapshot, audio)
-                                        ? Duration(
-                                            milliseconds: NativeAlarmsBridge
-                                                .instance
-                                                .lastSnapshot
-                                                .durationMs)
-                                        : audio.player.duration,
+                                initialData: _useNativeProgress(snapshot, audio)
+                                    ? Duration(
+                                        milliseconds: NativeAlarmsBridge
+                                            .instance.lastSnapshot.durationMs)
+                                    : audio.player.duration,
                                 builder: (context, durSnap) {
                                   final pos = posSnap.data ?? Duration.zero;
                                   final dur = _resolveDisplayDuration(

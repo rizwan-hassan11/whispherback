@@ -32,7 +32,8 @@ void main() {
       expect(body, contains('await _flushPlayerSource()'));
     });
 
-    test('skip flushes Dart source before playFile bind (title may flip first)', () {
+    test('skip flushes Dart source before playFile bind (title may flip first)',
+        () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
       final idx = src.indexOf('Future<void> _runOneSkip(');
       final end = src.indexOf('Future<void> _skipPlaylistClip(', idx);

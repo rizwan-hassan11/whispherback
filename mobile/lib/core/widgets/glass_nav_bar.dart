@@ -240,8 +240,7 @@ class _NavItem extends StatelessWidget {
                     duration: const Duration(milliseconds: 200),
                     style: TextStyle(
                       fontSize: compact ? 9 : 10,
-                      fontWeight:
-                          selected ? FontWeight.w700 : FontWeight.w500,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                       letterSpacing: 0.2,
                       color: selected ? activeColor : inactiveColor,
                     ),

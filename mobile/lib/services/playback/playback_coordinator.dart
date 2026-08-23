@@ -599,8 +599,8 @@ class PlaybackCoordinator {
                 : _snapshot.durationMs,
             playlistId: native.playlistId ?? _snapshot.playlistId,
           ));
-          unawaited(_ensurePlaylistCache(
-              native.playlistId ?? _snapshot.playlistId));
+          unawaited(
+              _ensurePlaylistCache(native.playlistId ?? _snapshot.playlistId));
           return;
         }
         final firstStart = !_nativeScheduledActive;
@@ -610,8 +610,8 @@ class PlaybackCoordinator {
           final startedAt = DateTime.now();
           _nativeActiveScheduleId = native.scheduleId;
           _stampNativeFireStart(native.scheduleId, startedAt);
-          unawaited(_ensurePlaylistCache(
-              native.playlistId ?? _snapshot.playlistId));
+          unawaited(
+              _ensurePlaylistCache(native.playlistId ?? _snapshot.playlistId));
           unawaited(() async {
             try {
               await _audio.suspendSilenceForExternalPlayback();
@@ -716,9 +716,8 @@ class PlaybackCoordinator {
               _optimisticSkipIndex != null || _suppressTransientNotPlaying;
           if (dartOwnsClip || skipInFlight) {
             // Keep session state so the mini-player never vanishes mid-skip.
-            _emit(_snapshot.copyWith(isPlaying: _suppressTransientNotPlaying
-                ? true
-                : false));
+            _emit(_snapshot.copyWith(
+                isPlaying: _suppressTransientNotPlaying ? true : false));
           } else {
             // True end of native clip — clear metadata so the bar can hide.
             _emit(const PlaybackSnapshot(
@@ -2702,7 +2701,8 @@ class PlaybackCoordinator {
           await NativeAlarmsBridge.instance.stopNative();
         } catch (e, st) {
           if (kDebugMode) {
-            debugPrint('refreshModeState: stopNative for sleep failed: $e\n$st');
+            debugPrint(
+                'refreshModeState: stopNative for sleep failed: $e\n$st');
           }
         }
         _nativeScheduledActive = false;

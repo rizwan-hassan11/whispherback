@@ -580,7 +580,6 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     required bool swapping,
     required int playGen,
   }) async {
-
     if (!swapping) {
       await _ensureAudioSession();
       final session = await AudioSession.instance;

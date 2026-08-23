@@ -71,7 +71,8 @@ void main() {
       expect(broadcast, contains('_sourceSwapInFlight = false'));
     });
 
-    test('mini-player merges titles by ownership and keys progress by clip', () {
+    test('mini-player merges titles by ownership and keys progress by clip',
+        () {
       final bar = _read('lib/features/playback/mini_player_bar.dart');
       expect(bar, contains('final dartOwns = audio.currentPath != null'));
       expect(bar, contains('ValueKey<String>'));

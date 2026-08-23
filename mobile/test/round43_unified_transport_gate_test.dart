@@ -30,12 +30,14 @@ void main() {
       expect(src.contains('Future<T> _serializePauseResume<T>'), isFalse);
       expect(src.contains('Future<T> _serializePlay<T>'), isFalse);
 
-      final guardedIdx = src.indexOf('Future<void> _guardedSkip(');
-      expect(guardedIdx, greaterThanOrEqualTo(0));
-      final guardedEnd = src.indexOf('\n  }\n', guardedIdx);
-      final guardedBody = src.substring(guardedIdx, guardedEnd);
-      expect(guardedBody, contains('_serializeTransport'));
-      expect(guardedBody, contains('_skipPlaylistClip'));
+      // Round 55: skip entry is `_guardedSkip` → `_runOneSkip` → gate.
+      expect(src, contains('Future<void> _guardedSkip('));
+      final runIdx = src.indexOf('Future<void> _runOneSkip(');
+      expect(runIdx, greaterThanOrEqualTo(0));
+      final runEnd = src.indexOf('\n  Future<void> _skipPlaylistClip(', runIdx);
+      final runBody = src.substring(runIdx, runEnd);
+      expect(runBody, contains('_serializeTransport'));
+      expect(runBody, contains('_skipPlaylistClip'));
       expect(src, contains('(epoch) => _playClipInternal'));
     });
 

@@ -151,8 +151,7 @@ class _MainShellState extends ConsumerState<MainShell> {
     final audio = ref.watch(audioPlaybackServiceProvider);
     final dartClipActive =
         audio.currentPath != null && (audio.isPlayingClip || audio.isPlaying);
-    final hasMediaSessionClip =
-        audio.isPlayingClip && audio.mediaItem != null;
+    final hasMediaSessionClip = audio.isPlayingClip && audio.mediaItem != null;
     final miniPlayerVisible = snapshot != null &&
         snapshot.showsMiniPlayer(
           nativeActive: native.isNativeActive,

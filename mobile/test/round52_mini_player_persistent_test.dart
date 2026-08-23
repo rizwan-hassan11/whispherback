@@ -24,7 +24,8 @@ void main() {
       final src = _read('lib/services/playback/playback_coordinator.dart');
       final idx = src.indexOf('_audio.onPlaybackStartFailure = (title)');
       expect(idx, greaterThanOrEqualTo(0));
-      final end = src.indexOf('_playerSub = _audio.playerStateStream.listen(', idx);
+      final end =
+          src.indexOf('_playerSub = _audio.playerStateStream.listen(', idx);
       final body = src.substring(idx, end);
       expect(body.contains('await stop()'), isFalse,
           reason: 'stop() hid the bar while MediaSession stayed alive.');

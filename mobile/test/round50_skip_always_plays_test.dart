@@ -68,7 +68,8 @@ void main() {
         state: AppPlaybackState.manualPlaying,
       );
       expect(snap.showsMiniPlayer(), isTrue,
-          reason: 'Bar must show for the whole play session, even without titles.');
+          reason:
+              'Bar must show for the whole play session, even without titles.');
     });
 
     test('mini-player does not shrink after showsMiniPlayer for missing titles',

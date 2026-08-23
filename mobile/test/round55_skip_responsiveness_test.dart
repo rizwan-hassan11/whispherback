@@ -30,7 +30,8 @@ void main() {
       final flushIdx = body.indexOf('flushCurrentSource');
       expect(primeIdx, greaterThanOrEqualTo(0));
       expect(flushIdx, greaterThan(primeIdx),
-          reason: 'Title must flip before flush so the first tap feels instant.');
+          reason:
+              'Title must flip before flush so the first tap feels instant.');
     });
 
     test('in-flight taps queue instead of being discarded', () {
@@ -38,7 +39,8 @@ void main() {
       expect(src, contains('bool? _pendingSkipNext'));
 
       final guardedIdx = src.indexOf('Future<void> _guardedSkip(');
-      final guardedEnd = src.indexOf('\n  Future<void> _runOneSkip(', guardedIdx);
+      final guardedEnd =
+          src.indexOf('\n  Future<void> _runOneSkip(', guardedIdx);
       final guarded = src.substring(guardedIdx, guardedEnd);
 
       expect(guarded, contains('if (_skipInFlight)'));

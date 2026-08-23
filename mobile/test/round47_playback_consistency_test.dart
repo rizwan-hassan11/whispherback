@@ -32,7 +32,8 @@ void main() {
 
       final honorIdx = src.indexOf('Future<void> _honorSupersededTransport(');
       expect(honorIdx, greaterThanOrEqualTo(0));
-      final honorEnd = src.indexOf('\n  /// Called after a scheduled whisper', honorIdx);
+      final honorEnd =
+          src.indexOf('\n  /// Called after a scheduled whisper', honorIdx);
       final honor = src.substring(honorIdx, honorEnd);
       expect(honor, contains('if (!_latestTransportPausesPlayback) return'));
       expect(honor, contains('await _audio.pause()'));
@@ -40,7 +41,9 @@ void main() {
 
     test('mini-player progress never ORs bare nativeLive', () {
       final bar = _read('lib/features/playback/mini_player_bar.dart');
-      expect(bar.contains('_useNativeProgress(snapshot, audio) ||\n                                    nativeLive'),
+      expect(
+          bar.contains(
+              '_useNativeProgress(snapshot, audio) ||\n                                    nativeLive'),
           isFalse);
       expect(bar.contains('_useNativeProgress(snapshot, audio) || nativeLive'),
           isFalse);
