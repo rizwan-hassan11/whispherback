@@ -609,11 +609,13 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
       await _flushPlayerSource();
       if (playGen != _playFileGeneration) return;
 
-      if (!swapping) {
-        await _player.setVolume(1);
-        await _player.setSpeed(1);
-        await _player.setLoopMode(LoopMode.off);
-      }
+      // ALWAYS force LoopMode.off — including sourceSwap. Keep-alive uses
+      // LoopMode.one; skipping that reset left ExoPlayer looping the same
+      // clip forever so ProcessingState.completed never fired (QA: track
+      // loops instead of advancing the queue).
+      await _player.setVolume(1);
+      await _player.setSpeed(1);
+      await _player.setLoopMode(LoopMode.off);
       // CRITICAL: cap setAudioSource. The just_audio future can hang
       // indefinitely if the underlying ExoPlayer / native MediaPlayer
       // gets into a stuck state (observed on Samsung One UI after rapid
@@ -1300,21 +1302,16 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
 
   @override
   Future<void> skipToNext() async {
-    if (!_playingClip) return;
-
-    // Always prefer the coordinator when wired. Relying on a local
-    // playlistMode flag alone caused lock-screen / compact next to seek(0)
-    // and replay the current clip after mode was cleared mid-session
-    // (QA Aug 22 Issue 2). The coordinator owns the queue pointer and
-    // already restarts on a single-clip queue.
+    // Prefer the coordinator whenever wired — even if `_playingClip` is
+    // briefly false mid-swap. Returning early here dropped notification
+    // next taps (QA: 3–6 taps to skip).
     final onNext = onSkipToNextRequested;
     if (onNext != null) {
       await onNext();
       return;
     }
+    if (!_playingClip) return;
 
-    // Fallback when no coordinator is attached (tests / early init):
-    // restart from the top so the lock-screen next button still feels alive.
     await _player.seek(Duration.zero);
     if (!_player.playing) {
       await play();
@@ -1323,13 +1320,12 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
 
   @override
   Future<void> skipToPrevious() async {
-    if (!_playingClip) return;
-
     final onPrev = onSkipToPreviousRequested;
     if (onPrev != null) {
       await onPrev();
       return;
     }
+    if (!_playingClip) return;
 
     await _player.seek(Duration.zero);
     if (!_player.playing) {

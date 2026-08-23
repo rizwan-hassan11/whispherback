@@ -351,6 +351,7 @@ class _MiniPlayerBody extends StatelessWidget {
                     onPressed: () =>
                         _safeCall(coordinator.skipPrevious, 'skipPrevious'),
                   ),
+                const SizedBox(width: 6),
                 _MiniPlayPauseButton(
                   isPlaying: displayPlaying,
                   onTap: () {
@@ -361,6 +362,7 @@ class _MiniPlayerBody extends StatelessWidget {
                     }
                   },
                 ),
+                const SizedBox(width: 6),
                 if (canSkip)
                   _MiniIconButton(
                     icon: Icons.skip_next_rounded,
@@ -371,6 +373,7 @@ class _MiniPlayerBody extends StatelessWidget {
                     onPressed: () =>
                         _safeCall(coordinator.skipNext, 'skipNext'),
                   ),
+                const SizedBox(width: 4),
                 _MiniIconButton(
                   icon: AppIcons.close,
                   semanticLabel: l10n.stopPlayback,
@@ -405,7 +408,7 @@ class _MiniPlayPauseButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 2),
       child: Semantics(
         label: isPlaying ? l10n.pause : l10n.play,
         button: true,
@@ -416,12 +419,12 @@ class _MiniPlayPauseButton extends StatelessWidget {
             onTap: onTap,
             customBorder: const CircleBorder(),
             child: SizedBox(
-              width: 40,
-              height: 40,
+              width: 48,
+              height: 48,
               child: Icon(
                 isPlaying ? AppIcons.pause : AppIcons.play,
                 color: AppColors.neonBright,
-                size: 22,
+                size: 24,
               ),
             ),
           ),
@@ -456,9 +459,9 @@ class _MiniIconButton extends StatelessWidget {
           onTap: onPressed,
           customBorder: const CircleBorder(),
           child: SizedBox(
-            width: 36,
-            height: 36,
-            child: Icon(icon, size: 20, color: color),
+            width: 48,
+            height: 48,
+            child: Icon(icon, size: 22, color: color),
           ),
         ),
       ),

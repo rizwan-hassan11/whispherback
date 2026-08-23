@@ -437,7 +437,11 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                                 unawaited(
                                   ref
                                       .read(playbackCoordinatorProvider)
-                                      .playClip(clip, queue: _clips)
+                                      .playClip(
+                                        clip,
+                                        queue: _clips,
+                                        playlistId: widget.playlistId,
+                                      )
                                       .catchError((Object e, StackTrace st) {
                                     debugPrint(
                                       'playlist detail playClip handled: $e\n$st',

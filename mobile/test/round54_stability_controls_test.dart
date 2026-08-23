@@ -49,7 +49,8 @@ void main() {
       expect(resumeIdx, greaterThan(pauseIdx));
 
       final pauseBody = src.substring(pauseIdx, resumeIdx);
-      expect(pauseBody, contains('if (!_acceptPlayPauseControl()) return'));
+      expect(pauseBody, contains('_acceptPlayPauseControl()'));
+      expect(pauseBody, contains('_userInitiatedPause = true'));
 
       final resumeEnd = src.indexOf('\n  Future<void> ', resumeIdx + 1);
       final resumeBody = src.substring(
