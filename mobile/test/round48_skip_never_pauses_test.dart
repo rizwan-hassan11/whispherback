@@ -40,7 +40,9 @@ void main() {
     test('handler keeps notification playing during source swap', () {
       final handler = _read('lib/services/audio/whisper_audio_handler.dart');
       expect(handler, contains('bool _sourceSwapInFlight = false'));
-      expect(handler, contains('_sourceSwapInFlight = swapping'));
+      // Round 61: always arm the swap latch for the bind/play window so OEM
+      // pause-echo cannot silence cold play or skip (was `= swapping` only).
+      expect(handler, contains('_sourceSwapInFlight = true'));
 
       final broadcastIdx =
           handler.indexOf('void _broadcastState(PlaybackEvent event)');
