@@ -163,11 +163,6 @@ class PlaybackCoordinator {
   /// audio playing when the user asked to pause.
   int _transportEpoch = 0;
 
-  /// Snapshot captured before an optimistic skip title flip. Restored when
-  /// pause preempts an in-flight skip so the user does not see "pause changed
-  /// the clip".
-  PlaybackSnapshot? _optimisticSkipSnapshot;
-
   /// Index chosen by [_primeOptimisticSkip]. The skip body plays THIS index
   /// instead of advancing again (double-advance made 2-clip queues wrap to
   /// the same track and feel like pause/seek-0).
@@ -177,18 +172,9 @@ class PlaybackCoordinator {
   /// clip — never re-roll shuffle or the title/audio diverge.
   AudioClip? _optimisticSkipClip;
 
-  /// File path the in-flight skip is trying to bind. Used so pause only
-  /// reverts the title when the new source has NOT committed yet.
+  /// File path primed at tap time. Skip body binds THIS path so title and
+  /// audio cannot diverge from a later re-roll.
   String? _optimisticSkipTargetPath;
-
-  /// Bound path before an optimistic skip. Restored when pause aborts an
-  /// uncommitted skip so resume cannot play a half-loaded next track.
-  String? _preSkipBoundPath;
-
-  /// Queue pointer before an optimistic skip. Restored when pause preempts
-  /// so pause cannot leave the session pointing at the next track.
-  int _preSkipLibraryIndex = -1;
-  int? _preSkipPlaylistIndex;
 
   /// Sized for playFile's 8s setAudioSource cap plus native MethodChannel
   /// skip / pause round-trips.
@@ -251,11 +237,9 @@ class PlaybackCoordinator {
       // Pause/dismiss must NEVER change which clip the session is on.
       // Reverting indices/titles after a skip bind made pause/resume look
       // like a track change (QA Round 59). Only cancel the unfinished load.
-      _optimisticSkipSnapshot = null;
       _optimisticSkipIndex = null;
       _optimisticSkipClip = null;
       _optimisticSkipTargetPath = null;
-      _preSkipBoundPath = null;
       _ignoreSessionPauseUntil = null;
       _audio.suppressMediaSessionPauseEcho = false;
     }
@@ -329,7 +313,9 @@ class PlaybackCoordinator {
         if (!completer.isCompleted) completer.completeError(e, st);
       } finally {
         if (_transportCurrent(epoch)) {
-          _optimisticSkipSnapshot = null;
+          _optimisticSkipIndex = null;
+          _optimisticSkipClip = null;
+          _optimisticSkipTargetPath = null;
         }
       }
     });
@@ -996,13 +982,9 @@ class PlaybackCoordinator {
   void _primeOptimisticSkip(bool next) {
     _userInitiatedPause = false;
     _playbackGeneration++;
-    _optimisticSkipSnapshot = _snapshot;
     _optimisticSkipIndex = null;
     _optimisticSkipClip = null;
     _optimisticSkipTargetPath = null;
-    _preSkipLibraryIndex = _libraryIndex;
-    _preSkipPlaylistIndex = _playlistClipIndex;
-    _preSkipBoundPath = _audio.boundPath;
 
     final native = _nativeOwnsPlayback ||
         NativeAlarmsBridge.instance.lastSnapshot.isNativeActive;
@@ -1341,10 +1323,10 @@ class PlaybackCoordinator {
       _optimisticSkipIndex = null;
       final idx = clips.indexWhere((c) => c.id == clip.id);
       if (idx >= 0) _playlistClipIndex = idx;
-      _optimisticSkipTargetPath = clip.filePath;
+      final path = _optimisticSkipTargetPath ?? clip.filePath;
       try {
         final ok = await _audio.playFile(
-          clip.filePath,
+          path,
           title: clip.title,
           playlistName: _snapshot.playlistName,
           subtitle: fromSchedule
@@ -1375,9 +1357,7 @@ class PlaybackCoordinator {
           durationMs: clip.durationMs,
           modalVisible: false,
         ));
-        _optimisticSkipSnapshot = null;
         _optimisticSkipTargetPath = null;
-        _preSkipBoundPath = null;
       }
       _refreshScheduleNotificationsDeferred();
       await _honorSupersededTransport(epoch);
@@ -1477,10 +1457,8 @@ class PlaybackCoordinator {
         durationMs: clip.durationMs,
       ),
     );
-    _optimisticSkipSnapshot = null;
     _optimisticSkipClip = null;
     _optimisticSkipTargetPath = null;
-    _preSkipBoundPath = null;
     _refreshScheduleNotificationsDeferred();
   }
 
@@ -1761,10 +1739,8 @@ class PlaybackCoordinator {
               durationMs: clip.durationMs,
             ),
           );
-          _optimisticSkipSnapshot = null;
           _optimisticSkipClip = null;
           _optimisticSkipTargetPath = null;
-          _preSkipBoundPath = null;
           _refreshScheduleNotificationsDeferred();
           return index;
         } catch (_) {
@@ -2388,10 +2364,8 @@ class PlaybackCoordinator {
         durationMs: clip.durationMs,
         modalVisible: false,
       ));
-      _optimisticSkipSnapshot = null;
       _optimisticSkipClip = null;
       _optimisticSkipTargetPath = null;
-      _preSkipBoundPath = null;
     }
   }
 

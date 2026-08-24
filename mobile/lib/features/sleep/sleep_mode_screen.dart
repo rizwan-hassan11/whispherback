@@ -118,7 +118,7 @@ class _SleepModeScreenState extends ConsumerState<SleepModeScreen> {
                                   await ref
                                       .read(playbackCoordinatorProvider)
                                       .refreshModeState();
-                                  if (mounted) {
+                                  if (context.mounted) {
                                     context.showShellSnackBar(
                                       context.l10n.sleepModeEnded,
                                       icon: AppIcons.moon,

@@ -22,7 +22,7 @@ void main() {
     test('pause and notification handlers preempt in-flight skip', () {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
       expect(coord, contains('_abortInFlightTransport'));
-      expect(coord, contains('_optimisticSkipSnapshot'));
+      expect(coord, contains('_optimisticSkipIndex'));
       expect(coord, contains('bool preempt = false'));
       expect(coord, contains('revertOptimisticSkip: true'));
       expect(coord, contains('_handleNotificationPause'));

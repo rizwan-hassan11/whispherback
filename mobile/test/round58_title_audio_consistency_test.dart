@@ -76,7 +76,6 @@ void main() {
       expect(body, contains('_emit('));
       expect(body, contains('clipTitle: clip.title'));
       expect(body, contains('_optimisticSkipTargetPath'));
-      expect(body, contains('_preSkipBoundPath'));
     });
 
     test('pause abort never changes clip identity', () {

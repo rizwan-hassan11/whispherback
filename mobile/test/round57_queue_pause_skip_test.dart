@@ -69,8 +69,6 @@ void main() {
 
     test('pause restores pre-skip queue indices and sets sentinel first', () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
-      expect(src, contains('_preSkipLibraryIndex'));
-      expect(src, contains('_preSkipPlaylistIndex'));
       // Round 59: pause must NOT restore pre-skip indices (that changed clips).
       final abort = src.substring(
         src.indexOf('Future<void> _abortInFlightTransport('),

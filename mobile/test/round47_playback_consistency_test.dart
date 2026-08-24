@@ -51,7 +51,7 @@ void main() {
     });
 
     test('showsMiniPlayer stays up for dartClipActive handoff', () {
-      final withTitles = const PlaybackSnapshot(
+      const withTitles = PlaybackSnapshot(
         state: AppPlaybackState.activeIdle,
         clipTitle: 'Winter Time',
         playlistName: 'Library',
@@ -64,12 +64,12 @@ void main() {
       );
       expect(withTitles.showsMiniPlayer(nativeActive: true), isTrue);
 
-      final bareIdle =
-          const PlaybackSnapshot(state: AppPlaybackState.activeIdle);
+      const bareIdle =
+          PlaybackSnapshot(state: AppPlaybackState.activeIdle);
       expect(bareIdle.showsMiniPlayer(), isFalse);
       expect(bareIdle.showsMiniPlayer(dartClipActive: true), isTrue);
 
-      final playing = const PlaybackSnapshot(
+      const playing = PlaybackSnapshot(
         state: AppPlaybackState.manualPlaying,
         clipTitle: 'A',
       );
