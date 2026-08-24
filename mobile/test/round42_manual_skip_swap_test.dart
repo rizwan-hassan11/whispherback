@@ -40,7 +40,7 @@ void main() {
 
     test('playFile swaps with _player.stop() only, never stopClip()', () {
       final src = _read('lib/services/audio/whisper_audio_handler.dart');
-      final idx = src.indexOf('Future<void> playFile(');
+      final idx = src.indexOf('Future<bool> playFile(');
       expect(idx, greaterThanOrEqualTo(0));
       final end = src.indexOf('\n  /// Outstanding watchdog', idx);
       final body = src.substring(idx, end);

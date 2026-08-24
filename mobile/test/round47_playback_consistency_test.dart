@@ -78,7 +78,7 @@ void main() {
 
     test('playFile preload stays true and does not pause newer generation', () {
       final handler = _read('lib/services/audio/whisper_audio_handler.dart');
-      final idx = handler.indexOf('Future<void> playFile(');
+      final idx = handler.indexOf('Future<bool> playFile(');
       final end = handler.indexOf('\n  /// Outstanding watchdog', idx);
       final body = handler.substring(idx, end);
       expect(body, contains('preload: true'));

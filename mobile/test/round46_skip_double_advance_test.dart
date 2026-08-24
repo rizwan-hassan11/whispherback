@@ -27,7 +27,7 @@ void main() {
     test('prime records `_optimisticSkipIndex` and skip consumes it once', () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
       expect(src, contains('int? _optimisticSkipIndex'));
-      expect(src, contains('_optimisticSkipIndex = target.index'));
+      expect(src, contains('_optimisticSkipIndex = nextIndex'));
       expect(src, contains('final primed = _optimisticSkipIndex'));
       expect(src, contains('_optimisticSkipIndex = null'));
 

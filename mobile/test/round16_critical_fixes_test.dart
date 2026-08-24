@@ -187,7 +187,7 @@ void main() {
   group('Round 16-D — playFile starts FG service before setAudioSource', () {
     test('playFile pre-publishes a playing-true PlaybackState', () {
       final src = _readFile('lib/services/audio/whisper_audio_handler.dart');
-      final playFileIdx = src.indexOf('Future<void> playFile(');
+      final playFileIdx = src.indexOf('Future<bool> playFile(');
       expect(playFileIdx, greaterThan(0));
       // Capture the PRE-setAudioSource portion only (everything up to
       // the first setAudioSource call INSIDE playFile).
