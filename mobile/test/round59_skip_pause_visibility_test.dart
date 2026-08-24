@@ -33,8 +33,9 @@ void main() {
       final body = src.substring(idx, end);
       expect(body, contains('must NEVER change which clip'));
       expect(body.contains('_libraryIndex = _preSkipLibraryIndex'), isFalse);
-      expect(body.contains('_playlistClipIndex = _preSkipPlaylistIndex'), isFalse);
-      expect(body, contains('invalidateInFlightPlay()'));
+      expect(
+          body.contains('_playlistClipIndex = _preSkipPlaylistIndex'), isFalse);
+      expect(body, contains('invalidateInFlightPlay(forPause: true)'));
       expect(body, contains('await _audio.pause()'));
       expect(
         body.contains('cancelInFlightPlay()'),
@@ -84,7 +85,8 @@ void main() {
       final end = src.indexOf('Future<void> _skipPlaylistClip(', idx);
       final body = src.substring(idx, end);
       expect(body, contains('await _audio.resume()'));
-      expect(body, contains('_latestTransportPausesPlayback || _userInitiatedPause'));
+      expect(body,
+          contains('_latestTransportPausesPlayback || _userInitiatedPause'));
       expect(body, contains('suppressMediaSessionPauseEcho = true'));
       expect(body, contains('_ignoreSessionPauseUntil'));
     });

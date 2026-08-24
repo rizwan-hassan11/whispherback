@@ -54,7 +54,8 @@ void main() {
       final abortEnd =
           coord.indexOf('\n  Future<T> _serializeTransport', abortIdx);
       final abortBody = coord.substring(abortIdx, abortEnd);
-      expect(abortBody, contains('_audio.invalidateInFlightPlay()'));
+      expect(
+          abortBody, contains('_audio.invalidateInFlightPlay(forPause: true)'));
       expect(
         abortBody.contains('await _audio.pause()'),
         isTrue,
@@ -69,12 +70,12 @@ void main() {
       final softIdx = abortBody.indexOf('} else {');
       expect(softIdx, greaterThanOrEqualTo(0));
       final softBranch = abortBody.substring(softIdx);
-      expect(softBranch, contains('invalidateInFlightPlay()'));
+      expect(softBranch, contains('invalidateInFlightPlay(forPause: false)'));
       expect(softBranch.contains('cancelInFlightPlay()'), isFalse,
           reason: 'Soft skip abort must not stop() a playing clip.');
 
       final handler = _read('lib/services/audio/whisper_audio_handler.dart');
-      expect(handler, contains('void invalidateInFlightPlay()'));
+      expect(handler, contains('void invalidateInFlightPlay({bool forPause'));
       expect(
         handler,
         contains('/// Invalidates an in-flight [playFile] without stopping'),

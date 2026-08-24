@@ -337,7 +337,10 @@ class AudioPlaybackService {
   bool get mediaSessionPlaying => _handler.playbackState.value.playing;
 
   /// Invalidates an in-flight playFile without stopping playback.
-  void invalidateInFlightPlay() => _handler.invalidateInFlightPlay();
+  /// Pass [forPause] when the user tapped pause/dismiss so a dying bind
+  /// cannot leave the next clip playing.
+  void invalidateInFlightPlay({bool forPause = false}) =>
+      _handler.invalidateInFlightPlay(forPause: forPause);
 
   /// Stops an in-flight ExoPlayer source swap without tearing down the session.
   Future<void> cancelInFlightPlay() => _handler.cancelInFlightPlay();

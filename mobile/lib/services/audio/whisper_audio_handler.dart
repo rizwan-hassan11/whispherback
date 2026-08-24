@@ -560,6 +560,7 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     }
 
     final playGen = ++_playFileGeneration;
+    _invalidateForPause = false;
     final swapping = sourceSwap && _playingClip;
     final previousBind = _playFileTail;
     final bindDone = Completer<void>();
@@ -570,7 +571,10 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     suppressMediaSessionPauseEcho = true;
     try {
       await previousBind.catchError((Object _, StackTrace __) {});
-      if (playGen != _playFileGeneration) return false;
+      if (playGen != _playFileGeneration) {
+        await _pauseIfInvalidatedForPause(playGen);
+        return false;
+      }
       await _playFileBound(
         path: path,
         title: title,
@@ -580,12 +584,18 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
         swapping: swapping,
         playGen: playGen,
       );
-      if (playGen != _playFileGeneration) return false;
+      if (playGen != _playFileGeneration) {
+        await _pauseIfInvalidatedForPause(playGen);
+        return false;
+      }
       if (mediaItem.value?.id != path) return false;
 
       // Force audible start under this generation.
       await _ensureAudible(playGen);
-      if (playGen != _playFileGeneration) return false;
+      if (playGen != _playFileGeneration) {
+        await _pauseIfInvalidatedForPause(playGen);
+        return false;
+      }
       if (mediaItem.value?.id != path) return false;
 
       // Owned bind of this path is success. If OEM still reports !playing
@@ -612,10 +622,16 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
 
   /// Repeatedly calls play until ExoPlayer reports playing or [playGen] dies.
   Future<void> _ensureAudible(int playGen) async {
-    if (playGen != _playFileGeneration) return;
+    if (playGen != _playFileGeneration) {
+      await _pauseIfInvalidatedForPause(playGen);
+      return;
+    }
     if (_player.playing) return;
     for (var attempt = 0; attempt < 8; attempt++) {
-      if (playGen != _playFileGeneration) return;
+      if (playGen != _playFileGeneration) {
+        await _pauseIfInvalidatedForPause(playGen);
+        return;
+      }
       if (_player.playing) return;
       try {
         await _player.play();
@@ -630,6 +646,9 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
       } on TimeoutException {
         // Retry play().
       } catch (_) {}
+    }
+    if (playGen != _playFileGeneration) {
+      await _pauseIfInvalidatedForPause(playGen);
     }
   }
 
@@ -669,7 +688,10 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     _startWatchdog = null;
     try {
       await _flushPlayerSource();
-      if (playGen != _playFileGeneration) return;
+      if (playGen != _playFileGeneration) {
+        await _pauseIfInvalidatedForPause(playGen);
+        return;
+      }
 
       // ALWAYS force LoopMode.off — including sourceSwap. Keep-alive uses
       // LoopMode.one; skipping that reset left ExoPlayer looping the same
@@ -711,6 +733,7 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
         }
       }
       if (playGen != _playFileGeneration) {
+        await _pauseIfInvalidatedForPause(playGen);
         return;
       }
       final item = _clipMediaItem(
@@ -726,8 +749,10 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
       onClipSessionChanged?.call();
       await play();
       if (playGen != _playFileGeneration) {
-        // Round 47: do NOT pause here — the newer playFile already owns
-        // the player. Pausing would stop the clip the user just skipped to.
+        // Round 62: if pause killed this load, pause — do NOT leave the
+        // newly bound clip playing (that made "pause change the clip").
+        // If a newer skip owns the player, leave it alone.
+        await _pauseIfInvalidatedForPause(playGen);
         return;
       }
       await _ensureAudible(playGen);
@@ -810,20 +835,50 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   /// decides how to phrase the user-visible message.
   void Function(String? clipTitle)? onPlaybackStartFailure;
 
+  /// True when the latest [invalidateInFlightPlay] came from a user pause /
+  /// dismiss. A superseded [playFile] must then pause — not leave the newly
+  /// bound clip playing (QA: next deferred until pause, then clip changes).
+  bool _invalidateForPause = false;
+
   /// Invalidates an in-flight [playFile] without stopping a healthy clip.
   /// Used when skip/play preempts a prior load — the new [playFile] owns the
   /// ExoPlayer stop/swap. Stopping here made every next/prev sound like
   /// pause and reset the scrubber to 0:00.
-  void invalidateInFlightPlay() {
+  ///
+  /// [forPause]: hard abort from coordinator.pause / dismiss. The dying
+  /// playFile must pause after bind and must not call play()/resume.
+  void invalidateInFlightPlay({bool forPause = false}) {
     _playFileGeneration++;
+    _invalidateForPause = forPause;
     _startWatchdog?.cancel();
     _startWatchdog = null;
+    if (forPause) {
+      _sourceSwapInFlight = false;
+      suppressMediaSessionPauseEcho = false;
+    }
+  }
+
+  /// Pause if this generation was killed by a user pause (not by a newer skip).
+  Future<void> _pauseIfInvalidatedForPause(int playGen) async {
+    if (playGen == _playFileGeneration) return;
+    if (!_invalidateForPause) return;
+    _invalidateForPause = false;
+    _sourceSwapInFlight = false;
+    try {
+      await _player.pause();
+    } catch (_) {}
+    try {
+      _publishClipControls(
+        playing: false,
+        processing: _player.processingState,
+      );
+    } catch (_) {}
   }
 
   /// Aborts an in-flight [playFile] (e.g. pause preempted skip). Keeps the
   /// audio_service session alive — only stops the ExoPlayer source swap.
   Future<void> cancelInFlightPlay() async {
-    invalidateInFlightPlay();
+    invalidateInFlightPlay(forPause: true);
     _sourceSwapInFlight = false;
     if (!_playingClip &&
         _player.processingState != ProcessingState.loading &&
@@ -1194,7 +1249,8 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     if ((_sourceSwapInFlight || suppressMediaSessionPauseEcho) &&
         _appTransportDepth == 0) {
       if (kDebugMode) {
-        debugPrint('handler.pause: ignored MediaSession echo during source swap');
+        debugPrint(
+            'handler.pause: ignored MediaSession echo during source swap');
       }
       return;
     }

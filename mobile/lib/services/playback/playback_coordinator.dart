@@ -257,15 +257,17 @@ class PlaybackCoordinator {
       // Invalidate the load, then PAUSE — do not stop()/cancelInFlightPlay.
       // Stopping destroyed the newly bound source so resume rebound a
       // different clip than the one that was audible (QA Round 59).
+      // Round 62: forPause so a dying playFile cannot leave the next clip
+      // playing (that made pause appear to change the track).
       try {
-        _audio.invalidateInFlightPlay();
+        _audio.invalidateInFlightPlay(forPause: true);
       } catch (_) {}
       try {
         await _audio.pause();
       } catch (_) {}
     } else {
       try {
-        _audio.invalidateInFlightPlay();
+        _audio.invalidateInFlightPlay(forPause: false);
       } catch (_) {}
     }
   }
@@ -685,9 +687,8 @@ class PlaybackCoordinator {
               native.playlistName ?? _snapshot.playlistName ?? 'WhisperBack',
           clipTitle:
               native.clipTitle ?? _snapshot.clipTitle ?? 'Scheduled whisper',
-          durationMs: native.durationMs > 0
-              ? native.durationMs
-              : _snapshot.durationMs,
+          durationMs:
+              native.durationMs > 0 ? native.durationMs : _snapshot.durationMs,
           modalVisible: false,
         ));
         return;
@@ -869,14 +870,15 @@ class PlaybackCoordinator {
   /// [WhisperAudioHandler.pause]. Preempt any in-flight skip and sync
   /// coordinator + native state without double-pausing ExoPlayer.
   Future<void> _handleNotificationPause() {
-    // Round 50/59: ignore MediaSession pause echoes triggered by ExoPlayer
-    // stop()/setAudioSource during and shortly after next/prev.
-    if (_suppressTransientNotPlaying ||
-        _skipInFlight ||
-        (_ignoreSessionPauseUntil != null &&
-            DateTime.now().isBefore(_ignoreSessionPauseUntil!))) {
+    // Round 62: only ignore a short OEM MediaSession echo window — never
+    // ignore a real pause for the whole `_skipInFlight` latch. Swallowing
+    // pause during skip left the skip body free to finish and start the
+    // next clip when the user later tapped pause again.
+    if (_ignoreSessionPauseUntil != null &&
+        DateTime.now().isBefore(_ignoreSessionPauseUntil!) &&
+        !_userInitiatedPause) {
       if (kDebugMode) {
-        debugPrint('notification pause: ignored during skip latch');
+        debugPrint('notification pause: ignored OEM echo settle window');
       }
       return Future<void>.value();
     }
@@ -900,7 +902,6 @@ class PlaybackCoordinator {
     return _serializeTransport(
       (epoch) async {
         if (!_transportCurrent(epoch)) return;
-        if (_suppressTransientNotPlaying) return;
         _userInitiatedPause = true;
         if (_nativeOwnsPlayback ||
             NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
@@ -1155,7 +1156,16 @@ class PlaybackCoordinator {
           (epoch) => _skipPlaylistClip(epoch, next: next),
           preempt: true,
         );
-        if (_latestTransportPausesPlayback || _userInitiatedPause) return;
+        // Pause/dismiss won while this skip was binding — do not force-resume
+        // or re-emit playing:true (that started the deferred next clip).
+        if (_latestTransportPausesPlayback || _userInitiatedPause) {
+          _suppressTransientNotPlaying = false;
+          _pendingSkipNext = null;
+          if (_snapshot.isPlaying) {
+            _emit(_snapshot.copyWith(isPlaying: false));
+          }
+          return;
+        }
         _userInitiatedPause = false;
         // playFile now refuses success unless ExoPlayer is actually playing.
         // One final resume covers a late OEM pause-echo after playFile returned.
@@ -1340,7 +1350,6 @@ class PlaybackCoordinator {
       _optimisticSkipClip = null;
       _optimisticSkipIndex = null;
       final idx = clips.indexWhere((c) => c.id == clip.id);
-      if (idx >= 0) _playlistClipIndex = idx;
       final path = _optimisticSkipTargetPath ?? clip.filePath;
       try {
         final ok = await _audio.playFile(
@@ -1364,6 +1373,8 @@ class PlaybackCoordinator {
         await _honorSupersededTransport(epoch);
         return;
       }
+      // Commit queue pointer only after a successful bind.
+      if (idx >= 0) _playlistClipIndex = idx;
       _warmPlaylistNeighbors();
       if (_transportCurrent(epoch)) {
         _emit(_snapshot.copyWith(
@@ -2310,6 +2321,14 @@ class PlaybackCoordinator {
         sourceSwap: skipSnapshotEmit,
       );
       if (!ok) {
+        // Round 62: NEVER resume a skip that pause/dismiss superseded.
+        // Round 61's "resume if MediaItem matches" made pause start the
+        // deferred next clip — the exact QA "pause changes the clip" bug.
+        if (_userInitiatedPause ||
+            _latestTransportPausesPlayback ||
+            (transportEpoch != null && !_transportCurrent(transportEpoch))) {
+          return;
+        }
         // Round 61: never tear down a live MediaSession just because the
         // playing flag lagged. If this clip is already the bound MediaItem,
         // keep the Spotify bar + notification and try resume.
@@ -2692,8 +2711,8 @@ class PlaybackCoordinator {
             _audio.restoreCurrentPath(path);
           }
           final ps = _audio.player.processingState;
-          final needsRebind = ps == ProcessingState.completed ||
-              ps == ProcessingState.idle;
+          final needsRebind =
+              ps == ProcessingState.completed || ps == ProcessingState.idle;
           if (needsRebind) {
             await _audio.playFile(
               path,
@@ -2714,8 +2733,7 @@ class PlaybackCoordinator {
           final path = _audio.boundPath ?? _audio.currentPath;
           final ps = _audio.player.processingState;
           if (path != null &&
-              (ps == ProcessingState.idle ||
-                  ps == ProcessingState.completed)) {
+              (ps == ProcessingState.idle || ps == ProcessingState.completed)) {
             await _audio.playFile(
               path,
               title: _snapshot.clipTitle ?? '',
@@ -2921,7 +2939,18 @@ class PlaybackCoordinator {
     }
 
     if (!active) {
-      _emit(const PlaybackSnapshot(state: AppPlaybackState.inactive));
+      // Round 62: never wipe an in-session Spotify bar because of a
+      // transient Active=false read on the 15s timer. Keep titles / state
+      // unless there is truly no clip session.
+      final hasSession = _snapshot.state == AppPlaybackState.manualPlaying ||
+          _snapshot.state == AppPlaybackState.scheduledPlaying ||
+          _snapshot.clipTitle != null ||
+          _audio.mediaItem != null ||
+          _audio.currentPath != null ||
+          _nativeOwnsPlayback;
+      if (!hasSession) {
+        _emit(const PlaybackSnapshot(state: AppPlaybackState.inactive));
+      }
       return;
     }
 
