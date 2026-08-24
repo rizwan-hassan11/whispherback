@@ -82,6 +82,27 @@ void main() {
       );
     });
 
+    test('notification pause arms user-pause sentinel before transport', () {
+      final src = _read('lib/services/playback/playback_coordinator.dart');
+      final idx = src.indexOf('Future<void> _handleNotificationPause()');
+      final end = src.indexOf('Future<void> _handleNotificationPlay()', idx);
+      final body = src.substring(idx, end);
+      expect(
+        body.indexOf('_userInitiatedPause = true'),
+        lessThan(body.indexOf('_serializeTransport')),
+        reason: 'Notification shade pause must not lose the completion race.',
+      );
+    });
+
+    test('duplicate completion events cannot double-advance queue', () {
+      final src = _read('lib/services/playback/playback_coordinator.dart');
+      expect(src, contains('_clipCompletionInFlight'));
+      final idx = src.indexOf('Future<void> _onClipCompleted() async');
+      final end = src.indexOf('Future<void> _onClipCompletedBody() async', idx);
+      final guard = src.substring(idx, end);
+      expect(guard, contains('if (_clipCompletionInFlight) return'));
+    });
+
     test('notification skip routes to coordinator even when not playingClip',
         () {
       final src = _read('lib/services/audio/whisper_audio_handler.dart');

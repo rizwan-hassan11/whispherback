@@ -333,6 +333,11 @@ class PlaybackCoordinator {
   /// or the user explicitly pauses.
   bool _suppressTransientNotPlaying = false;
 
+  /// Guards against duplicate `ProcessingState.completed` events from
+  /// ExoPlayer double-firing completion, which would otherwise walk the
+  /// queue twice on a single track end (QA Round 57).
+  bool _clipCompletionInFlight = false;
+
   /// If a newer transport op superseded [epoch] after audio already started,
   /// honor the user's latest intent — but ONLY when that intent is pause /
   /// dismiss. Skip→skip must not pause the newer clip (Round 47).
@@ -844,17 +849,23 @@ class PlaybackCoordinator {
     if (_userInitiatedPause && !_snapshot.isPlaying) {
       return Future<void>.value();
     }
+    // Mirror in-app pause(): arm the sentinel before transport serialization
+    // so a concurrent ProcessingState.completed cannot auto-advance while
+    // this notification pause waits on the transport gate (QA Round 57).
+    if (_snapshot.state != AppPlaybackState.inactive &&
+        !_systemDrivenPauseInFlight) {
+      _userInitiatedPause = true;
+    }
+    _suppressTransientNotPlaying = false;
+    _pendingSkipNext = null;
+    if (_snapshot.isPlaying) {
+      _emit(_snapshot.copyWith(isPlaying: false));
+    }
     return _serializeTransport(
       (epoch) async {
         if (!_transportCurrent(epoch)) return;
         if (_suppressTransientNotPlaying) return;
-        if (_snapshot.state != AppPlaybackState.inactive &&
-            !_systemDrivenPauseInFlight) {
-          _userInitiatedPause = true;
-        }
-        if (_snapshot.isPlaying) {
-          _emit(_snapshot.copyWith(isPlaying: false));
-        }
+        _userInitiatedPause = true;
         if (_nativeOwnsPlayback ||
             NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
           try {
@@ -1462,6 +1473,16 @@ class PlaybackCoordinator {
   }
 
   Future<void> _onClipCompleted() async {
+    if (_clipCompletionInFlight) return;
+    _clipCompletionInFlight = true;
+    try {
+      await _onClipCompletedBody();
+    } finally {
+      _clipCompletionInFlight = false;
+    }
+  }
+
+  Future<void> _onClipCompletedBody() async {
     // Capture generation BEFORE yielding so a concurrent skip/next that
     // bumps `_playbackGeneration` can invalidate this completion.
     final generationAtStart = _playbackGeneration;
