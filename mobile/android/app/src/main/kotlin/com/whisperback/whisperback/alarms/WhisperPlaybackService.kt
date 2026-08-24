@@ -445,9 +445,9 @@ class WhisperPlaybackService : Service() {
                 if (!path.isNullOrBlank() && File(path).exists()) {
                     userPaused = false
                     wantPlaying = true
-                    writeState(STATE_PLAYING)
-                    notifyListener(STATE_PLAYING)
-                    postPlaybackNotification(isPlaying = true)
+                    writeState(STATE_PAUSED)
+                    notifyListener(STATE_PAUSED)
+                    postPlaybackNotification(isPlaying = false)
                     playClip(path)
                 } else {
                     Log.w(TAG, "skip requested with empty queue and no path")
@@ -471,9 +471,12 @@ class WhisperPlaybackService : Service() {
                 currentClipTitle = title
                 userPaused = false
                 wantPlaying = true
-                writeState(STATE_PLAYING)
-                notifyListener(STATE_PLAYING)
-                postPlaybackNotification(isPlaying = true)
+                // Do NOT notify STATE_PLAYING until MediaPlayer.start() in
+                // onPrepared — early PLAYING made Flutter think skip worked
+                // while audio was still silent (same dead-next / resume bug).
+                writeState(STATE_PAUSED)
+                notifyListener(STATE_PAUSED)
+                postPlaybackNotification(isPlaying = false)
                 playClip(path)
                 return
             }

@@ -63,15 +63,18 @@ void main() {
       expect(body, contains('_optimisticSkipIndex = nextIndex'));
     });
 
-    test('playFile success is mediaItem bind, not generation race', () {
+    test('playFile success requires audible playing, not just mediaItem bind',
+        () {
       final handler = _read('lib/services/audio/whisper_audio_handler.dart');
       final idx = handler.indexOf('Future<bool> playFile(');
       final end = handler.indexOf('Future<void> _playFileBound(', idx);
       final body = handler.substring(idx, end);
-      expect(body, contains('return mediaItem.value?.id == path'));
+      expect(body, contains('_waitUntilPlaying'));
+      expect(body, contains('_player.playing'));
       expect(
-        body.contains('playGen == _playFileGeneration && mediaItem'),
+        body.contains('return mediaItem.value?.id == path;'),
         isFalse,
+        reason: 'Must not succeed on silent MediaItem bind (Round 60).',
       );
     });
 

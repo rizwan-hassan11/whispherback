@@ -95,9 +95,11 @@ void main() {
         isTrue,
         reason: 'After moving the index the handler must start the new clip.',
       );
-      expect(handleSkipBody, contains('notifyListener(STATE_PLAYING)'),
-          reason: 'Skip must push the new title/playing state to Flutter '
-              'before prepareAsync, otherwise next/prev feels laggy.');
+      expect(handleSkipBody, contains('notifyListener(STATE_PAUSED)'),
+          reason: 'Skip must not claim PLAYING before MediaPlayer.start(); '
+              'onPrepared pushes PLAYING once audio is audible.');
+      expect(handleSkipBody, contains('playClip(path)'),
+          reason: 'After moving the index the handler must start the new clip.');
     });
 
     test(

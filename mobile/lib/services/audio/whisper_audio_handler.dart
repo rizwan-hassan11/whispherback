@@ -537,9 +537,9 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   // ── Clip / playlist playback (Spotify-style media notification) ───────────
 
   /// Loads [path] and starts playback. Returns `true` only when THIS call's
-  /// generation still owns the player and [mediaItem] was published for [path].
-  /// Superseded loads return `false` without throwing so callers never treat
-  /// a cancelled skip as a successful bind (title/audio desync).
+  /// generation still owns the player, [mediaItem] is [path], AND ExoPlayer
+  /// is actually `playing`. Bind-without-play used to make next/prev look
+  /// dead until pause/resume (QA Round 60).
   Future<bool> playFile(
     String path, {
     String title = 'WhisperBack',
@@ -574,13 +574,39 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
         swapping: swapping,
         playGen: playGen,
       );
-      // Bound for this path counts as success even if a later generation bump
-      // raced `play()` — otherwise skip leaves audio stopped / indices stale
-      // and pause/resume appears to change the clip (QA Round 59).
-      return mediaItem.value?.id == path;
+      if (playGen != _playFileGeneration) return false;
+      if (mediaItem.value?.id != path) return false;
+      if (_player.playing) return true;
+
+      // OEM MediaSession pause-echo after stop() often leaves the new source
+      // bound but paused. One more play under this generation before we give
+      // up — never report success for a silent bind.
+      try {
+        await _player.play();
+      } catch (_) {}
+      final audible = await _waitUntilPlaying(playGen);
+      return playGen == _playFileGeneration &&
+          mediaItem.value?.id == path &&
+          audible;
     } finally {
       if (!bindDone.isCompleted) bindDone.complete();
     }
+  }
+
+  /// Waits briefly for ExoPlayer to report [playing] under [playGen].
+  Future<bool> _waitUntilPlaying(int playGen) async {
+    if (playGen != _playFileGeneration) return false;
+    if (_player.playing) return true;
+    try {
+      await _player.playerStateStream
+          .firstWhere(
+            (s) => s.playing || playGen != _playFileGeneration,
+          )
+          .timeout(const Duration(milliseconds: 1500));
+    } on TimeoutException {
+      // Fall through — caller decides based on current playing flag.
+    } catch (_) {}
+    return playGen == _playFileGeneration && _player.playing;
   }
 
   Future<void> _playFileBound({
@@ -669,15 +695,27 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
         playlistName: playlistName,
         subtitle: subtitle,
       );
-      mediaItem.add(item);
-      queue.add([item]);
-      onClipSessionChanged?.call();
+      // Publish MediaItem only after play starts so a silent bind cannot
+      // become "the current clip" that pause/resume then audibly starts
+      // (QA Round 60: next dead until pause/resume).
       await play();
       if (playGen != _playFileGeneration) {
         // Round 47: do NOT pause here — the newer playFile already owns
         // the player. Pausing would stop the clip the user just skipped to.
         return;
       }
+      if (!_player.playing) {
+        try {
+          await _player.play();
+        } catch (_) {}
+        await _waitUntilPlaying(playGen);
+      }
+      if (playGen != _playFileGeneration || !_player.playing) {
+        return;
+      }
+      mediaItem.add(item);
+      queue.add([item]);
+      onClipSessionChanged?.call();
 
       // Fire-and-forget watcher: if the native player never reaches a playable
       // state within 5s, emit `onPlaybackStartFailure` so the coordinator can

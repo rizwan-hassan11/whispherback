@@ -91,7 +91,7 @@ void main() {
       final body = src.substring(idx, end);
       expect(body, contains('flushPlayerForSkip()'));
       final flushIdx = body.indexOf('flushPlayerForSkip()');
-      final notifyIdx = body.indexOf('notifyListener(STATE_PLAYING)');
+      final notifyIdx = body.indexOf('notifyListener(STATE_PAUSED)');
       final playIdx = body.indexOf('playClip(path)');
       expect(flushIdx, greaterThanOrEqualTo(0));
       expect(notifyIdx, greaterThan(flushIdx));

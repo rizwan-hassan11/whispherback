@@ -51,9 +51,9 @@ class PlaybackSnapshot extends Equatable {
   /// Shared by [MainShell] and [MiniPlayerBar] so layout reserve and
   /// visibility never disagree.
   ///
-  /// Contract (Round 50/52): the bar stays visible for the whole clip session
-  /// (playing or paused) until dismiss/stop/inactive. It must never vanish
-  /// mid next/prev, after pause, or while MediaSession still owns a clip.
+  /// Contract (Round 50/52/60): the bar stays visible for the whole clip
+  /// session (playing or paused) until dismiss/stop/inactive. It must never
+  /// vanish mid next/prev, after pause, or while MediaSession still owns a clip.
   bool showsMiniPlayer({
     bool nativeActive = false,
     bool dartClipActive = false,
@@ -69,8 +69,8 @@ class PlaybackSnapshot extends Equatable {
     if (nativeActive || dartClipActive || hasMediaSessionClip || isPlaying) {
       return true;
     }
-    // Keep the bar during handoff / skip gaps when we still know what was
-    // playing — vanishing mid next/prev is the Round 59 visibility bug.
+    // Keep the bar during handoff / skip gaps / sleep-pause when we still
+    // know what was playing — vanishing mid next/prev is the visibility bug.
     if (clipTitle != null || playlistName != null) return true;
     return false;
   }

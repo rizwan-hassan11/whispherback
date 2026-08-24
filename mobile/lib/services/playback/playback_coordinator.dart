@@ -283,10 +283,17 @@ class PlaybackCoordinator {
       final abort = _abortInFlightTransport(
         revertOptimisticSkip: revertOptimisticSkip,
       );
-      // Soft abort is synchronous (generation bump only) — never wait on it.
-      // Hard abort (pause) cuts the line immediately while cancel runs parallel.
-      unawaited(abort);
-      previous = Future<void>.value();
+      if (revertOptimisticSkip) {
+        // Hard pause/dismiss: cut the line immediately.
+        unawaited(abort);
+        previous = Future<void>.value();
+      } else {
+        // Soft skip/play: invalidate the prior load, but still wait for the
+        // previous transport body so two setAudioSource calls cannot
+        // interleave on ExoPlayer (that left next silent until resume).
+        unawaited(abort);
+        previous = _transportGate;
+      }
     } else {
       previous = _transportGate;
     }
@@ -724,20 +731,25 @@ class PlaybackCoordinator {
         // its own clip (e.g. user tapped Play); we only roll back our own
         // scheduledPlaying frame.
         //
-        // Round 47: MediaPlayer often goes briefly idle between skip
-        // prepares. Demoting to activeIdle hid the mini-player while the
-        // next clip was still audible. Keep scheduledPlaying (just mark
-        // not playing) unless Dart has no clip and no skip is in flight.
+        // Round 47/60: MediaPlayer often goes briefly idle between skip
+        // prepares. Demoting to bare activeIdle hid the Spotify mini-player.
+        // Keep the session (and titles) unless there is truly nothing left.
         if (_snapshot.state == AppPlaybackState.scheduledPlaying) {
           final dartOwnsClip = _audio.currentPath != null ||
               _audio.isPlayingClip ||
               _audio.mediaItem != null;
-          final skipInFlight =
-              _optimisticSkipIndex != null || _suppressTransientNotPlaying;
-          if (dartOwnsClip || skipInFlight) {
-            // Keep session state so the mini-player never vanishes mid-skip.
+          final skipInFlight = _skipInFlight ||
+              _suppressTransientNotPlaying ||
+              _optimisticSkipIndex != null;
+          final hasSessionMeta =
+              _snapshot.clipTitle != null || _snapshot.playlistName != null;
+          if (dartOwnsClip || skipInFlight || hasSessionMeta) {
+            // Keep scheduledPlaying + titles so the bar never vanishes mid-skip.
             _emit(_snapshot.copyWith(
-                isPlaying: _suppressTransientNotPlaying ? true : false));
+              state: AppPlaybackState.scheduledPlaying,
+              isPlaying: _suppressTransientNotPlaying ? true : false,
+              modalVisible: false,
+            ));
           } else {
             // True end of native clip — clear metadata so the bar can hide.
             _emit(const PlaybackSnapshot(
@@ -1144,17 +1156,14 @@ class PlaybackCoordinator {
         );
         if (_latestTransportPausesPlayback || _userInitiatedPause) return;
         _userInitiatedPause = false;
-        // Ensure the new clip is actually audible. playFile usually starts
-        // playback, but OEM MediaSession pause-echo after stop() can leave
-        // the player paused — without this, next/prev look dead until the
-        // user taps resume (which then appears to "change" the clip).
+        // playFile now refuses success unless ExoPlayer is actually playing.
+        // One final resume covers a late OEM pause-echo after playFile returned.
         if (!_nativeOwnsPlayback &&
             !NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
           try {
-            final ps = _audio.player.processingState;
             if (!_audio.isPlaying &&
-                ps != ProcessingState.idle &&
-                ps != ProcessingState.completed) {
+                _audio.player.processingState != ProcessingState.idle &&
+                _audio.player.processingState != ProcessingState.completed) {
               await _audio.resume();
             }
           } catch (e, st) {
@@ -1163,6 +1172,11 @@ class PlaybackCoordinator {
             }
           }
         }
+        final audible = _nativeOwnsPlayback
+            ? NativeAlarmsBridge.instance.lastSnapshot.isPlaying
+            : _audio.isPlaying;
+        // Never paint "playing" when audio is silent — that made next look
+        // dead and pause/resume appear to change the clip.
         if (_snapshot.state == AppPlaybackState.manualPlaying ||
             _snapshot.state == AppPlaybackState.scheduledPlaying ||
             _snapshot.clipTitle != null) {
@@ -1171,14 +1185,16 @@ class PlaybackCoordinator {
                     _nativeOwnsPlayback
                 ? AppPlaybackState.scheduledPlaying
                 : AppPlaybackState.manualPlaying,
-            isPlaying: true,
+            isPlaying: audible,
             modalVisible: false,
           ));
         }
         // Hold the MediaSession pause-echo shield briefly after skip so a
         // late OEM echo cannot pause the clip we just started.
-        _ignoreSessionPauseUntil =
-            DateTime.now().add(const Duration(milliseconds: 900));
+        if (audible) {
+          _ignoreSessionPauseUntil =
+              DateTime.now().add(const Duration(milliseconds: 900));
+        }
       } catch (e, st) {
         if (kDebugMode) {
           debugPrint('skip${next ? 'Next' : 'Previous'} failed: $e\n$st');

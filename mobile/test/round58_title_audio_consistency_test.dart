@@ -43,6 +43,13 @@ void main() {
       final handler = _read('lib/services/audio/whisper_audio_handler.dart');
       expect(handler, contains('Future<bool> playFile('));
       expect(handler, contains('mediaItem.value?.id == path'));
+      expect(handler, contains('_waitUntilPlaying'));
+      expect(handler, contains('_player.playing'));
+      expect(
+        handler.contains('Bound for this path counts as success even if'),
+        isFalse,
+        reason: 'Bind-without-play made next dead until pause/resume.',
+      );
 
       final audio = _read('lib/services/audio/audio_services.dart');
       final idx = audio.indexOf('Future<bool> playFile(');
