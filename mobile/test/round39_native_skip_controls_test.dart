@@ -99,7 +99,8 @@ void main() {
           reason: 'Skip must not claim PLAYING before MediaPlayer.start(); '
               'onPrepared pushes PLAYING once audio is audible.');
       expect(handleSkipBody, contains('playClip(path)'),
-          reason: 'After moving the index the handler must start the new clip.');
+          reason:
+              'After moving the index the handler must start the new clip.');
     });
 
     test(

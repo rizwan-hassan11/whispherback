@@ -135,7 +135,8 @@ void main() {
     test('mini-player stays up during skip and prefers snapshot title', () {
       final bar = _read('lib/features/playback/mini_player_bar.dart');
       expect(bar, contains('coordinator.skipTransportActive'));
-      expect(bar, contains('skipPending && snapTitle'));
+      expect(bar, contains('snapTitle?.isNotEmpty == true'));
+      expect(bar, contains('skipPending || snapshot.isPlaying'));
       expect(bar, contains('elevation: 8'));
       final shell = _read('lib/core/widgets/main_shell.dart');
       expect(shell, contains('skipTransportActive'));

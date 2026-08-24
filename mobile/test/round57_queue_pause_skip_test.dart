@@ -78,10 +78,10 @@ void main() {
       expect(abort, contains('must NEVER change which clip'));
 
       final pauseIdx = src.indexOf('Future<void> pause()');
-      final pauseBody = src.substring(pauseIdx, pauseIdx + 500);
+      final pauseBody = src.substring(pauseIdx, pauseIdx + 700);
       expect(
         pauseBody.indexOf('_userInitiatedPause = true'),
-        lessThan(pauseBody.indexOf('_acceptPlayPauseControl')),
+        lessThan(pauseBody.indexOf('_serializeTransport')),
       );
     });
 

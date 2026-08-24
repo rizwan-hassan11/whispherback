@@ -37,10 +37,11 @@ void main() {
 
     test('mini-player title follows bound MediaItem (not optimistic snapshot)',
         () {
+      // Round 63: snapshot is source of truth for in-app title/icon.
       final bar = _read('lib/features/playback/mini_player_bar.dart');
       expect(bar, contains('skipTransportActive'));
-      expect(bar, contains('skipPending && snapTitle'));
-      expect(bar, contains('skipPending ? true : mediaSessionPlaying'));
+      expect(bar, contains('snapTitle?.isNotEmpty == true'));
+      expect(bar, contains('skipPending || snapshot.isPlaying'));
     });
 
     test('in-flight skip taps queue instead of debounce-reject', () {

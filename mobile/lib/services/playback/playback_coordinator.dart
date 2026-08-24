@@ -180,11 +180,6 @@ class PlaybackCoordinator {
   /// skip / pause round-trips.
   static const _transportBodyTimeout = Duration(seconds: 12);
 
-  /// Collapse accidental double-taps on play/pause (QA Aug 22 Issue 3).
-  static const _controlDebounce = Duration(milliseconds: 400);
-
-  DateTime? _lastPlayPauseControlAt;
-
   /// True while [_runOneSkip] is running (flush → transport → force-resume).
   bool _skipInFlight = false;
 
@@ -209,19 +204,6 @@ class PlaybackCoordinator {
 
   bool _transportCurrent(int epoch) => epoch == _transportEpoch;
 
-  /// Debounces play/pause so a double-tap cannot toggle twice into an
-  /// undefined state. Pause is never blocked by [_skipInFlight] so the user
-  /// can still stop audio during a slow skip.
-  bool _acceptPlayPauseControl() {
-    final now = DateTime.now();
-    final last = _lastPlayPauseControlAt;
-    if (last != null && now.difference(last) < _controlDebounce) {
-      return false;
-    }
-    _lastPlayPauseControlAt = now;
-    return true;
-  }
-
   /// Stops an in-flight skip / playFile without tearing down the media session.
   ///
   /// [revertOptimisticSkip] distinguishes hard abort (pause/dismiss) from soft
@@ -243,8 +225,7 @@ class PlaybackCoordinator {
       _ignoreSessionPauseUntil = null;
       _audio.suppressMediaSessionPauseEcho = false;
     }
-    final nativeActive = _nativeOwnsPlayback ||
-        NativeAlarmsBridge.instance.lastSnapshot.isNativeActive;
+    final nativeActive = _nativeOwnsPlayback;
     if (nativeActive) {
       if (revertOptimisticSkip) {
         try {
@@ -370,8 +351,7 @@ class PlaybackCoordinator {
     _suppressTransientNotPlaying = false;
     _userInitiatedPause = true;
     _emit(_snapshot.copyWith(isPlaying: false));
-    if (_nativeOwnsPlayback ||
-        NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
+    if (_nativeOwnsPlayback) {
       try {
         await NativeAlarmsBridge.instance.pauseNative();
       } catch (_) {}
@@ -548,9 +528,15 @@ class PlaybackCoordinator {
   }
 
   /// Native FG MediaPlayer owns the session (playing or paused).
+  ///
+  /// Round 63: only treat native as owner while the UI is in
+  /// [AppPlaybackState.scheduledPlaying]. A sticky `nativeActive` prefs flag
+  /// after a prior schedule must NOT steal library/manual next/prev/pause
+  /// onto `skipNative` (that left titles stuck and buttons feeling dead).
   bool get _nativeOwnsPlayback =>
-      _nativeScheduledActive ||
-      NativeAlarmsBridge.instance.lastSnapshot.isNativeActive;
+      _snapshot.state == AppPlaybackState.scheduledPlaying &&
+      (_nativeScheduledActive ||
+          NativeAlarmsBridge.instance.lastSnapshot.isNativeActive);
 
   /// Schedule id native is currently playing. Cached so the idle
   /// transition can stamp the completion into the right store bucket
@@ -903,8 +889,7 @@ class PlaybackCoordinator {
       (epoch) async {
         if (!_transportCurrent(epoch)) return;
         _userInitiatedPause = true;
-        if (_nativeOwnsPlayback ||
-            NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
+        if (_nativeOwnsPlayback) {
           try {
             await NativeAlarmsBridge.instance.pauseNative();
           } catch (e, st) {
@@ -936,8 +921,7 @@ class PlaybackCoordinator {
         if (!_snapshot.isPlaying) {
           _emit(_snapshot.copyWith(isPlaying: true));
         }
-        if (_nativeOwnsPlayback ||
-            NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
+        if (_nativeOwnsPlayback) {
           try {
             await NativeAlarmsBridge.instance.resumeNative();
           } catch (e, st) {
@@ -1000,8 +984,7 @@ class PlaybackCoordinator {
     _optimisticSkipClip = null;
     _optimisticSkipTargetPath = null;
 
-    final native = _nativeOwnsPlayback ||
-        NativeAlarmsBridge.instance.lastSnapshot.isNativeActive;
+    final native = _nativeOwnsPlayback;
     if (native) {
       // Keep the bar alive; native snapshot will update the real title.
       _emit(_snapshot.copyWith(
@@ -1169,8 +1152,7 @@ class PlaybackCoordinator {
         _userInitiatedPause = false;
         // playFile now refuses success unless ExoPlayer is actually playing.
         // One final resume covers a late OEM pause-echo after playFile returned.
-        if (!_nativeOwnsPlayback &&
-            !NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
+        if (!_nativeOwnsPlayback) {
           try {
             if (!_audio.isPlaying &&
                 _audio.player.processingState != ProcessingState.idle &&
@@ -1219,10 +1201,8 @@ class PlaybackCoordinator {
             modalVisible: false,
           ));
         }
-        final stillLive = _audio.isPlayingClip ||
-            _audio.isPlaying ||
-            _nativeOwnsPlayback ||
-            NativeAlarmsBridge.instance.lastSnapshot.isNativeActive;
+        final stillLive =
+            _audio.isPlayingClip || _audio.isPlaying || _nativeOwnsPlayback;
         if (!stillLive && !_errorController.isClosed) {
           _errorController.add(PlaybackErrorEvent(
             PlaybackErrorReason.decodeFailed,
@@ -1232,10 +1212,11 @@ class PlaybackCoordinator {
       }
     } finally {
       _skipInFlight = false;
-      // Do not clear the skip latch here — that reintroduced alternate
-      // pause/play (Round 49). Latch clears on playing:true or user pause.
-      // MediaSession pause-echo uses suppressMediaSessionPauseEcho +
-      // settle window instead.
+      // Round 63: ALWAYS clear the swap latch when skip ends. Leaving it
+      // set until playing:true (Round 49) stuck forever when OEM lag /
+      // failed bind never reported playing — next/prev and pause then
+      // looked dead because player-state updates were ignored.
+      _suppressTransientNotPlaying = false;
       final settleUntil = _ignoreSessionPauseUntil;
       if (settleUntil != null) {
         final remaining = settleUntil.difference(DateTime.now());
@@ -1263,8 +1244,7 @@ class PlaybackCoordinator {
     // Scheduled Android playback is owned by native MediaPlayer. Dart
     // skip used to call just_audio, which is idle in that state — the
     // mini-player and notification next/prev looked dead.
-    if (_nativeOwnsPlayback ||
-        NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
+    if (_nativeOwnsPlayback) {
       _optimisticSkipIndex = null;
       try {
         await NativeAlarmsBridge.instance.skipNative(next: next);
@@ -2467,7 +2447,7 @@ class PlaybackCoordinator {
   }
 
   Future<void> pause() {
-    // Flip the pause sentinel BEFORE debounce / transport so a concurrent
+    // Flip the pause sentinel BEFORE transport so a concurrent
     // ProcessingState.completed cannot auto-advance and look like "pause
     // skipped to next" (QA Round 57).
     _userInitiatedPause = true;
@@ -2475,13 +2455,9 @@ class PlaybackCoordinator {
     _pendingSkipNext = null;
     _ignoreSessionPauseUntil = null;
     _audio.suppressMediaSessionPauseEcho = false;
-    if (!_acceptPlayPauseControl()) {
-      // Still keep the sentinel — the user intended pause.
-      if (_snapshot.isPlaying) {
-        _emit(_snapshot.copyWith(isPlaying: false));
-      }
-      return Future<void>.value();
-    }
+    // Round 63: never debounce-away the real audio pause. Returning early
+    // after only flipping the snapshot left audio playing while the icon
+    // disagreed with what the user heard.
     if (_snapshot.isPlaying) {
       _emit(_snapshot.copyWith(isPlaying: false));
     }
@@ -2492,8 +2468,7 @@ class PlaybackCoordinator {
       // FG service (not just_audio), `_audio.pause()` is a no-op. Route
       // the pause request through the native bridge so the actual
       // audio actually stops.
-      if (_nativeOwnsPlayback ||
-          NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
+      if (_nativeOwnsPlayback) {
         _nativeScheduledActive = true;
         try {
           await NativeAlarmsBridge.instance.pauseNative();
@@ -2654,9 +2629,12 @@ class PlaybackCoordinator {
   }
 
   Future<void> resume() {
-    if (!_acceptPlayPauseControl()) return Future<void>.value();
+    // Round 63: never debounce-away a real resume. If already playing, no-op.
+    if (_snapshot.isPlaying && !_userInitiatedPause) {
+      return Future<void>.value();
+    }
+    _userInitiatedPause = false;
     if (!_snapshot.isPlaying && _snapshot.state != AppPlaybackState.inactive) {
-      _userInitiatedPause = false;
       _emit(_snapshot.copyWith(isPlaying: true));
     }
     return _serializeTransport((epoch) async {
@@ -2683,8 +2661,7 @@ class PlaybackCoordinator {
       // the native FG service, the resume tap must go back to native so
       // the MediaPlayer actually resumes. just_audio's resume would be a
       // no-op (nothing was queued in it).
-      if (_nativeOwnsPlayback ||
-          NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
+      if (_nativeOwnsPlayback) {
         _nativeScheduledActive = true;
         try {
           await NativeAlarmsBridge.instance.resumeNative();

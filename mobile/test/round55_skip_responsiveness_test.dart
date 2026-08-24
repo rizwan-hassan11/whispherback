@@ -47,20 +47,14 @@ void main() {
       expect(guarded, contains('if (_skipInFlight)'));
       expect(guarded, contains('_pendingSkipNext = next'));
       expect(guarded, contains('while (_pendingSkipNext != null)'));
-
-      final acceptMethod = src.substring(
-        src.indexOf('bool _acceptPlayPauseControl()'),
-        src.indexOf('\n  /// Stops an in-flight'),
-      );
-      expect(acceptMethod.contains('_skipInFlight'), isFalse);
     });
 
     test('skip debounce removed; play/pause still debounced', () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
-      expect(src, contains('_controlDebounce'));
-      expect(src, contains('Duration(milliseconds: 400)'));
       expect(src.contains('_skipDebounce'), isFalse);
       expect(src.contains('_acceptSkipControl'), isFalse);
+      // Round 63: play/pause debounce removed — it skipped the real pause.
+      expect(src.contains('_acceptPlayPauseControl'), isFalse);
     });
   });
 }

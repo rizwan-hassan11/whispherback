@@ -71,7 +71,8 @@ void main() {
       final idx = src.indexOf('Future<void> _runOneSkip(bool next) async');
       final end = src.indexOf('Future<void> _skipPlaylistClip(', idx);
       final body = src.substring(idx, end);
-      expect(body, contains('_latestTransportPausesPlayback || _userInitiatedPause'));
+      expect(body,
+          contains('_latestTransportPausesPlayback || _userInitiatedPause'));
       expect(body, contains('await _audio.resume()'));
     });
 
@@ -110,7 +111,8 @@ void main() {
 
     test('native idle during skip does not drop native ownership', () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
-      expect(src, contains('if (_skipInFlight || _suppressTransientNotPlaying)'));
+      expect(
+          src, contains('if (_skipInFlight || _suppressTransientNotPlaying)'));
       final idleIdx = src.indexOf(
           '// Idle — clear the snapshot only if we\'d previously promoted it.');
       expect(idleIdx, greaterThanOrEqualTo(0));
@@ -120,8 +122,8 @@ void main() {
 
     test('mini-player may prefer snapshot title while skip is pending', () {
       final bar = _read('lib/features/playback/mini_player_bar.dart');
-      expect(bar, contains('skipPending && snapTitle'));
-      expect(bar, contains('mediaTitle?.isNotEmpty == true ? mediaTitle'));
+      expect(bar, contains('snapTitle?.isNotEmpty == true'));
+      expect(bar, contains('skipPending || snapshot.isPlaying'));
     });
   });
 }

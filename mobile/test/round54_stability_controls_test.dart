@@ -23,11 +23,9 @@ void main() {
   group('Round 54 — crash / skip / double-tap stability', () {
     test('skip queues overlapping taps; no time debounce on skip', () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
-      expect(src, contains('static const _controlDebounce'));
       expect(src, contains('bool _skipInFlight = false'));
       expect(src, contains('bool? _pendingSkipNext'));
       expect(src, contains('bool get skipTransportActive'));
-      expect(src, contains('bool _acceptPlayPauseControl()'));
       expect(src.contains('_acceptSkipControl'), isFalse);
 
       final runIdx = src.indexOf('Future<void> _runOneSkip(');
@@ -42,6 +40,8 @@ void main() {
     });
 
     test('pause and resume share a play/pause debounce gate', () {
+      // Round 63: debounce-only pause left audio playing with a wrong icon.
+      // Pause/resume must always reach the audio engine.
       final src = _read('lib/services/playback/playback_coordinator.dart');
       final pauseIdx = src.indexOf('Future<void> pause()');
       final resumeIdx = src.indexOf('Future<void> resume()');
@@ -49,15 +49,16 @@ void main() {
       expect(resumeIdx, greaterThan(pauseIdx));
 
       final pauseBody = src.substring(pauseIdx, resumeIdx);
-      expect(pauseBody, contains('_acceptPlayPauseControl()'));
+      expect(pauseBody.contains('_acceptPlayPauseControl()'), isFalse);
       expect(pauseBody, contains('_userInitiatedPause = true'));
+      expect(pauseBody, contains('await _audio.pause()'));
 
       final resumeEnd = src.indexOf('\n  Future<void> ', resumeIdx + 1);
       final resumeBody = src.substring(
         resumeIdx,
         resumeEnd > resumeIdx ? resumeEnd : resumeIdx + 400,
       );
-      expect(resumeBody, contains('if (!_acceptPlayPauseControl()) return'));
+      expect(resumeBody.contains('_acceptPlayPauseControl()'), isFalse);
     });
 
     test('MediaSession next/prev prefer coordinator over playlistMode seek-0',

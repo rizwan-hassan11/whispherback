@@ -68,9 +68,9 @@ void _safeCall(Future<void> Function() body, String tag) {
 
 /// Compact now-playing bar above the bottom navigation (Spotify-style).
 ///
-/// Round 51: title + play/pause follow the same live MediaSession streams
-/// as the system notification when Dart owns audio. Snapshot alone drifted
-/// (pause icon stuck, stale clip name) while the notification stayed correct.
+/// Round 63: title + play/pause follow the coordinator snapshot (instant
+/// next/pause feedback). MediaSession still drives the system notification;
+/// mirroring it into the in-app bar caused stale titles and wrong icons.
 class MiniPlayerBar extends ConsumerWidget {
   const MiniPlayerBar({super.key});
 
@@ -122,11 +122,10 @@ class MiniPlayerBar extends ConsumerWidget {
             )) {
               return const SizedBox.shrink();
             }
-            final dartOwns =
-                (audio.currentPath != null ||
-                        audio.isPlayingClip ||
-                        coordinator.skipTransportActive) &&
-                    !nativeLive;
+            final dartOwns = (audio.currentPath != null ||
+                    audio.isPlayingClip ||
+                    coordinator.skipTransportActive) &&
+                !nativeLive;
             return _MiniPlayerBody(
               snapshot: snapshot,
               native: native,
@@ -182,16 +181,19 @@ class _MiniPlayerBody extends StatelessWidget {
     final snapSubtitle = snapshot.playlistName?.trim();
     final mediaTitle = mediaItem?.title.trim();
     final mediaSubtitle = mediaItem?.album?.trim() ?? mediaItem?.artist?.trim();
-
-    // While a skip is in flight, prefer the coordinator snapshot title so the
-    // bar updates on the first tap. Once bound, MediaItem wins.
     final skipPending = coordinator.skipTransportActive;
+
+    // Round 63: in-app bar follows the coordinator snapshot (optimistic next /
+    // pause), NOT MediaSession. Preferring mediaTitle after skip ended made
+    // the bar keep painting the OLD clip until a late MediaItem event —
+    // QA: "next/prev does not update the title". Notification still uses
+    // MediaItem via audio_service.
     final title = dartOwns
-        ? (skipPending && snapTitle?.isNotEmpty == true
+        ? (snapTitle?.isNotEmpty == true
             ? snapTitle
-            : (mediaTitle?.isNotEmpty == true ? mediaTitle : snapTitle))
+            : (mediaTitle?.isNotEmpty == true ? mediaTitle : nativeTitle))
         : (nativeTitle ??
-            (mediaTitle?.isNotEmpty == true ? mediaTitle : snapTitle));
+            (snapTitle?.isNotEmpty == true ? snapTitle : mediaTitle));
     final subtitle = dartOwns
         ? (snapSubtitle?.isNotEmpty == true
             ? snapSubtitle
@@ -206,9 +208,11 @@ class _MiniPlayerBody extends StatelessWidget {
     final displaySubtitle =
         (subtitle != null && subtitle.isNotEmpty) ? subtitle : 'WhisperBack';
 
-    // During skip keep showing "playing" so the control does not flicker.
+    // Round 63: play/pause icon follows snapshot.isPlaying (flipped on tap).
+    // mediaSessionPlaying lagged or stuck after skip/pause, so the button
+    // called the wrong action (pause when already paused, etc.).
     final displayPlaying = dartOwns
-        ? (skipPending ? true : mediaSessionPlaying)
+        ? (skipPending || snapshot.isPlaying)
         : (nativeLive ? native.isPlaying : snapshot.isPlaying);
 
     final progressKey = ValueKey<String>(
@@ -252,150 +256,147 @@ class _MiniPlayerBody extends StatelessWidget {
         elevation: 8,
         shadowColor: Colors.black.withValues(alpha: 0.35),
         child: Container(
-            height: ShellMetrics.miniPlayerHeight,
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            decoration: BoxDecoration(
-              border: Border(
-                top: BorderSide(
-                  color: isDark
-                      ? AppColors.glassBorder
-                      : AppColors.ink.withValues(alpha: 0.08),
-                ),
+          height: ShellMetrics.miniPlayerHeight,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            border: Border(
+              top: BorderSide(
+                color: isDark
+                    ? AppColors.glassBorder
+                    : AppColors.ink.withValues(alpha: 0.08),
               ),
             ),
-            child: Row(
-              children: [
-                _MiniCover(
-                  isPlaying: displayPlaying,
+          ),
+          child: Row(
+            children: [
+              _MiniCover(
+                isPlaying: displayPlaying,
+                onTap: coordinator.showModal,
+                colors: coverColors,
+                hasSchedule: hasSchedule,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: InkWell(
                   onTap: coordinator.showModal,
-                  colors: coverColors,
-                  hasSchedule: hasSchedule,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: InkWell(
-                    onTap: coordinator.showModal,
-                    borderRadius: BorderRadius.circular(6),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            displayTitle,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: GoogleFonts.fraunces(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                              color: isDark ? AppColors.soft : AppColors.ink,
-                            ),
+                  borderRadius: BorderRadius.circular(6),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          displayTitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.fraunces(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: isDark ? AppColors.soft : AppColors.ink,
                           ),
-                          StreamBuilder<Duration?>(
-                            key: progressKey,
-                            stream: _useNativeProgress(snapshot, audio)
-                                ? NativeAlarmsBridge.instance.stateStream
-                                    .map<Duration?>((n) =>
-                                        Duration(milliseconds: n.positionMs))
-                                : audio.positionStream,
-                            initialData: _useNativeProgress(snapshot, audio)
-                                ? Duration(
-                                    milliseconds: NativeAlarmsBridge
-                                        .instance.lastSnapshot.positionMs)
-                                : audio.player.position,
-                            builder: (context, posSnap) {
-                              return StreamBuilder<Duration?>(
-                                stream: _useNativeProgress(snapshot, audio)
-                                    ? NativeAlarmsBridge.instance.stateStream
-                                        .map<Duration?>((n) => Duration(
-                                            milliseconds: n.durationMs))
-                                    : audio.durationStream,
-                                initialData: _useNativeProgress(snapshot, audio)
-                                    ? Duration(
-                                        milliseconds: NativeAlarmsBridge
-                                            .instance.lastSnapshot.durationMs)
-                                    : audio.player.duration,
-                                builder: (context, durSnap) {
-                                  final pos = posSnap.data ?? Duration.zero;
-                                  final dur = _resolveDisplayDuration(
-                                    snapshot: snapshot,
-                                    streamDuration: durSnap.data,
-                                    native: _useNativeProgress(snapshot, audio)
-                                        ? NativeAlarmsBridge
-                                            .instance.lastSnapshot
-                                        : null,
-                                  );
-                                  final text = dur.inMilliseconds > 0
-                                      ? '${_fmt(pos)} / ${_fmt(dur)}'
-                                      : displaySubtitle;
-                                  return Text(
-                                    text,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      color: isDark
-                                          ? AppColors.muted
-                                          : AppColors.ink
-                                              .withValues(alpha: 0.55),
-                                    ),
-                                  );
-                                },
-                              );
-                            },
-                          ),
-                        ],
-                      ),
+                        ),
+                        StreamBuilder<Duration?>(
+                          key: progressKey,
+                          stream: _useNativeProgress(snapshot, audio)
+                              ? NativeAlarmsBridge.instance.stateStream
+                                  .map<Duration?>((n) =>
+                                      Duration(milliseconds: n.positionMs))
+                              : audio.positionStream,
+                          initialData: _useNativeProgress(snapshot, audio)
+                              ? Duration(
+                                  milliseconds: NativeAlarmsBridge
+                                      .instance.lastSnapshot.positionMs)
+                              : audio.player.position,
+                          builder: (context, posSnap) {
+                            return StreamBuilder<Duration?>(
+                              stream: _useNativeProgress(snapshot, audio)
+                                  ? NativeAlarmsBridge.instance.stateStream
+                                      .map<Duration?>((n) =>
+                                          Duration(milliseconds: n.durationMs))
+                                  : audio.durationStream,
+                              initialData: _useNativeProgress(snapshot, audio)
+                                  ? Duration(
+                                      milliseconds: NativeAlarmsBridge
+                                          .instance.lastSnapshot.durationMs)
+                                  : audio.player.duration,
+                              builder: (context, durSnap) {
+                                final pos = posSnap.data ?? Duration.zero;
+                                final dur = _resolveDisplayDuration(
+                                  snapshot: snapshot,
+                                  streamDuration: durSnap.data,
+                                  native: _useNativeProgress(snapshot, audio)
+                                      ? NativeAlarmsBridge.instance.lastSnapshot
+                                      : null,
+                                );
+                                final text = dur.inMilliseconds > 0
+                                    ? '${_fmt(pos)} / ${_fmt(dur)}'
+                                    : displaySubtitle;
+                                return Text(
+                                  text,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: isDark
+                                        ? AppColors.muted
+                                        : AppColors.ink.withValues(alpha: 0.55),
+                                  ),
+                                );
+                              },
+                            );
+                          },
+                        ),
+                      ],
                     ),
                   ),
                 ),
-                if (canSkip)
-                  _MiniIconButton(
-                    icon: Icons.skip_previous_rounded,
-                    semanticLabel: l10n.previousTrack,
-                    color: isDark
-                        ? AppColors.soft
-                        : AppColors.ink.withValues(alpha: 0.72),
-                    onPressed: () =>
-                        _safeCall(coordinator.skipPrevious, 'skipPrevious'),
-                  ),
-                const SizedBox(width: 6),
-                _MiniPlayPauseButton(
-                  isPlaying: displayPlaying,
-                  onTap: () {
-                    if (displayPlaying) {
-                      _safeCall(coordinator.pause, 'pause');
-                    } else {
-                      _safeCall(coordinator.resume, 'resume');
-                    }
-                  },
-                ),
-                const SizedBox(width: 6),
-                if (canSkip)
-                  _MiniIconButton(
-                    icon: Icons.skip_next_rounded,
-                    semanticLabel: l10n.nextTrack,
-                    color: isDark
-                        ? AppColors.soft
-                        : AppColors.ink.withValues(alpha: 0.72),
-                    onPressed: () =>
-                        _safeCall(coordinator.skipNext, 'skipNext'),
-                  ),
-                const SizedBox(width: 4),
+              ),
+              if (canSkip)
                 _MiniIconButton(
-                  icon: AppIcons.close,
-                  semanticLabel: l10n.stopPlayback,
+                  icon: Icons.skip_previous_rounded,
+                  semanticLabel: l10n.previousTrack,
                   color: isDark
-                      ? AppColors.muted
-                      : AppColors.ink.withValues(alpha: 0.55),
+                      ? AppColors.soft
+                      : AppColors.ink.withValues(alpha: 0.72),
                   onPressed: () =>
-                      _safeCall(coordinator.dismissPlayer, 'dismiss'),
+                      _safeCall(coordinator.skipPrevious, 'skipPrevious'),
                 ),
-              ],
-            ),
+              const SizedBox(width: 6),
+              _MiniPlayPauseButton(
+                isPlaying: displayPlaying,
+                onTap: () {
+                  if (displayPlaying) {
+                    _safeCall(coordinator.pause, 'pause');
+                  } else {
+                    _safeCall(coordinator.resume, 'resume');
+                  }
+                },
+              ),
+              const SizedBox(width: 6),
+              if (canSkip)
+                _MiniIconButton(
+                  icon: Icons.skip_next_rounded,
+                  semanticLabel: l10n.nextTrack,
+                  color: isDark
+                      ? AppColors.soft
+                      : AppColors.ink.withValues(alpha: 0.72),
+                  onPressed: () => _safeCall(coordinator.skipNext, 'skipNext'),
+                ),
+              const SizedBox(width: 4),
+              _MiniIconButton(
+                icon: AppIcons.close,
+                semanticLabel: l10n.stopPlayback,
+                color: isDark
+                    ? AppColors.muted
+                    : AppColors.ink.withValues(alpha: 0.55),
+                onPressed: () =>
+                    _safeCall(coordinator.dismissPlayer, 'dismiss'),
+              ),
+            ],
           ),
         ),
+      ),
     );
   }
 

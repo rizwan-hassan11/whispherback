@@ -64,8 +64,7 @@ void main() {
       );
       expect(withTitles.showsMiniPlayer(nativeActive: true), isTrue);
 
-      const bareIdle =
-          PlaybackSnapshot(state: AppPlaybackState.activeIdle);
+      const bareIdle = PlaybackSnapshot(state: AppPlaybackState.activeIdle);
       expect(bareIdle.showsMiniPlayer(), isFalse);
       expect(bareIdle.showsMiniPlayer(dartClipActive: true), isTrue);
 
