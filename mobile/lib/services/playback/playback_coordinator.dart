@@ -173,6 +173,18 @@ class PlaybackCoordinator {
   /// the same track and feel like pause/seek-0).
   int? _optimisticSkipIndex;
 
+  /// Concrete clip chosen at tap time (incl. shuffle). Body must play THIS
+  /// clip — never re-roll shuffle or the title/audio diverge.
+  AudioClip? _optimisticSkipClip;
+
+  /// File path the in-flight skip is trying to bind. Used so pause only
+  /// reverts the title when the new source has NOT committed yet.
+  String? _optimisticSkipTargetPath;
+
+  /// Bound path before an optimistic skip. Restored when pause aborts an
+  /// uncommitted skip so resume cannot play a half-loaded next track.
+  String? _preSkipBoundPath;
+
   /// Queue pointer before an optimistic skip. Restored when pause preempts
   /// so pause cannot leave the session pointing at the next track.
   int _preSkipLibraryIndex = -1;
@@ -231,11 +243,26 @@ class PlaybackCoordinator {
   Future<void> _abortInFlightTransport(
       {required bool revertOptimisticSkip}) async {
     if (revertOptimisticSkip && _optimisticSkipSnapshot != null) {
-      _libraryIndex = _preSkipLibraryIndex;
-      _playlistClipIndex = _preSkipPlaylistIndex;
-      _emit(_optimisticSkipSnapshot!.copyWith(isPlaying: false));
+      // Only roll the title/index back when the next clip has NOT bound yet.
+      // If MediaItem already shows the skip target, the skip committed —
+      // pause must pause THAT clip, not resurrect the previous title
+      // (QA Round 58: "pause/resume changed the clip").
+      final bound = _audio.boundPath;
+      final target = _optimisticSkipTargetPath;
+      final committed = target != null && bound != null && bound == target;
+      if (!committed) {
+        _libraryIndex = _preSkipLibraryIndex;
+        _playlistClipIndex = _preSkipPlaylistIndex;
+        _emit(_optimisticSkipSnapshot!.copyWith(isPlaying: false));
+        if (_preSkipBoundPath != null) {
+          _audio.restoreCurrentPath(_preSkipBoundPath);
+        }
+      }
       _optimisticSkipSnapshot = null;
       _optimisticSkipIndex = null;
+      _optimisticSkipClip = null;
+      _optimisticSkipTargetPath = null;
+      _preSkipBoundPath = null;
     }
     final nativeActive = _nativeOwnsPlayback ||
         NativeAlarmsBridge.instance.lastSnapshot.isNativeActive;
@@ -672,6 +699,12 @@ class PlaybackCoordinator {
       }
       // Idle — clear the snapshot only if we'd previously promoted it.
       if (_nativeScheduledActive) {
+        // Mid-skip MediaPlayer goes briefly idle between flush and prepare.
+        // Dropping ownership here made Dart fall through to ExoPlayer playFile
+        // while native still owned the next clip (title/audio split).
+        if (_skipInFlight || _suppressTransientNotPlaying) {
+          return;
+        }
         _nativeScheduledActive = false;
         // Round 24 — stamp actual completion so the "upcoming events"
         // widget and the always-on notification card show the correct
@@ -911,7 +944,7 @@ class PlaybackCoordinator {
         }
       },
       preempt: true,
-      revertOptimisticSkip: true,
+      revertOptimisticSkip: false,
     );
   }
 
@@ -953,86 +986,63 @@ class PlaybackCoordinator {
   Future<void> skipNext() => _guardedSkip(next: true);
   Future<void> skipPrevious() => _guardedSkip(next: false);
 
-  /// Synchronous next/prev target for instant mini-player feedback.
-  ({String title, int durationMs, int index})? _resolveSkipTarget(bool next) {
-    final playlistId = _snapshot.playlistId;
-    if (playlistId == null) {
-      if (_libraryQueue.length <= 1) return null;
-      final currentIndex = _libraryIndex < 0 ? 0 : _libraryIndex;
-      final nextIndex = next
-          ? (currentIndex + 1) % _libraryQueue.length
-          : (currentIndex - 1 + _libraryQueue.length) % _libraryQueue.length;
-      final clip = _libraryQueue[nextIndex];
-      return (title: clip.title, durationMs: clip.durationMs, index: nextIndex);
-    }
-    if (_playlistClipCache.length <= 1) return null;
-    final currentIndex = _playlistClipIndex ?? 0;
-    final size = _playlistClipCache.length;
-    final nextIndex =
-        next ? (currentIndex + 1) % size : (currentIndex - 1 + size) % size;
-    final clip = _playlistClipCache[nextIndex];
-    return (title: clip.title, durationMs: clip.durationMs, index: nextIndex);
-  }
-
-  /// Flip title / play icon on the same frame as the tap — before transport
-  /// serialization or native I/O.
+  /// Resolve the next/prev target at tap time. Does NOT emit a new title —
+  /// title must follow the bound MediaItem / native snapshot so we never show
+  /// clip B while audio is still clip A (QA Round 58).
   void _primeOptimisticSkip(bool next) {
     _userInitiatedPause = false;
     _playbackGeneration++;
     _optimisticSkipSnapshot = _snapshot;
     _optimisticSkipIndex = null;
+    _optimisticSkipClip = null;
+    _optimisticSkipTargetPath = null;
     _preSkipLibraryIndex = _libraryIndex;
     _preSkipPlaylistIndex = _playlistClipIndex;
+    _preSkipBoundPath = _audio.boundPath;
 
     final native = _nativeOwnsPlayback ||
         NativeAlarmsBridge.instance.lastSnapshot.isNativeActive;
     if (native) {
-      final target = _resolveSkipTarget(next);
-      _optimisticSkipIndex = target?.index;
-      _emit(_snapshot.copyWith(
-        state: AppPlaybackState.scheduledPlaying,
-        isPlaying: true,
-        clipTitle: target?.title ?? _snapshot.clipTitle,
-        durationMs: target?.durationMs ?? _snapshot.durationMs,
-        modalVisible: false,
-      ));
+      // Native queue is authoritative — do not invent a Dart title/index.
       return;
     }
 
-    final target = _resolveSkipTarget(next);
-    if (target == null) {
-      if (_snapshot.playlistId == null && _libraryQueue.length == 1) {
-        _emit(_snapshot.copyWith(isPlaying: true));
-      }
-      return;
-    }
-
-    _optimisticSkipIndex = target.index;
-    final fromSchedule = _snapshot.state == AppPlaybackState.scheduledPlaying;
-    if (_snapshot.playlistId == null) {
-      _libraryIndex = target.index;
-      _emit(_snapshot.copyWith(
-        state: AppPlaybackState.manualPlaying,
-        clipTitle: target.title,
-        playlistName: target.title,
-        isPlaying: true,
-        durationMs: target.durationMs,
-        modalVisible: false,
-      ));
+    final playlistId = _snapshot.playlistId;
+    if (playlistId == null) {
+      if (_libraryQueue.length <= 1) return;
+      final currentIndex = _libraryIndex < 0 ? 0 : _libraryIndex;
+      final nextIndex = next
+          ? (currentIndex + 1) % _libraryQueue.length
+          : (currentIndex - 1 + _libraryQueue.length) % _libraryQueue.length;
+      final clip = _libraryQueue[nextIndex];
+      _optimisticSkipIndex = nextIndex;
+      _optimisticSkipClip = clip;
+      _optimisticSkipTargetPath = clip.filePath;
+      _libraryIndex = nextIndex;
       _warmLibraryNeighbors();
-    } else {
-      _playlistClipIndex = target.index;
-      _emit(_snapshot.copyWith(
-        state: fromSchedule
-            ? AppPlaybackState.scheduledPlaying
-            : AppPlaybackState.manualPlaying,
-        clipTitle: target.title,
-        isPlaying: true,
-        durationMs: target.durationMs,
-        modalVisible: false,
-      ));
-      _warmPlaylistNeighbors();
+      return;
     }
+
+    if (_playlistClipCache.length <= 1) return;
+    final clips = _playlistClipCache;
+    final AudioClip clip;
+    final int nextIndex;
+    if (_snapshot.shuffleEnabled) {
+      clip = _nextShuffledClip(playlistId, clips);
+      nextIndex = clips.indexWhere((c) => c.id == clip.id);
+    } else {
+      final currentIndex = _playlistClipIndex ?? 0;
+      final size = clips.length;
+      nextIndex =
+          next ? (currentIndex + 1) % size : (currentIndex - 1 + size) % size;
+      clip = clips[nextIndex];
+    }
+    if (nextIndex < 0) return;
+    _optimisticSkipIndex = nextIndex;
+    _optimisticSkipClip = clip;
+    _optimisticSkipTargetPath = clip.filePath;
+    _playlistClipIndex = nextIndex;
+    _warmPlaylistNeighbors();
   }
 
   void _warmLibraryNeighbors() {
@@ -1091,7 +1101,7 @@ class PlaybackCoordinator {
     }
   }
 
-  /// One next/prev execution: optimistic UI first, then flush + bind.
+  /// One next/prev execution: resolve target, bind audio, THEN update title.
   Future<void> _runOneSkip(bool next) async {
     _skipInFlight = true;
     try {
@@ -1099,7 +1109,7 @@ class PlaybackCoordinator {
         await _ensurePlaylistCache(_snapshot.playlistId);
       }
 
-      // Instant coordinator snapshot for modal + skipUiPending mini-player path.
+      // Resolve target index/clip only — title waits for a successful bind.
       _primeOptimisticSkip(next);
 
       // Invalidate in-flight completion BEFORE the transport body so stop()
@@ -1114,42 +1124,16 @@ class PlaybackCoordinator {
           (epoch) => _skipPlaylistClip(epoch, next: next),
           preempt: true,
         );
-        // Spotify contract: skip always leaves the new clip PLAYING —
-        // but never seek(0)+play a still-completed source (that replayed
-        // the old track and made next feel dead).
+        // Do NOT force-resume here. playFile / skipNative already start
+        // playback. Resuming whatever ExoPlayer still held after a cancelled
+        // bind replayed the OLD clip under the NEW title (QA Round 58).
         if (_latestTransportPausesPlayback) return;
         _userInitiatedPause = false;
-        if (_snapshot.state == AppPlaybackState.manualPlaying ||
-            _snapshot.state == AppPlaybackState.scheduledPlaying ||
-            _snapshot.clipTitle != null) {
-          try {
-            if (!_nativeOwnsPlayback &&
-                !NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
-              final ps = _audio.player.processingState;
-              if (ps != ProcessingState.completed &&
-                  ps != ProcessingState.idle) {
-                await _audio.resume();
-              }
-            }
-          } catch (e, st) {
-            if (kDebugMode) {
-              debugPrint('skip: force-resume failed: $e\n$st');
-            }
-          }
-          _emit(_snapshot.copyWith(
-            state: _snapshot.state == AppPlaybackState.scheduledPlaying ||
-                    _nativeOwnsPlayback
-                ? AppPlaybackState.scheduledPlaying
-                : AppPlaybackState.manualPlaying,
-            isPlaying: true,
-            modalVisible: false,
-          ));
-          // Native skips never hit Dart playerState — clear latch here.
-          // Dart skips keep the latch until playing:true (MediaSession echo).
-          if (_nativeOwnsPlayback ||
-              NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
-            _suppressTransientNotPlaying = false;
-          }
+        // Native skips never hit Dart playerState — clear latch here.
+        // Dart skips keep the latch until playing:true (MediaSession echo).
+        if (_nativeOwnsPlayback ||
+            NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
+          _suppressTransientNotPlaying = false;
         }
       } catch (e, st) {
         if (kDebugMode) {
@@ -1270,15 +1254,16 @@ class PlaybackCoordinator {
     final fromSchedule = _snapshot.state == AppPlaybackState.scheduledPlaying;
 
     if (shuffle) {
+      // Prefer the clip resolved at tap time so we never re-roll shuffle
+      // (that made the audible clip disagree with any primed metadata).
+      final clip = _optimisticSkipClip ?? _nextShuffledClip(playlistId, clips);
+      _optimisticSkipClip = null;
       _optimisticSkipIndex = null;
-      // Lightweight shuffle skip: pick next via ShuffleEngine + sourceSwap.
-      // Full `_playPlaylistInternal` re-hit DB, sleep/prayer checks, and
-      // awaited notification refresh — that was multi-second next/prev lag.
-      final clip = _nextShuffledClip(playlistId, clips);
       final idx = clips.indexWhere((c) => c.id == clip.id);
       if (idx >= 0) _playlistClipIndex = idx;
+      _optimisticSkipTargetPath = clip.filePath;
       try {
-        await _audio.playFile(
+        final ok = await _audio.playFile(
           clip.filePath,
           title: clip.title,
           playlistName: _snapshot.playlistName,
@@ -1288,6 +1273,10 @@ class PlaybackCoordinator {
           playlistMode: true,
           sourceSwap: true,
         );
+        if (!ok) {
+          await _honorSupersededTransport(epoch);
+          return;
+        }
       } catch (e, st) {
         if (kDebugMode) {
           debugPrint('skip shuffle playFile failed: $e\n$st');
@@ -1306,6 +1295,9 @@ class PlaybackCoordinator {
           durationMs: clip.durationMs,
           modalVisible: false,
         ));
+        _optimisticSkipSnapshot = null;
+        _optimisticSkipTargetPath = null;
+        _preSkipBoundPath = null;
       }
       _refreshScheduleNotificationsDeferred();
       await _honorSupersededTransport(epoch);
@@ -1370,7 +1362,7 @@ class PlaybackCoordinator {
     final swapping = _snapshot.state == AppPlaybackState.manualPlaying ||
         _snapshot.state == AppPlaybackState.scheduledPlaying;
     try {
-      await _audio.playFile(
+      final ok = await _audio.playFile(
         clip.filePath,
         title: clip.title,
         playlistName: playlistName,
@@ -1380,6 +1372,7 @@ class PlaybackCoordinator {
         playlistMode: clips.length > 1,
         sourceSwap: swapping,
       );
+      if (!ok) return;
     } catch (_) {
       return;
     }
@@ -1404,6 +1397,10 @@ class PlaybackCoordinator {
         durationMs: clip.durationMs,
       ),
     );
+    _optimisticSkipSnapshot = null;
+    _optimisticSkipClip = null;
+    _optimisticSkipTargetPath = null;
+    _preSkipBoundPath = null;
     _refreshScheduleNotificationsDeferred();
   }
 
@@ -1639,7 +1636,7 @@ class PlaybackCoordinator {
       if (_isPlayablePath(clip.filePath)) {
         try {
           _playbackGeneration++;
-          await _audio.playFile(
+          final ok = await _audio.playFile(
             clip.filePath,
             title: clip.title,
             playlistName: playlistName,
@@ -1649,6 +1646,10 @@ class PlaybackCoordinator {
             playlistMode: clips.length > 1,
             sourceSwap: swapping,
           );
+          if (!ok) {
+            // Superseded — stop walking so a newer skip owns the queue.
+            return null;
+          }
           if (transportEpoch != null && !_transportCurrent(transportEpoch)) {
             return null;
           }
@@ -1668,6 +1669,10 @@ class PlaybackCoordinator {
               durationMs: clip.durationMs,
             ),
           );
+          _optimisticSkipSnapshot = null;
+          _optimisticSkipClip = null;
+          _optimisticSkipTargetPath = null;
+          _preSkipBoundPath = null;
           _refreshScheduleNotificationsDeferred();
           return index;
         } catch (_) {
@@ -2047,7 +2052,7 @@ class PlaybackCoordinator {
 
     try {
       _playbackGeneration++;
-      await _audio.playFile(
+      final ok = await _audio.playFile(
         clip.filePath,
         title: clip.title,
         playlistName: playlist?.name,
@@ -2056,6 +2061,7 @@ class PlaybackCoordinator {
             : RuntimeCopy.l10n.nowPlaying,
         playlistMode: clips.length > 1,
       );
+      if (!ok) return false;
     } catch (e, st) {
       if (kDebugMode) {
         debugPrint('playPlaylist: playFile failed: $e\n$st');
@@ -2203,7 +2209,7 @@ class PlaybackCoordinator {
     }
 
     try {
-      await _audio.playFile(
+      final ok = await _audio.playFile(
         clip.filePath,
         title: clip.title,
         playlistName: effectivePlaylistId != null ? playlistName : null,
@@ -2213,6 +2219,10 @@ class PlaybackCoordinator {
         playlistMode: resolvedQueue.length > 1 || effectivePlaylistId != null,
         sourceSwap: skipSnapshotEmit,
       );
+      if (!ok) {
+        // Superseded by a newer transport op — leave title/path alone.
+        return;
+      }
     } catch (e, st) {
       if (!_transportCurrent(transportEpoch ?? _transportEpoch)) {
         return;
@@ -2274,6 +2284,10 @@ class PlaybackCoordinator {
         durationMs: clip.durationMs,
         modalVisible: false,
       ));
+      _optimisticSkipSnapshot = null;
+      _optimisticSkipClip = null;
+      _optimisticSkipTargetPath = null;
+      _preSkipBoundPath = null;
     }
   }
 
@@ -2543,9 +2557,11 @@ class PlaybackCoordinator {
             _emit(previous);
             return;
           }
-          final atEnd =
-              _audio.player.processingState == ProcessingState.completed;
-          if (atEnd) {
+          final ps = _audio.player.processingState;
+          final needsRebind = ps == ProcessingState.completed ||
+              ps == ProcessingState.idle ||
+              (_audio.boundPath != null && _audio.boundPath != path);
+          if (needsRebind) {
             await _audio.playFile(
               path,
               title: _snapshot.clipTitle ?? '',
@@ -2583,7 +2599,7 @@ class PlaybackCoordinator {
           ));
         }
       }
-    }, preempt: true, revertOptimisticSkip: true);
+    }, preempt: true, revertOptimisticSkip: false);
   }
 
   Future<void> stop() async {

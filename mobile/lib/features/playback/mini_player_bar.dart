@@ -174,20 +174,18 @@ class _MiniPlayerBody extends StatelessWidget {
     final mediaTitle = mediaItem?.title.trim();
     final mediaSubtitle = mediaItem?.album?.trim() ?? mediaItem?.artist?.trim();
 
-    // Dart owns: prefer snapshot while a skip swap is in flight (MediaItem
-    // lags until playFile binds). Otherwise MediaItem wins (Round 51).
-    final skipPending = coordinator.skipTransportActive;
+    // Title ALWAYS follows the bound MediaItem (Dart) or native snapshot.
+    // Never prefer an optimistic coordinator title over the bound source —
+    // that is exactly "title changed but clip did not" (QA Round 58).
     final title = dartOwns
-        ? (skipPending && snapTitle?.isNotEmpty == true
-            ? snapTitle
-            : (mediaTitle?.isNotEmpty == true ? mediaTitle : snapTitle))
+        ? (mediaTitle?.isNotEmpty == true ? mediaTitle : snapTitle)
         : (nativeTitle ??
             (mediaTitle?.isNotEmpty == true ? mediaTitle : snapTitle));
     final subtitle = dartOwns
-        ? (snapSubtitle?.isNotEmpty == true
-            ? snapSubtitle
-            : (mediaSubtitle?.isNotEmpty == true
-                ? mediaSubtitle
+        ? (mediaSubtitle?.isNotEmpty == true
+            ? mediaSubtitle
+            : (snapSubtitle?.isNotEmpty == true
+                ? snapSubtitle
                 : nativeSubtitle))
         : (nativeSubtitle ?? snapSubtitle ?? mediaSubtitle);
 
@@ -197,9 +195,12 @@ class _MiniPlayerBody extends StatelessWidget {
     final displaySubtitle =
         (subtitle != null && subtitle.isNotEmpty) ? subtitle : 'WhisperBack';
 
-    // Play icon: snapshot while skip pending; MediaSession when stable (Round 51).
+    // Play icon: MediaSession when Dart owns; native/snapshot otherwise.
+    // During an in-flight skip keep showing "playing" so the button does not
+    // flicker to play mid-swap (audio is switching, not paused).
+    final skipPending = coordinator.skipTransportActive;
     final displayPlaying = dartOwns
-        ? (skipPending ? snapshot.isPlaying : mediaSessionPlaying)
+        ? (skipPending ? true : mediaSessionPlaying)
         : (nativeLive ? native.isPlaying : snapshot.isPlaying);
 
     final progressKey = ValueKey<String>(

@@ -283,7 +283,7 @@ class AudioPlaybackService {
   Stream<PlayerState> get playerStateStream =>
       _handler.player.playerStateStream;
 
-  Future<void> playFile(
+  Future<bool> playFile(
     String path, {
     String title = 'WhisperBack',
     String? playlistName,
@@ -291,8 +291,10 @@ class AudioPlaybackService {
     bool playlistMode = false,
     bool sourceSwap = false,
   }) async {
-    _currentPath = path;
-    await _handler.runFromAppTransport(
+    // Do NOT set `_currentPath` until bind succeeds. Setting it early made
+    // resume()/skip think the new clip was loaded while ExoPlayer still had
+    // the previous source (title/audio desync — QA Round 58).
+    final ok = await _handler.runFromAppTransport(
       () => _handler.playFile(
         path,
         title: title,
@@ -302,12 +304,24 @@ class AudioPlaybackService {
         sourceSwap: sourceSwap,
       ),
     );
+    if (ok) {
+      _currentPath = path;
+    }
+    return ok;
   }
 
   Future<void> warmFileCache(String path) => _handler.warmFileCache(path);
 
   Future<void> pause() => _handler.runFromAppTransport(_handler.pause);
   Future<void> resume() => _handler.runFromAppTransport(_handler.play);
+
+  /// Restores the logical path after an aborted skip without touching ExoPlayer.
+  void restoreCurrentPath(String? path) {
+    _currentPath = path;
+  }
+
+  /// Path of the MediaItem currently published to the session (bound clip).
+  String? get boundPath => _handler.mediaItem.value?.id ?? _currentPath;
 
   /// Stops the current clip source immediately without ending the session.
   Future<void> flushCurrentSource() =>

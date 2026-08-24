@@ -24,13 +24,13 @@ String _read(String relPath) {
 
 void main() {
   group('Round 50 — skip always plays + mini-player session visibility', () {
-    test('handler.pause returns early during source swap', () {
+    test('handler.pause ignores only MediaSession echo during source swap', () {
       final handler = _read('lib/services/audio/whisper_audio_handler.dart');
       final idx = handler.indexOf('Future<void> pause() async');
       expect(idx, greaterThanOrEqualTo(0));
       final end = handler.indexOf('Future<void> seek(', idx);
       final body = handler.substring(idx, end);
-      expect(body, contains('if (_sourceSwapInFlight)'));
+      expect(body, contains('_sourceSwapInFlight && _appTransportDepth == 0'));
       expect(body, contains('return;'));
     });
 
@@ -43,13 +43,12 @@ void main() {
       expect(body, contains('return Future<void>.value()'));
     });
 
-    test('guardedSkip force-resumes and emits isPlaying true', () {
+    test('guardedSkip does not force-resume after transport', () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
-      final idx = src.indexOf('Future<void> _guardedSkip(');
+      final idx = src.indexOf('Future<void> _runOneSkip(bool next) async');
       final end = src.indexOf('Future<void> _skipPlaylistClip(', idx);
       final body = src.substring(idx, end);
-      expect(body, contains('await _audio.resume()'));
-      expect(body, contains('isPlaying: true'));
+      expect(body.contains('await _audio.resume()'), isFalse);
       expect(body, contains('_userInitiatedPause = false'));
     });
 

@@ -73,6 +73,7 @@ void main() {
       );
       expect(abort, contains('_libraryIndex = _preSkipLibraryIndex'));
       expect(abort, contains('_playlistClipIndex = _preSkipPlaylistIndex'));
+      expect(abort, contains('if (!committed)'));
 
       final pauseIdx = src.indexOf('Future<void> pause()');
       final pauseBody = src.substring(pauseIdx, pauseIdx + 500);

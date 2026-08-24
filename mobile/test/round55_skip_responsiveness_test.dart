@@ -31,7 +31,7 @@ void main() {
       expect(primeIdx, greaterThanOrEqualTo(0));
       expect(transportIdx, greaterThan(primeIdx),
           reason:
-              'Title must flip before transport so the first tap feels instant.');
+              'Target must resolve before transport so skip cannot double-advance.');
       expect(body.contains('flushCurrentSource'), isFalse);
     });
 

@@ -532,7 +532,11 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
 
   // ── Clip / playlist playback (Spotify-style media notification) ───────────
 
-  Future<void> playFile(
+  /// Loads [path] and starts playback. Returns `true` only when THIS call's
+  /// generation still owns the player and [mediaItem] was published for [path].
+  /// Superseded loads return `false` without throwing so callers never treat
+  /// a cancelled skip as a successful bind (title/audio desync).
+  Future<bool> playFile(
     String path, {
     String title = 'WhisperBack',
     String? playlistName,
@@ -556,7 +560,7 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     _playFileTail = bindDone.future;
     try {
       await previousBind.catchError((Object _, StackTrace __) {});
-      if (playGen != _playFileGeneration) return;
+      if (playGen != _playFileGeneration) return false;
       await _playFileBound(
         path: path,
         title: title,
@@ -566,6 +570,8 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
         swapping: swapping,
         playGen: playGen,
       );
+      // Bound + MediaItem published for this path, and we still own the gen.
+      return playGen == _playFileGeneration && mediaItem.value?.id == path;
     } finally {
       if (!bindDone.isCompleted) bindDone.complete();
     }
@@ -1119,15 +1125,20 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> pause() async {
     if (!_playingClip) return;
 
-    // Round 50: source-swap `stop()` makes Android MediaSession echo a
-    // PAUSE command back into audio_service. Honoring that mid-skip pauses
-    // the clip we just loaded — QA: "next changes the clip but pauses it".
-    if (_sourceSwapInFlight) {
+    // Source-swap `stop()` makes Android MediaSession echo PAUSE into
+    // audio_service. Ignore ONLY that echo (`_appTransportDepth == 0`).
+    // In-app / coordinator pause uses `runFromAppTransport` (depth > 0) and
+    // MUST always win — swallowing it left skip running so "pause" looked
+    // like it advanced the queue (QA Round 58).
+    if (_sourceSwapInFlight && _appTransportDepth == 0) {
       if (kDebugMode) {
-        debugPrint('handler.pause: ignored during source swap');
+        debugPrint('handler.pause: ignored MediaSession echo during source swap');
       }
       return;
     }
+    // User pause always ends the swap latch so subsequent state publishes
+    // reflect paused, not a stuck "loading/playing" notification.
+    _sourceSwapInFlight = false;
 
     _publishClipControls(
       playing: false,

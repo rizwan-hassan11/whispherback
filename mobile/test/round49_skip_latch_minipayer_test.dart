@@ -46,8 +46,8 @@ void main() {
         expect(finallyBody, contains('_skipInFlight = false'));
       }
       // Native-only clear after emit is OK — Dart keeps latch until playing:true.
-      expect(body, contains('isPlaying: true'));
-      expect(body, contains('await _audio.resume()'));
+      // Round 58: force-resume after skip was removed (it replayed the old clip).
+      expect(body.contains('await _audio.resume()'), isFalse);
     });
 
     test('onPlayerState never syncs playing:false into snapshot', () {
