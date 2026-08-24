@@ -34,29 +34,8 @@ class GlassNavBar extends StatelessWidget {
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          // Soft scrim fade above the bar — only in dark mode. In light mode
-          // it read as a muddy grey band, so we omit it for a clean look.
-          if (isDark)
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 56,
-              child: IgnorePointer(
-                child: Container(
-                  height: 40,
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.bottomCenter,
-                      end: Alignment.topCenter,
-                      colors: [
-                        Color(0xB8020611),
-                        Colors.transparent,
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
+          // Dark-mode upward scrim removed — it painted over the Spotify
+          // mini-player and made the bar look half-hidden (QA Round 59).
           ClipRRect(
             borderRadius: BorderRadius.circular(28),
             child: BackdropFilter(

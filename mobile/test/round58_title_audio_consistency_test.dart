@@ -1,12 +1,16 @@
-// Round 58 — title changed but audio did not; pause/resume changed the clip.
+// Round 58 — title/audio/pause consistency (updated by Round 59 where needed).
 //
-// Root causes:
-//   1. Optimistic title emit before playFile bound the new source.
-//   2. Force-resume after skip replayed whatever ExoPlayer still held.
-//   3. Pause/resume reverted an already-committed skip (title ↔ audio split).
-//   4. handler.pause ignored ALL pauses during source swap, including user taps.
-//   5. currentPath set before bind succeeded.
-//   6. Native idle between skip flush/prepare dropped native ownership.
+// Still pinned:
+//   - handler.pause only ignores MediaSession echo during swap
+//   - currentPath waits for bind success
+//   - resume/notification play never revertOptimisticSkip
+//   - native idle during skip keeps ownership
+//
+// Round 59 revised:
+//   - skip may ensure-playing after transport (OEM pause-echo)
+//   - prime emits title again for first-tap feedback
+//   - pause never reverts clip identity
+//   - mini-player may prefer snapshot title while skip is in flight
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -27,7 +31,7 @@ void main() {
       final end = handler.indexOf('Future<void> seek(', idx);
       final body = handler.substring(idx, end);
       expect(body, contains('_appTransportDepth == 0'));
-      expect(body, contains('_sourceSwapInFlight && _appTransportDepth == 0'));
+      expect(body, contains('suppressMediaSessionPauseEcho'));
       expect(
         body.contains('if (_sourceSwapInFlight) {\n      if (kDebugMode)'),
         isFalse,
@@ -55,35 +59,34 @@ void main() {
       expect(audio, contains('String? get boundPath'));
     });
 
-    test('skip does not force-resume after transport', () {
+    test('skip ensure-playing is gated on pause intent', () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
       final idx = src.indexOf('Future<void> _runOneSkip(bool next) async');
       final end = src.indexOf('Future<void> _skipPlaylistClip(', idx);
       final body = src.substring(idx, end);
-      expect(body.contains('await _audio.resume()'), isFalse,
-          reason: 'Force-resume after skip replays the old source.');
-      expect(body, contains('Do NOT force-resume'));
+      expect(body, contains('_latestTransportPausesPlayback || _userInitiatedPause'));
+      expect(body, contains('await _audio.resume()'));
     });
 
-    test('prime does not emit a new clip title before bind', () {
+    test('prime emits skip title for instant feedback', () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
       final idx = src.indexOf('void _primeOptimisticSkip(bool next)');
       final end = src.indexOf('void _warmLibraryNeighbors()', idx);
       final body = src.substring(idx, end);
-      expect(body.contains('_emit('), isFalse,
-          reason: 'Optimistic title emit is the title/audio desync.');
+      expect(body, contains('_emit('));
+      expect(body, contains('clipTitle: clip.title'));
       expect(body, contains('_optimisticSkipTargetPath'));
       expect(body, contains('_preSkipBoundPath'));
     });
 
-    test('pause reverts skip only when the new source is not committed', () {
+    test('pause abort never changes clip identity', () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
       final idx = src.indexOf('Future<void> _abortInFlightTransport(');
       final end = src.indexOf('Future<T> _serializeTransport', idx);
       final body = src.substring(idx, end);
-      expect(body, contains('final committed ='));
-      expect(body, contains('if (!committed)'));
-      expect(body, contains('restoreCurrentPath'));
+      expect(body, contains('must NEVER change which clip'));
+      expect(body.contains('final committed ='), isFalse);
+      expect(body.contains('_libraryIndex = _preSkipLibraryIndex'), isFalse);
     });
 
     test('resume and notification play never revert a committed skip', () {
@@ -109,12 +112,10 @@ void main() {
       expect(slice, contains('_skipInFlight'));
     });
 
-    test('mini-player title follows bound MediaItem, not optimistic snapshot',
-        () {
+    test('mini-player may prefer snapshot title while skip is pending', () {
       final bar = _read('lib/features/playback/mini_player_bar.dart');
+      expect(bar, contains('skipPending && snapTitle'));
       expect(bar, contains('mediaTitle?.isNotEmpty == true ? mediaTitle'));
-      expect(bar.contains('skipPending && snapTitle'), isFalse,
-          reason: 'Must not prefer optimistic snapshot title during skip.');
     });
   });
 }

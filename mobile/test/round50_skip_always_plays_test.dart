@@ -30,7 +30,8 @@ void main() {
       expect(idx, greaterThanOrEqualTo(0));
       final end = handler.indexOf('Future<void> seek(', idx);
       final body = handler.substring(idx, end);
-      expect(body, contains('_sourceSwapInFlight && _appTransportDepth == 0'));
+      expect(body, contains('suppressMediaSessionPauseEcho'));
+      expect(body, contains('_appTransportDepth == 0'));
       expect(body, contains('return;'));
     });
 
@@ -39,17 +40,18 @@ void main() {
       final idx = src.indexOf('Future<void> _handleNotificationPause()');
       final end = src.indexOf('Future<void> _handleNotificationPlay()', idx);
       final body = src.substring(idx, end);
-      expect(body, contains('if (_suppressTransientNotPlaying)'));
+      expect(body, contains('_suppressTransientNotPlaying'));
+      expect(body, contains('_skipInFlight'));
       expect(body, contains('return Future<void>.value()'));
     });
 
-    test('guardedSkip does not force-resume after transport', () {
+    test('guardedSkip ensure-playing after transport when not paused', () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
       final idx = src.indexOf('Future<void> _runOneSkip(bool next) async');
       final end = src.indexOf('Future<void> _skipPlaylistClip(', idx);
       final body = src.substring(idx, end);
-      expect(body.contains('await _audio.resume()'), isFalse);
-      expect(body, contains('_userInitiatedPause = false'));
+      expect(body, contains('await _audio.resume()'));
+      expect(body, contains('_userInitiatedPause'));
     });
 
     test('onPlayerState never auto-pauses from playing:false', () {
@@ -81,7 +83,8 @@ void main() {
         reason: 'Title-gap shrink made the bar invisible mid skip.',
       );
       expect(bar, contains('mediaItemStream'));
-      expect(bar, contains('audio.isPlayingClip || audio.isPlaying'));
+      expect(bar, contains('audio.isPlayingClip'));
+      expect(bar, contains('coordinator.skipTransportActive'));
     });
   });
 }

@@ -56,9 +56,14 @@ void main() {
       final abortBody = coord.substring(abortIdx, abortEnd);
       expect(abortBody, contains('_audio.invalidateInFlightPlay()'));
       expect(
-        abortBody.contains('await _audio.cancelInFlightPlay()'),
+        abortBody.contains('await _audio.pause()'),
         isTrue,
-        reason: 'Hard abort (pause) must still stop in-flight loads.',
+        reason: 'Hard abort (pause) must pause without destroying the bind.',
+      );
+      expect(
+        abortBody.contains('await _audio.cancelInFlightPlay()'),
+        isFalse,
+        reason: 'Hard abort must not stop() a newly bound skip source.',
       );
       // Soft branch must not stop — only invalidate.
       final softIdx = abortBody.indexOf('} else {');

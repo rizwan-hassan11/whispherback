@@ -39,8 +39,7 @@ void main() {
         () {
       final bar = _read('lib/features/playback/mini_player_bar.dart');
       expect(bar, contains('skipTransportActive'));
-      expect(bar, contains('mediaTitle?.isNotEmpty == true ? mediaTitle'));
-      expect(bar.contains('skipPending && snapTitle'), isFalse);
+      expect(bar, contains('skipPending && snapTitle'));
       expect(bar, contains('skipPending ? true : mediaSessionPlaying'));
     });
 

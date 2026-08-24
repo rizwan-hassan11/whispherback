@@ -342,6 +342,13 @@ class AudioPlaybackService {
   /// Stops an in-flight ExoPlayer source swap without tearing down the session.
   Future<void> cancelInFlightPlay() => _handler.cancelInFlightPlay();
 
+  /// When true, MediaSession pause echoes are ignored (see handler).
+  set suppressMediaSessionPauseEcho(bool value) =>
+      _handler.suppressMediaSessionPauseEcho = value;
+
+  bool get suppressMediaSessionPauseEcho =>
+      _handler.suppressMediaSessionPauseEcho;
+
   /// Hides the lock-screen media card without tearing down the audio
   /// session. Used by `dismissPlayer` so the user's "cross icon" tap
   /// removes the visible system notification too — without that,

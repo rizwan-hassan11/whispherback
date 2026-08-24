@@ -149,8 +149,12 @@ class _MainShellState extends ConsumerState<MainShell> {
     final native =
         nativeAsync.valueOrNull ?? NativeAlarmsBridge.instance.lastSnapshot;
     final audio = ref.watch(audioPlaybackServiceProvider);
-    final dartClipActive =
-        audio.currentPath != null && (audio.isPlayingClip || audio.isPlaying);
+    final dartClipActive = ref.watch(playbackCoordinatorProvider).skipTransportActive ||
+        audio.currentPath != null ||
+        audio.isPlayingClip ||
+        audio.mediaItem != null ||
+        (snapshot?.isPlaying ?? false) ||
+        (snapshot?.clipTitle != null);
     final hasMediaSessionClip = audio.isPlayingClip && audio.mediaItem != null;
     final miniPlayerVisible = snapshot != null &&
         snapshot.showsMiniPlayer(

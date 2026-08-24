@@ -46,8 +46,8 @@ void main() {
         expect(finallyBody, contains('_skipInFlight = false'));
       }
       // Native-only clear after emit is OK — Dart keeps latch until playing:true.
-      // Round 58: force-resume after skip was removed (it replayed the old clip).
-      expect(body.contains('await _audio.resume()'), isFalse);
+      // Round 59: ensure-playing after skip is required (OEM pause-echo).
+      expect(body, contains('await _audio.resume()'));
     });
 
     test('onPlayerState never syncs playing:false into snapshot', () {
@@ -74,11 +74,13 @@ void main() {
     test('mini-player merges titles by ownership and keys progress by clip',
         () {
       final bar = _read('lib/features/playback/mini_player_bar.dart');
-      expect(bar, contains('final dartOwns = audio.currentPath != null'));
+      expect(bar, contains('final dartOwns ='));
+      expect(bar, contains('audio.currentPath != null'));
+      expect(bar, contains('coordinator.skipTransportActive'));
       expect(bar, contains('ValueKey<String>'));
       expect(bar, contains('key: progressKey'));
       expect(bar, contains('mediaSessionPlaying'));
-      expect(bar, contains('audio.isPlayingClip || audio.isPlaying'));
+      expect(bar, contains('audio.isPlayingClip'));
     });
   });
 }

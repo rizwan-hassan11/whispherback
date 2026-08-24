@@ -51,29 +51,33 @@ void main() {
       expect(src, contains('playlistId: widget.playlistId'));
     });
 
-    test('completed is handled before skip latch early-return', () {
+    test('completed during skip is ignored so auto-advance cannot race skip',
+        () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
       final idx = src.indexOf('void _onPlayerState(PlayerState state)');
       final end = src.indexOf('Future<void> _onClipCompleted(', idx);
       final body = src.substring(idx, end);
       final completedIdx = body.indexOf('ProcessingState.completed');
-      final latchIdx = body.indexOf('_suppressTransientNotPlaying');
+      final guardIdx =
+          body.indexOf('if (_skipInFlight || _suppressTransientNotPlaying)');
+      final advanceIdx = body.indexOf('unawaited(_onClipCompleted())');
       expect(completedIdx, greaterThanOrEqualTo(0));
-      expect(latchIdx, greaterThan(completedIdx),
-          reason: 'completed must run before latch swallows the event.');
+      expect(guardIdx, greaterThan(completedIdx));
+      expect(advanceIdx, greaterThan(guardIdx),
+          reason: 'Skip latch must gate auto-advance (QA Round 59).');
     });
 
     test('pause restores pre-skip queue indices and sets sentinel first', () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
       expect(src, contains('_preSkipLibraryIndex'));
       expect(src, contains('_preSkipPlaylistIndex'));
+      // Round 59: pause must NOT restore pre-skip indices (that changed clips).
       final abort = src.substring(
         src.indexOf('Future<void> _abortInFlightTransport('),
         src.indexOf('Future<T> _serializeTransport'),
       );
-      expect(abort, contains('_libraryIndex = _preSkipLibraryIndex'));
-      expect(abort, contains('_playlistClipIndex = _preSkipPlaylistIndex'));
-      expect(abort, contains('if (!committed)'));
+      expect(abort.contains('_libraryIndex = _preSkipLibraryIndex'), isFalse);
+      expect(abort, contains('must NEVER change which clip'));
 
       final pauseIdx = src.indexOf('Future<void> pause()');
       final pauseBody = src.substring(pauseIdx, pauseIdx + 500);

@@ -61,6 +61,7 @@ class PlaybackSnapshot extends Equatable {
   }) {
     if (modalVisible) return false;
     if (state == AppPlaybackState.inactive) return false;
+    // Whole clip session (playing or paused) keeps the Spotify bar up.
     if (state == AppPlaybackState.manualPlaying ||
         state == AppPlaybackState.scheduledPlaying) {
       return true;
@@ -68,6 +69,8 @@ class PlaybackSnapshot extends Equatable {
     if (nativeActive || dartClipActive || hasMediaSessionClip || isPlaying) {
       return true;
     }
+    // Keep the bar during handoff / skip gaps when we still know what was
+    // playing — vanishing mid next/prev is the Round 59 visibility bug.
     if (clipTitle != null || playlistName != null) return true;
     return false;
   }

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui';
 
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
@@ -106,8 +105,14 @@ class MiniPlayerBar extends ConsumerWidget {
           initialData: audio.mediaSessionPlaying,
           builder: (context, playingSnap) {
             final mediaItem = mediaSnap.data;
-            final dartClipActive = audio.currentPath != null &&
-                (audio.isPlayingClip || audio.isPlaying);
+            // Keep the bar mounted for the whole session — including mid skip,
+            // MediaSession gaps, and paused clips (QA: Spotify bar "hides").
+            final dartClipActive = coordinator.skipTransportActive ||
+                audio.currentPath != null ||
+                audio.isPlayingClip ||
+                mediaItem != null ||
+                snapshot.isPlaying ||
+                snapshot.clipTitle != null;
             final hasMediaSessionClip =
                 audio.isPlayingClip && mediaItem != null;
             if (!snapshot.showsMiniPlayer(
@@ -117,7 +122,11 @@ class MiniPlayerBar extends ConsumerWidget {
             )) {
               return const SizedBox.shrink();
             }
-            final dartOwns = audio.currentPath != null && !nativeLive;
+            final dartOwns =
+                (audio.currentPath != null ||
+                        audio.isPlayingClip ||
+                        coordinator.skipTransportActive) &&
+                    !nativeLive;
             return _MiniPlayerBody(
               snapshot: snapshot,
               native: native,
@@ -174,18 +183,20 @@ class _MiniPlayerBody extends StatelessWidget {
     final mediaTitle = mediaItem?.title.trim();
     final mediaSubtitle = mediaItem?.album?.trim() ?? mediaItem?.artist?.trim();
 
-    // Title ALWAYS follows the bound MediaItem (Dart) or native snapshot.
-    // Never prefer an optimistic coordinator title over the bound source —
-    // that is exactly "title changed but clip did not" (QA Round 58).
+    // While a skip is in flight, prefer the coordinator snapshot title so the
+    // bar updates on the first tap. Once bound, MediaItem wins.
+    final skipPending = coordinator.skipTransportActive;
     final title = dartOwns
-        ? (mediaTitle?.isNotEmpty == true ? mediaTitle : snapTitle)
+        ? (skipPending && snapTitle?.isNotEmpty == true
+            ? snapTitle
+            : (mediaTitle?.isNotEmpty == true ? mediaTitle : snapTitle))
         : (nativeTitle ??
             (mediaTitle?.isNotEmpty == true ? mediaTitle : snapTitle));
     final subtitle = dartOwns
-        ? (mediaSubtitle?.isNotEmpty == true
-            ? mediaSubtitle
-            : (snapSubtitle?.isNotEmpty == true
-                ? snapSubtitle
+        ? (snapSubtitle?.isNotEmpty == true
+            ? snapSubtitle
+            : (mediaSubtitle?.isNotEmpty == true
+                ? mediaSubtitle
                 : nativeSubtitle))
         : (nativeSubtitle ?? snapSubtitle ?? mediaSubtitle);
 
@@ -195,10 +206,7 @@ class _MiniPlayerBody extends StatelessWidget {
     final displaySubtitle =
         (subtitle != null && subtitle.isNotEmpty) ? subtitle : 'WhisperBack';
 
-    // Play icon: MediaSession when Dart owns; native/snapshot otherwise.
-    // During an in-flight skip keep showing "playing" so the button does not
-    // flicker to play mid-swap (audio is switching, not paused).
-    final skipPending = coordinator.skipTransportActive;
+    // During skip keep showing "playing" so the control does not flicker.
     final displayPlaying = dartOwns
         ? (skipPending ? true : mediaSessionPlaying)
         : (nativeLive ? native.isPlaying : snapshot.isPlaying);
@@ -237,13 +245,13 @@ class _MiniPlayerBody extends StatelessWidget {
 
     return ClipRRect(
       borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-        child: Material(
-          color: isDark
-              ? AppColors.card.withValues(alpha: 0.94)
-              : Colors.white.withValues(alpha: 0.96),
-          child: Container(
+      child: Material(
+        // Fully opaque — translucent blur made the bar look "hidden" behind
+        // the glass nav scrim (QA Round 59 visibility).
+        color: isDark ? AppColors.card : Colors.white,
+        elevation: 8,
+        shadowColor: Colors.black.withValues(alpha: 0.35),
+        child: Container(
             height: ShellMetrics.miniPlayerHeight,
             padding: const EdgeInsets.symmetric(horizontal: 10),
             decoration: BoxDecoration(
@@ -388,7 +396,6 @@ class _MiniPlayerBody extends StatelessWidget {
             ),
           ),
         ),
-      ),
     );
   }
 

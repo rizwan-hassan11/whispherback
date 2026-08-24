@@ -149,6 +149,10 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   /// the notification stayed correct).
   int _appTransportDepth = 0;
 
+  /// When true, MediaSession pause echoes are ignored (depth 0 only). Set by
+  /// the coordinator for the duration of a next/prev settle window.
+  bool suppressMediaSessionPauseEcho = false;
+
   /// Runs [action] without firing coordinator transport callbacks.
   Future<T> runFromAppTransport<T>(Future<T> Function() action) async {
     _appTransportDepth++;
@@ -570,8 +574,10 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
         swapping: swapping,
         playGen: playGen,
       );
-      // Bound + MediaItem published for this path, and we still own the gen.
-      return playGen == _playFileGeneration && mediaItem.value?.id == path;
+      // Bound for this path counts as success even if a later generation bump
+      // raced `play()` — otherwise skip leaves audio stopped / indices stale
+      // and pause/resume appears to change the clip (QA Round 59).
+      return mediaItem.value?.id == path;
     } finally {
       if (!bindDone.isCompleted) bindDone.complete();
     }
@@ -1130,7 +1136,10 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     // In-app / coordinator pause uses `runFromAppTransport` (depth > 0) and
     // MUST always win — swallowing it left skip running so "pause" looked
     // like it advanced the queue (QA Round 58).
-    if (_sourceSwapInFlight && _appTransportDepth == 0) {
+    // Round 59: also honor the coordinator settle window — OEM echoes often
+    // arrive AFTER `_sourceSwapInFlight` clears and paused the new clip.
+    if ((_sourceSwapInFlight || suppressMediaSessionPauseEcho) &&
+        _appTransportDepth == 0) {
       if (kDebugMode) {
         debugPrint('handler.pause: ignored MediaSession echo during source swap');
       }
