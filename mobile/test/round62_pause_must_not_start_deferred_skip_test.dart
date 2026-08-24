@@ -31,7 +31,13 @@ void main() {
       final window = coord.substring(idx, idx + 500);
       expect(window, contains('_userInitiatedPause'));
       expect(window, contains('_latestTransportPausesPlayback'));
-      expect(window, contains('!_transportCurrent(transportEpoch)'));
+      // Stale-epoch guard is immediately above the Round 62 block (Round 65).
+      expect(
+        coord.contains(
+          'if (transportEpoch != null && !_transportCurrent(transportEpoch))',
+        ),
+        isTrue,
+      );
     });
 
     test('hard abort invalidates playFile forPause so dying bind pauses', () {

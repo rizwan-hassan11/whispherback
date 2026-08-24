@@ -51,7 +51,7 @@ void main() {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
       expect(coord, contains('_preSkipSnapshot'));
       expect(coord, contains('_revertOptimisticSkipTitle'));
-      expect(coord, contains('bind failed — restore the previous title'));
+      expect(coord, contains('bind failed for THIS skip'));
     });
 
     test('canSkipClips requires a multi-clip queue', () {

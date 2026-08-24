@@ -271,9 +271,10 @@ class PlaybackCoordinator {
         unawaited(abort);
         previous = Future<void>.value();
       } else {
-        // Soft skip/play: invalidate the prior load, but still wait for the
-        // previous transport body so two setAudioSource calls cannot
-        // interleave on ExoPlayer (that left next silent until resume).
+        // Soft skip/play: wait for the previous body so setAudioSource does
+        // not interleave, and invalidate its playFile generation so it exits.
+        // Round 65: the dying body must NOT revert titles (see
+        // `_revertOptimisticSkipTitle`) — that wiped the newer skip's UI.
         unawaited(abort);
         previous = _transportGate;
       }
@@ -1376,7 +1377,8 @@ class PlaybackCoordinator {
           sourceSwap: true,
         );
         if (!ok) {
-          _revertOptimisticSkipTitle();
+          if (!_transportCurrent(epoch)) return;
+          _revertOptimisticSkipTitle(transportEpoch: epoch);
           await _honorSupersededTransport(epoch);
           return;
         }
@@ -1384,7 +1386,8 @@ class PlaybackCoordinator {
         if (kDebugMode) {
           debugPrint('skip shuffle playFile failed: $e\n$st');
         }
-        _revertOptimisticSkipTitle();
+        if (!_transportCurrent(epoch)) return;
+        _revertOptimisticSkipTitle(transportEpoch: epoch);
         await _honorSupersededTransport(epoch);
         return;
       }
@@ -2255,11 +2258,10 @@ class PlaybackCoordinator {
       return;
     }
 
-    // Round 64: manual library/playlist play must own the session exclusively.
-    // Leftover native MediaPlayer + sticky nativeActive made next/pause hit
-    // skipNative/pauseNative while ExoPlayer kept playing the library clip.
-    if (!skipSnapshotEmit ||
-        _snapshot.state != AppPlaybackState.scheduledPlaying) {
+    // Round 64/65: claim exclusive Dart ownership only when STARTING a
+    // manual play — not on every next/prev swap. stopNative() on each skip
+    // fought ExoPlayer audio focus and made controls feel dead.
+    if (!skipSnapshotEmit) {
       await _claimDartManualSession();
     }
 
@@ -2347,19 +2349,20 @@ class PlaybackCoordinator {
         sourceSwap: skipSnapshotEmit,
       );
       if (!ok) {
-        // Round 62: NEVER resume a skip that pause/dismiss superseded.
-        // Round 61's "resume if MediaItem matches" made pause start the
-        // deferred next clip — the exact QA "pause changes the clip" bug.
-        if (_userInitiatedPause ||
-            _latestTransportPausesPlayback ||
-            (transportEpoch != null && !_transportCurrent(transportEpoch))) {
-          if (skipSnapshotEmit) _revertOptimisticSkipTitle();
+        // Round 65: if a newer skip/pause already owns transport, do nothing.
+        // Reverting here used the shared `_preSkipSnapshot` and painted the
+        // OLD title over the newer skip — next looked permanently broken.
+        if (transportEpoch != null && !_transportCurrent(transportEpoch)) {
           return;
         }
-        // Round 64: bind failed — restore the previous title. Leaving the
-        // optimistic next title with the old audio is "next does nothing".
+        // Round 62: NEVER resume a skip that pause/dismiss superseded.
+        if (_userInitiatedPause || _latestTransportPausesPlayback) {
+          _revertOptimisticSkipTitle(transportEpoch: transportEpoch);
+          return;
+        }
+        // Round 64/65: bind failed for THIS skip — restore previous title.
         if (skipSnapshotEmit) {
-          _revertOptimisticSkipTitle();
+          _revertOptimisticSkipTitle(transportEpoch: transportEpoch);
           return;
         }
         // Round 61: never tear down a live MediaSession just because the
@@ -2386,7 +2389,6 @@ class PlaybackCoordinator {
           }
           return;
         }
-        // Superseded by a newer transport op — leave title/path alone.
         return;
       }
     } catch (e, st) {
@@ -2405,7 +2407,7 @@ class PlaybackCoordinator {
             clipTitle: clip.title,
           ));
         }
-        _revertOptimisticSkipTitle();
+        _revertOptimisticSkipTitle(transportEpoch: transportEpoch);
         return;
       }
       // Only wipe the session when nothing is bound. Round 60's false
@@ -2474,7 +2476,12 @@ class PlaybackCoordinator {
     }
   }
 
-  void _revertOptimisticSkipTitle() {
+  /// Restores the pre-skip snapshot only when [transportEpoch] still owns
+  /// transport. A superseded skip must never paint over a newer next/prev.
+  void _revertOptimisticSkipTitle({int? transportEpoch}) {
+    if (transportEpoch != null && !_transportCurrent(transportEpoch)) {
+      return;
+    }
     final previous = _preSkipSnapshot;
     _preSkipSnapshot = null;
     _optimisticSkipIndex = null;
@@ -2482,7 +2489,7 @@ class PlaybackCoordinator {
     _optimisticSkipTargetPath = null;
     if (previous == null) return;
     _emit(previous.copyWith(
-      isPlaying: _audio.isPlaying || previous.isPlaying,
+      isPlaying: _audio.isPlaying,
       modalVisible: false,
     ));
   }
