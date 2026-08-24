@@ -88,6 +88,9 @@ class MiniPlayerBar extends ConsumerWidget {
         (prev, next) {
       final n = next.valueOrNull;
       if (n == null) return;
+      // Round 64: do not re-apply sticky native polls over a manual session.
+      final snap = ref.read(playbackSnapshotProvider).valueOrNull;
+      if (snap?.state == AppPlaybackState.manualPlaying) return;
       coordinator.applyNativePlaybackSnapshot(n);
     });
 
@@ -122,10 +125,13 @@ class MiniPlayerBar extends ConsumerWidget {
             )) {
               return const SizedBox.shrink();
             }
-            final dartOwns = (audio.currentPath != null ||
-                    audio.isPlayingClip ||
-                    coordinator.skipTransportActive) &&
-                !nativeLive;
+            // Round 64: Dart owns the bar for the whole manualPlaying session.
+            // Sticky nativeActive must NOT flip dartOwns=false (that made the
+            // pause icon follow native.isPlaying=false while ExoPlayer played).
+            final dartOwns = snapshot.state == AppPlaybackState.manualPlaying ||
+                coordinator.skipTransportActive ||
+                ((audio.currentPath != null || audio.isPlayingClip) &&
+                    snapshot.state != AppPlaybackState.scheduledPlaying);
             return _MiniPlayerBody(
               snapshot: snapshot,
               native: native,

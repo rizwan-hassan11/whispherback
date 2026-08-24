@@ -34,10 +34,7 @@ void main() {
         coord,
         contains('state == AppPlaybackState.scheduledPlaying &&'),
       );
-      expect(
-        coord,
-        contains('sticky `nativeActive` prefs flag'),
-      );
+      expect(coord, contains('Sticky `nativeActive` prefs'));
     });
 
     test('skip finally clears suppress latch', () {

@@ -529,14 +529,36 @@ class PlaybackCoordinator {
 
   /// Native FG MediaPlayer owns the session (playing or paused).
   ///
-  /// Round 63: only treat native as owner while the UI is in
-  /// [AppPlaybackState.scheduledPlaying]. A sticky `nativeActive` prefs flag
-  /// after a prior schedule must NOT steal library/manual next/prev/pause
-  /// onto `skipNative` (that left titles stuck and buttons feeling dead).
+  /// Round 63/64: only while UI is [AppPlaybackState.scheduledPlaying].
+  /// Sticky `nativeActive` prefs after a prior schedule must NOT steal
+  /// library/manual next/prev/pause onto `skipNative`.
   bool get _nativeOwnsPlayback =>
       _snapshot.state == AppPlaybackState.scheduledPlaying &&
       (_nativeScheduledActive ||
           NativeAlarmsBridge.instance.lastSnapshot.isNativeActive);
+
+  /// Dart ExoPlayer owns a Clip Library / playlist session.
+  /// While this is true, native prefs/polls must not rewrite the snapshot
+  /// or flip the mini-player to native.isPlaying (QA Round 64).
+  bool get _dartOwnsManualSession =>
+      _snapshot.state == AppPlaybackState.manualPlaying ||
+      (_skipInFlight && _snapshot.state != AppPlaybackState.scheduledPlaying);
+
+  /// Take exclusive ownership for manual play/skip: stop leftover native
+  /// MediaPlayer and clear the sticky scheduled flag.
+  Future<void> _claimDartManualSession() async {
+    _nativeScheduledActive = false;
+    _nativeActiveScheduleId = null;
+    if (NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
+      try {
+        await NativeAlarmsBridge.instance.stopNative();
+      } catch (e, st) {
+        if (kDebugMode) {
+          debugPrint('claimDartManualSession: stopNative failed: $e\n$st');
+        }
+      }
+    }
+  }
 
   /// Schedule id native is currently playing. Cached so the idle
   /// transition can stamp the completion into the right store bucket
@@ -575,6 +597,13 @@ class PlaybackCoordinator {
   /// the tail always has ~half a day of fires queued.
   void _onNativePlaybackState(NativePlaybackSnapshot native) {
     try {
+      // Round 64: while the user is in a Clip Library / manual playlist
+      // session, ignore sticky native prefs and progress polls. Applying
+      // them rewrote state to scheduledPlaying and made pause/next route
+      // to the wrong engine (dead controls).
+      if (_dartOwnsManualSession) {
+        return;
+      }
       if (native.isPlaying) {
         // Round 27: progress ticks (every 500 ms) also arrive as
         // `isPlaying` snapshots so the mini-player can scrub. Only the
@@ -974,6 +1003,10 @@ class PlaybackCoordinator {
   Future<void> skipNext() => _guardedSkip(next: true);
   Future<void> skipPrevious() => _guardedSkip(next: false);
 
+  /// Snapshot before an optimistic skip title flip. Restored when bind fails
+  /// so the bar never keeps a title whose audio never started (Round 64).
+  PlaybackSnapshot? _preSkipSnapshot;
+
   /// Resolve next/prev target and show it immediately. Queue indices are
   /// applied only after a successful bind so a cancelled skip cannot leave
   /// the session pointing at a clip that never played (QA Round 59).
@@ -983,6 +1016,7 @@ class PlaybackCoordinator {
     _optimisticSkipIndex = null;
     _optimisticSkipClip = null;
     _optimisticSkipTargetPath = null;
+    _preSkipSnapshot = _snapshot;
 
     final native = _nativeOwnsPlayback;
     if (native) {
@@ -1168,9 +1202,8 @@ class PlaybackCoordinator {
         final audible = _nativeOwnsPlayback
             ? NativeAlarmsBridge.instance.lastSnapshot.isPlaying
             : _audio.isPlaying;
-        // Keep the session up even if OEM playing-flag lagged — MediaItem /
-        // titles are enough for bar + notification. Prefer real audible state
-        // for the icon, but never drop to a hidden player after skip.
+        // Round 64: never force isPlaying just because MediaItem exists —
+        // that left the pause icon on while audio was silent / paused.
         if (_snapshot.state == AppPlaybackState.manualPlaying ||
             _snapshot.state == AppPlaybackState.scheduledPlaying ||
             _snapshot.clipTitle != null ||
@@ -1180,7 +1213,7 @@ class PlaybackCoordinator {
                     _nativeOwnsPlayback
                 ? AppPlaybackState.scheduledPlaying
                 : AppPlaybackState.manualPlaying,
-            isPlaying: audible || _audio.mediaItem != null,
+            isPlaying: audible,
             modalVisible: false,
           ));
         }
@@ -1343,6 +1376,7 @@ class PlaybackCoordinator {
           sourceSwap: true,
         );
         if (!ok) {
+          _revertOptimisticSkipTitle();
           await _honorSupersededTransport(epoch);
           return;
         }
@@ -1350,6 +1384,7 @@ class PlaybackCoordinator {
         if (kDebugMode) {
           debugPrint('skip shuffle playFile failed: $e\n$st');
         }
+        _revertOptimisticSkipTitle();
         await _honorSupersededTransport(epoch);
         return;
       }
@@ -2061,6 +2096,9 @@ class PlaybackCoordinator {
       final sleep = await _sleep.getActive();
       if (_sleep.isSleepActive(sleep)) return false;
     }
+    if (!fromSchedule) {
+      await _claimDartManualSession();
+    }
 
     final clips = await _playlists.getClips(playlistId);
     if (clips.isEmpty) {
@@ -2217,6 +2255,14 @@ class PlaybackCoordinator {
       return;
     }
 
+    // Round 64: manual library/playlist play must own the session exclusively.
+    // Leftover native MediaPlayer + sticky nativeActive made next/pause hit
+    // skipNative/pauseNative while ExoPlayer kept playing the library clip.
+    if (!skipSnapshotEmit ||
+        _snapshot.state != AppPlaybackState.scheduledPlaying) {
+      await _claimDartManualSession();
+    }
+
     // Do NOT call `_audio.stop()` before swapping clips. stop() routes to
     // stopClip(), which restarts the silence keep-alive on Active=ON and
     // races the incoming playFile — the root cause of library next/prev
@@ -2307,6 +2353,13 @@ class PlaybackCoordinator {
         if (_userInitiatedPause ||
             _latestTransportPausesPlayback ||
             (transportEpoch != null && !_transportCurrent(transportEpoch))) {
+          if (skipSnapshotEmit) _revertOptimisticSkipTitle();
+          return;
+        }
+        // Round 64: bind failed — restore the previous title. Leaving the
+        // optimistic next title with the old audio is "next does nothing".
+        if (skipSnapshotEmit) {
+          _revertOptimisticSkipTitle();
           return;
         }
         // Round 61: never tear down a live MediaSession just because the
@@ -2352,6 +2405,7 @@ class PlaybackCoordinator {
             clipTitle: clip.title,
           ));
         }
+        _revertOptimisticSkipTitle();
         return;
       }
       // Only wipe the session when nothing is bound. Round 60's false
@@ -2416,7 +2470,21 @@ class PlaybackCoordinator {
       ));
       _optimisticSkipClip = null;
       _optimisticSkipTargetPath = null;
+      _preSkipSnapshot = null;
     }
+  }
+
+  void _revertOptimisticSkipTitle() {
+    final previous = _preSkipSnapshot;
+    _preSkipSnapshot = null;
+    _optimisticSkipIndex = null;
+    _optimisticSkipClip = null;
+    _optimisticSkipTargetPath = null;
+    if (previous == null) return;
+    _emit(previous.copyWith(
+      isPlaying: _audio.isPlaying || previous.isPlaying,
+      modalVisible: false,
+    ));
   }
 
   /// True when the user is in any clip-playing context.
@@ -2436,10 +2504,18 @@ class PlaybackCoordinator {
   /// for every playback context. The new "I imported one clip and there
   /// are no NEXT/PREV buttons" QA report confirms users expect to see
   /// them and tap to restart.
+  /// Round 64: only show next/prev when there is more than one clip to walk.
+  /// Showing them on a single-clip session made seek-to-zero look like a
+  /// broken "next" (title never changes).
   bool get canSkipClips {
-    final inPlayback = _snapshot.state == AppPlaybackState.manualPlaying ||
-        _snapshot.state == AppPlaybackState.scheduledPlaying;
-    return inPlayback;
+    if (_snapshot.state == AppPlaybackState.scheduledPlaying) {
+      return _playlistClipCache.length > 1 || _snapshot.playlistId != null;
+    }
+    if (_snapshot.state != AppPlaybackState.manualPlaying) return false;
+    if (_snapshot.playlistId != null) {
+      return _playlistClipCache.length > 1;
+    }
+    return _libraryQueue.length > 1;
   }
 
   bool _isPlayablePath(String path) {
