@@ -216,14 +216,24 @@ class PlaybackCoordinator {
   Future<void> _abortInFlightTransport(
       {required bool revertOptimisticSkip}) async {
     if (revertOptimisticSkip) {
-      // Pause/dismiss must NEVER change which clip the session is on.
-      // Reverting indices/titles after a skip bind made pause/resume look
-      // like a track change (QA Round 59). Only cancel the unfinished load.
+      // Pause/dismiss: cancel the unfinished load. If next/prev had only
+      // painted an optimistic title (bind not done), restore the previous
+      // title — otherwise pause looks like it changed the clip (Round 66).
+      // If the new path already bound, keep that title and just pause.
+      final targetPath = _optimisticSkipTargetPath;
       _optimisticSkipIndex = null;
       _optimisticSkipClip = null;
       _optimisticSkipTargetPath = null;
       _ignoreSessionPauseUntil = null;
       _audio.suppressMediaSessionPauseEcho = false;
+      final bound = _audio.boundPath ?? _audio.currentPath;
+      if (_preSkipSnapshot != null) {
+        if (targetPath != null && bound == targetPath) {
+          _preSkipSnapshot = null;
+        } else {
+          _revertOptimisticSkipTitle();
+        }
+      }
     }
     final nativeActive = _nativeOwnsPlayback;
     if (nativeActive) {
@@ -1017,7 +1027,9 @@ class PlaybackCoordinator {
     _optimisticSkipIndex = null;
     _optimisticSkipClip = null;
     _optimisticSkipTargetPath = null;
-    _preSkipSnapshot = _snapshot;
+    // Round 66: only capture `_preSkipSnapshot` when we actually flip the
+    // title to another clip. Setting it on single-clip / no-op primes left
+    // a stale snapshot that later reverts wiped a real next/prev.
 
     final native = _nativeOwnsPlayback;
     if (native) {
@@ -1046,6 +1058,7 @@ class PlaybackCoordinator {
       _optimisticSkipIndex = nextIndex;
       _optimisticSkipClip = clip;
       _optimisticSkipTargetPath = clip.filePath;
+      _preSkipSnapshot = _snapshot;
       // Do NOT assign `_libraryIndex` yet — wait for bind success.
       _emit(_snapshot.copyWith(
         state: AppPlaybackState.manualPlaying,
@@ -1077,6 +1090,7 @@ class PlaybackCoordinator {
     _optimisticSkipIndex = nextIndex;
     _optimisticSkipClip = clip;
     _optimisticSkipTargetPath = clip.filePath;
+    _preSkipSnapshot = _snapshot;
     final fromSchedule = _snapshot.state == AppPlaybackState.scheduledPlaying;
     _emit(_snapshot.copyWith(
       state: fromSchedule
@@ -1203,8 +1217,18 @@ class PlaybackCoordinator {
         final audible = _nativeOwnsPlayback
             ? NativeAlarmsBridge.instance.lastSnapshot.isPlaying
             : _audio.isPlaying;
-        // Round 64: never force isPlaying just because MediaItem exists —
+        // Round 64/66: never force isPlaying just because MediaItem exists —
         // that left the pause icon on while audio was silent / paused.
+        // After a skip, ExoPlayer can lag `playing` by a frame; if we still
+        // have a bound clip and the user did not pause, keep the playing
+        // icon so next does not look like it paused the queue.
+        final forcePaused =
+            _latestTransportPausesPlayback || _userInitiatedPause;
+        final showPlaying = forcePaused
+            ? false
+            : (audible ||
+                (_audio.mediaItem != null &&
+                    (_audio.isPlayingClip || _audio.currentPath != null)));
         if (_snapshot.state == AppPlaybackState.manualPlaying ||
             _snapshot.state == AppPlaybackState.scheduledPlaying ||
             _snapshot.clipTitle != null ||
@@ -1214,7 +1238,7 @@ class PlaybackCoordinator {
                     _nativeOwnsPlayback
                 ? AppPlaybackState.scheduledPlaying
                 : AppPlaybackState.manualPlaying,
-            isPlaying: audible,
+            isPlaying: showPlaying,
             modalVisible: false,
           ));
         }
@@ -1378,6 +1402,27 @@ class PlaybackCoordinator {
         );
         if (!ok) {
           if (!_transportCurrent(epoch)) return;
+          // Round 66: false from playFile after a real bind must not wipe
+          // the primed title — treat a matching MediaItem as success.
+          if (_isPathBound(path) || _isPathBound(clip.filePath)) {
+            if (idx >= 0) _playlistClipIndex = idx;
+            _warmPlaylistNeighbors();
+            if (_transportCurrent(epoch)) {
+              _emit(_snapshot.copyWith(
+                state: fromSchedule
+                    ? AppPlaybackState.scheduledPlaying
+                    : AppPlaybackState.manualPlaying,
+                clipTitle: clip.title,
+                isPlaying: true,
+                durationMs: clip.durationMs,
+                modalVisible: false,
+              ));
+              _optimisticSkipTargetPath = null;
+              _preSkipSnapshot = null;
+            }
+            await _honorSupersededTransport(epoch);
+            return;
+          }
           _revertOptimisticSkipTitle(transportEpoch: epoch);
           await _honorSupersededTransport(epoch);
           return;
@@ -1387,14 +1432,34 @@ class PlaybackCoordinator {
           debugPrint('skip shuffle playFile failed: $e\n$st');
         }
         if (!_transportCurrent(epoch)) return;
+        if (_isPathBound(clip.filePath)) {
+          if (idx >= 0) _playlistClipIndex = idx;
+          _warmPlaylistNeighbors();
+          if (_transportCurrent(epoch)) {
+            _emit(_snapshot.copyWith(
+              state: fromSchedule
+                  ? AppPlaybackState.scheduledPlaying
+                  : AppPlaybackState.manualPlaying,
+              clipTitle: clip.title,
+              isPlaying: true,
+              durationMs: clip.durationMs,
+              modalVisible: false,
+            ));
+            _optimisticSkipTargetPath = null;
+            _preSkipSnapshot = null;
+          }
+          await _honorSupersededTransport(epoch);
+          return;
+        }
         _revertOptimisticSkipTitle(transportEpoch: epoch);
         await _honorSupersededTransport(epoch);
         return;
       }
-      // Commit queue pointer only after a successful bind.
-      if (idx >= 0) _playlistClipIndex = idx;
-      _warmPlaylistNeighbors();
+      // Commit queue pointer only after a successful bind, and only if this
+      // skip still owns transport (a newer next/prev must not inherit our index).
       if (_transportCurrent(epoch)) {
+        if (idx >= 0) _playlistClipIndex = idx;
+        _warmPlaylistNeighbors();
         _emit(_snapshot.copyWith(
           state: fromSchedule
               ? AppPlaybackState.scheduledPlaying
@@ -1405,6 +1470,7 @@ class PlaybackCoordinator {
           modalVisible: false,
         ));
         _optimisticSkipTargetPath = null;
+        _preSkipSnapshot = null;
       }
       _refreshScheduleNotificationsDeferred();
       await _honorSupersededTransport(epoch);
@@ -2360,6 +2426,19 @@ class PlaybackCoordinator {
           _revertOptimisticSkipTitle(transportEpoch: transportEpoch);
           return;
         }
+        // Round 66: playFile may return false after ExoPlayer already bound
+        // this path (generation race / mediaItem check). Treat as success
+        // so we never paint the old title over audio that is already live.
+        if (skipSnapshotEmit && _isPathBound(clip.filePath)) {
+          _audio.restoreCurrentPath(clip.filePath);
+          _commitSkipBindSuccess(
+            clip: clip,
+            effectivePlaylistId: effectivePlaylistId,
+            resolvedQueue: resolvedQueue,
+            transportEpoch: transportEpoch,
+          );
+          return;
+        }
         // Round 64/65: bind failed for THIS skip — restore previous title.
         if (skipSnapshotEmit) {
           _revertOptimisticSkipTitle(transportEpoch: transportEpoch);
@@ -2401,6 +2480,16 @@ class PlaybackCoordinator {
       // Skip swaps must NOT call stop() — that emits activeIdle and hides
       // the Spotify mini-player while the user is still tapping next/prev.
       if (skipSnapshotEmit) {
+        if (_isPathBound(clip.filePath)) {
+          _audio.restoreCurrentPath(clip.filePath);
+          _commitSkipBindSuccess(
+            clip: clip,
+            effectivePlaylistId: effectivePlaylistId,
+            resolvedQueue: resolvedQueue,
+            transportEpoch: transportEpoch,
+          );
+          return;
+        }
         if (!_errorController.isClosed) {
           _errorController.add(PlaybackErrorEvent(
             PlaybackErrorReason.decodeFailed,
@@ -2449,31 +2538,55 @@ class PlaybackCoordinator {
     }
     if (skipSnapshotEmit &&
         (transportEpoch == null || _transportCurrent(transportEpoch))) {
-      // Commit queue pointer only after a successful bind.
-      if (effectivePlaylistId != null) {
-        final idx = resolvedQueue.indexWhere((c) => c.id == clip.id);
-        _playlistClipIndex = idx < 0 ? 0 : idx;
-      } else {
-        _libraryIndex = _libraryQueue.indexWhere((c) => c.id == clip.id);
-        if (_libraryIndex < 0) _libraryIndex = 0;
-      }
-      // Confirm title/duration after the swap so the mini-player cannot
-      // keep painting the previous clip metadata.
-      _emit(_snapshot.copyWith(
-        state: AppPlaybackState.manualPlaying,
-        playlistId: effectivePlaylistId ?? _snapshot.playlistId,
-        playlistName: effectivePlaylistId != null
-            ? (_snapshot.playlistName ?? clip.title)
-            : clip.title,
-        clipTitle: clip.title,
-        isPlaying: true,
-        durationMs: clip.durationMs,
-        modalVisible: false,
-      ));
-      _optimisticSkipClip = null;
-      _optimisticSkipTargetPath = null;
-      _preSkipSnapshot = null;
+      _commitSkipBindSuccess(
+        clip: clip,
+        effectivePlaylistId: effectivePlaylistId,
+        resolvedQueue: resolvedQueue,
+        transportEpoch: transportEpoch,
+      );
     }
+  }
+
+  /// True when ExoPlayer / MediaSession already owns [path].
+  bool _isPathBound(String path) {
+    return _audio.boundPath == path ||
+        _audio.mediaItem?.id == path ||
+        _audio.currentPath == path;
+  }
+
+  /// Commits queue pointer + title after a successful (or effectively
+  /// successful) skip bind. Shared by the happy path and Round 66's
+  /// "playFile returned false but path is already bound" recovery.
+  void _commitSkipBindSuccess({
+    required AudioClip clip,
+    required String? effectivePlaylistId,
+    required List<AudioClip> resolvedQueue,
+    int? transportEpoch,
+  }) {
+    if (transportEpoch != null && !_transportCurrent(transportEpoch)) {
+      return;
+    }
+    if (effectivePlaylistId != null) {
+      final idx = resolvedQueue.indexWhere((c) => c.id == clip.id);
+      _playlistClipIndex = idx < 0 ? 0 : idx;
+    } else {
+      _libraryIndex = _libraryQueue.indexWhere((c) => c.id == clip.id);
+      if (_libraryIndex < 0) _libraryIndex = 0;
+    }
+    _emit(_snapshot.copyWith(
+      state: AppPlaybackState.manualPlaying,
+      playlistId: effectivePlaylistId ?? _snapshot.playlistId,
+      playlistName: effectivePlaylistId != null
+          ? (_snapshot.playlistName ?? clip.title)
+          : clip.title,
+      clipTitle: clip.title,
+      isPlaying: true,
+      durationMs: clip.durationMs,
+      modalVisible: false,
+    ));
+    _optimisticSkipClip = null;
+    _optimisticSkipTargetPath = null;
+    _preSkipSnapshot = null;
   }
 
   /// Restores the pre-skip snapshot only when [transportEpoch] still owns

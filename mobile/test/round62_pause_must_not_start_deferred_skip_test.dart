@@ -94,21 +94,21 @@ void main() {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
       final shuffleIdx = coord.indexOf('if (shuffle) {');
       expect(shuffleIdx, greaterThanOrEqualTo(0));
-      // Find the skip shuffle block near playFile sourceSwap: true
-      final skipShuffle = coord.indexOf(
-        'skip shuffle playFile failed',
+      final playFileCall = coord.indexOf(
+        'sourceSwap: true,',
+        shuffleIdx,
       );
-      expect(skipShuffle, greaterThan(shuffleIdx));
-      final beforeOk = coord.substring(shuffleIdx, skipShuffle);
-      // Index commit must appear AFTER the playFile success path marker.
+      expect(playFileCall, greaterThan(shuffleIdx));
+      // Nothing between shuffle entry and the playFile call may commit index.
+      final beforePlay = coord.substring(shuffleIdx, playFileCall);
       expect(
-        beforeOk.contains('if (idx >= 0) _playlistClipIndex = idx;'),
+        beforePlay.contains('_playlistClipIndex = idx'),
         isFalse,
-        reason: 'Must not commit queue index before playFile succeeds.',
+        reason: 'Must not commit queue index before playFile is invoked.',
       );
       expect(
         coord,
-        contains('Commit queue pointer only after a successful bind.'),
+        contains('Commit queue pointer only after a successful bind'),
       );
     });
   });

@@ -64,11 +64,15 @@ void main() {
 
     test('skip settle does not force isPlaying from MediaItem alone', () {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
+      // Round 66: after skip, bound MediaItem may keep the playing icon for
+      // one ExoPlayer lag frame — but never via the Round-61 `audible || mediaItem`
+      // force that left pause broken.
       expect(
         coord.contains('isPlaying: audible || _audio.mediaItem != null'),
         isFalse,
       );
-      expect(coord, contains('isPlaying: audible,'));
+      expect(coord, contains('showPlaying'));
+      expect(coord, contains('forcePaused'));
     });
   });
 }

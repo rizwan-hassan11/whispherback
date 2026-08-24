@@ -21,10 +21,11 @@ void main() {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
       expect(
           coord, contains('_revertOptimisticSkipTitle({int? transportEpoch})'));
-      final idx = coord.indexOf('void _revertOptimisticSkipTitle(');
-      final body = coord.substring(idx, idx + 500);
+      final idx = coord.indexOf(
+          'A superseded skip must never paint over a newer next/prev');
+      expect(idx, greaterThanOrEqualTo(0));
+      final body = coord.substring(idx, idx + 600);
       expect(body, contains('!_transportCurrent(transportEpoch)'));
-      expect(body, contains('never paint over a newer next/prev'));
     });
 
     test('failed bind skips revert when a newer skip owns transport', () {

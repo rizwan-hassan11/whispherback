@@ -306,6 +306,11 @@ class AudioPlaybackService {
     );
     if (ok) {
       _currentPath = path;
+    } else if (_handler.mediaItem.value?.id == path) {
+      // Round 66: bind published this path but playFile returned false
+      // (generation race). Keep the logical path for resume/skip checks
+      // without claiming success to a superseded caller.
+      _currentPath = path;
     }
     return ok;
   }
