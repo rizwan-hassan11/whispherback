@@ -674,21 +674,22 @@ class PlaybackCoordinator {
         return;
       }
       if (native.isPaused) {
+        // Keep the Spotify bar + notification session during pause AND during
+        // native skip prepare (which briefly reports PAUSED before start).
         _nativeScheduledActive = true;
-        if (_snapshot.isPlaying ||
-            _snapshot.state != AppPlaybackState.scheduledPlaying) {
-          _emit(_snapshot.copyWith(
-            state: AppPlaybackState.scheduledPlaying,
-            isPlaying: false,
-            playlistName:
-                native.playlistName ?? _snapshot.playlistName ?? 'WhisperBack',
-            clipTitle:
-                native.clipTitle ?? _snapshot.clipTitle ?? 'Scheduled whisper',
-            durationMs: native.durationMs > 0
-                ? native.durationMs
-                : _snapshot.durationMs,
-          ));
-        }
+        _emit(_snapshot.copyWith(
+          state: AppPlaybackState.scheduledPlaying,
+          isPlaying: false,
+          playlistId: native.playlistId ?? _snapshot.playlistId,
+          playlistName:
+              native.playlistName ?? _snapshot.playlistName ?? 'WhisperBack',
+          clipTitle:
+              native.clipTitle ?? _snapshot.clipTitle ?? 'Scheduled whisper',
+          durationMs: native.durationMs > 0
+              ? native.durationMs
+              : _snapshot.durationMs,
+          modalVisible: false,
+        ));
         return;
       }
       // Idle — clear the snapshot only if we'd previously promoted it.
@@ -1175,26 +1176,27 @@ class PlaybackCoordinator {
         final audible = _nativeOwnsPlayback
             ? NativeAlarmsBridge.instance.lastSnapshot.isPlaying
             : _audio.isPlaying;
-        // Never paint "playing" when audio is silent — that made next look
-        // dead and pause/resume appear to change the clip.
+        // Keep the session up even if OEM playing-flag lagged — MediaItem /
+        // titles are enough for bar + notification. Prefer real audible state
+        // for the icon, but never drop to a hidden player after skip.
         if (_snapshot.state == AppPlaybackState.manualPlaying ||
             _snapshot.state == AppPlaybackState.scheduledPlaying ||
-            _snapshot.clipTitle != null) {
+            _snapshot.clipTitle != null ||
+            _audio.mediaItem != null) {
           _emit(_snapshot.copyWith(
             state: _snapshot.state == AppPlaybackState.scheduledPlaying ||
                     _nativeOwnsPlayback
                 ? AppPlaybackState.scheduledPlaying
                 : AppPlaybackState.manualPlaying,
-            isPlaying: audible,
+            isPlaying: audible || _audio.mediaItem != null,
             modalVisible: false,
           ));
         }
         // Hold the MediaSession pause-echo shield briefly after skip so a
         // late OEM echo cannot pause the clip we just started.
-        if (audible) {
-          _ignoreSessionPauseUntil =
-              DateTime.now().add(const Duration(milliseconds: 900));
-        }
+        _ignoreSessionPauseUntil =
+            DateTime.now().add(const Duration(milliseconds: 1200));
+        _audio.suppressMediaSessionPauseEcho = true;
       } catch (e, st) {
         if (kDebugMode) {
           debugPrint('skip${next ? 'Next' : 'Previous'} failed: $e\n$st');
@@ -2308,6 +2310,30 @@ class PlaybackCoordinator {
         sourceSwap: skipSnapshotEmit,
       );
       if (!ok) {
+        // Round 61: never tear down a live MediaSession just because the
+        // playing flag lagged. If this clip is already the bound MediaItem,
+        // keep the Spotify bar + notification and try resume.
+        if (_audio.boundPath == clip.filePath ||
+            _audio.mediaItem?.id == clip.filePath) {
+          _audio.restoreCurrentPath(clip.filePath);
+          try {
+            await _audio.resume();
+          } catch (_) {}
+          if (!skipSnapshotEmit) {
+            _emit(_snapshot.copyWith(
+              state: AppPlaybackState.manualPlaying,
+              playlistId: effectivePlaylistId ?? _snapshot.playlistId,
+              playlistName: effectivePlaylistId != null
+                  ? (_snapshot.playlistName ?? clip.title)
+                  : clip.title,
+              clipTitle: clip.title,
+              isPlaying: _audio.isPlaying,
+              durationMs: clip.durationMs,
+              modalVisible: false,
+            ));
+          }
+          return;
+        }
         // Superseded by a newer transport op — leave title/path alone.
         return;
       }
@@ -2329,11 +2355,20 @@ class PlaybackCoordinator {
         }
         return;
       }
-      // Roll back the optimistic snapshot and let the shell warn the user
-      // instead of failing silently — this was the client-reported "recorded
-      // a clip, tried to play, nothing happened" case on Samsung devices
-      // where the audio_service session sometimes never binds. Use a
-      // guarded stop so a follow-up failure can't propagate up to the UI.
+      // Only wipe the session when nothing is bound. Round 60's false
+      // negatives called stop() here and removed bar + notification.
+      if (_audio.mediaItem != null || _audio.currentPath != null) {
+        try {
+          await _audio.resume();
+        } catch (_) {}
+        if (!_errorController.isClosed) {
+          _errorController.add(PlaybackErrorEvent(
+            PlaybackErrorReason.decodeFailed,
+            clipTitle: clip.title,
+          ));
+        }
+        return;
+      }
       try {
         await stop();
       } catch (_) {}

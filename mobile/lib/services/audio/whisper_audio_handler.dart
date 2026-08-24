@@ -536,10 +536,14 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
 
   // ── Clip / playlist playback (Spotify-style media notification) ───────────
 
-  /// Loads [path] and starts playback. Returns `true` only when THIS call's
-  /// generation still owns the player, [mediaItem] is [path], AND ExoPlayer
-  /// is actually `playing`. Bind-without-play used to make next/prev look
-  /// dead until pause/resume (QA Round 60).
+  /// Loads [path], publishes the MediaItem (notification + in-app bar), and
+  /// starts playback.
+  ///
+  /// Success = this generation still owns the player AND [mediaItem] is [path]
+  /// after a forced play attempt. We publish MediaItem as soon as the source
+  /// is set (Spotify/production pattern) so the notification and mini-player
+  /// never vanish. Round 60 waited for `playing` before publish and returned
+  /// false on OEM lag — that called `stop()` and wiped the whole session.
   Future<bool> playFile(
     String path, {
     String title = 'WhisperBack',
@@ -548,8 +552,6 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     bool playlistMode = false,
     bool sourceSwap = false,
   }) async {
-    // Reject obviously bad inputs early so the caller's `try/catch` can show
-    // a snackbar instead of the system silently doing nothing.
     if (path.isEmpty) {
       throw ArgumentError('playFile requires a non-empty path');
     }
@@ -562,6 +564,10 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     final previousBind = _playFileTail;
     final bindDone = Completer<void>();
     _playFileTail = bindDone.future;
+    // Block MediaSession pause-echo for the whole bind/play window so OEM
+    // stop()→PAUSE cannot leave the new clip silent (dead next/prev).
+    final previousEchoSuppress = suppressMediaSessionPauseEcho;
+    suppressMediaSessionPauseEcho = true;
     try {
       await previousBind.catchError((Object _, StackTrace __) {});
       if (playGen != _playFileGeneration) return false;
@@ -576,37 +582,55 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
       );
       if (playGen != _playFileGeneration) return false;
       if (mediaItem.value?.id != path) return false;
-      if (_player.playing) return true;
 
-      // OEM MediaSession pause-echo after stop() often leaves the new source
-      // bound but paused. One more play under this generation before we give
-      // up — never report success for a silent bind.
-      try {
-        await _player.play();
-      } catch (_) {}
-      final audible = await _waitUntilPlaying(playGen);
-      return playGen == _playFileGeneration &&
-          mediaItem.value?.id == path &&
-          audible;
+      // Force audible start under this generation.
+      await _ensureAudible(playGen);
+      if (playGen != _playFileGeneration) return false;
+      if (mediaItem.value?.id != path) return false;
+
+      // Owned bind of this path is success. If OEM still reports !playing
+      // while ready/buffering, keep the session (MediaItem is live) — the
+      // coordinator / start-watchdog will recover. Never return false here
+      // solely due to a lagged playing flag (that wiped bar + notification).
+      return true;
     } finally {
       if (!bindDone.isCompleted) bindDone.complete();
+      // Keep echo suppress until ExoPlayer is actually playing, otherwise
+      // a late PAUSE echo after we return will silence the clip again.
+      if (_player.playing || playGen != _playFileGeneration) {
+        suppressMediaSessionPauseEcho = previousEchoSuppress;
+      } else {
+        // Clear shortly so a real user pause still works.
+        unawaited(Future<void>.delayed(const Duration(milliseconds: 1200), () {
+          if (playGen == _playFileGeneration) {
+            suppressMediaSessionPauseEcho = previousEchoSuppress;
+          }
+        }));
+      }
     }
   }
 
-  /// Waits briefly for ExoPlayer to report [playing] under [playGen].
-  Future<bool> _waitUntilPlaying(int playGen) async {
-    if (playGen != _playFileGeneration) return false;
-    if (_player.playing) return true;
-    try {
-      await _player.playerStateStream
-          .firstWhere(
-            (s) => s.playing || playGen != _playFileGeneration,
-          )
-          .timeout(const Duration(milliseconds: 1500));
-    } on TimeoutException {
-      // Fall through — caller decides based on current playing flag.
-    } catch (_) {}
-    return playGen == _playFileGeneration && _player.playing;
+  /// Repeatedly calls play until ExoPlayer reports playing or [playGen] dies.
+  Future<void> _ensureAudible(int playGen) async {
+    if (playGen != _playFileGeneration) return;
+    if (_player.playing) return;
+    for (var attempt = 0; attempt < 8; attempt++) {
+      if (playGen != _playFileGeneration) return;
+      if (_player.playing) return;
+      try {
+        await _player.play();
+      } catch (_) {}
+      if (_player.playing) return;
+      try {
+        await _player.playerStateStream
+            .firstWhere(
+              (s) => s.playing || playGen != _playFileGeneration,
+            )
+            .timeout(const Duration(milliseconds: 250));
+      } on TimeoutException {
+        // Retry play().
+      } catch (_) {}
+    }
   }
 
   Future<void> _playFileBound({
@@ -629,7 +653,7 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     _playingClip = true;
     _clipTitle = title;
     if (!_keepAlive) _standalonePlayback = true;
-    _sourceSwapInFlight = swapping;
+    _sourceSwapInFlight = true;
 
     // Round 53 (BUG-001): do NOT publish MediaItem until the new file is
     // bound. Publishing first made next/prev show the new title while
@@ -695,27 +719,18 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
         playlistName: playlistName,
         subtitle: subtitle,
       );
-      // Publish MediaItem only after play starts so a silent bind cannot
-      // become "the current clip" that pause/resume then audibly starts
-      // (QA Round 60: next dead until pause/resume).
+      // Production players publish metadata as soon as the source is bound
+      // so the notification card and mini-player stay visible. Then play.
+      mediaItem.add(item);
+      queue.add([item]);
+      onClipSessionChanged?.call();
       await play();
       if (playGen != _playFileGeneration) {
         // Round 47: do NOT pause here — the newer playFile already owns
         // the player. Pausing would stop the clip the user just skipped to.
         return;
       }
-      if (!_player.playing) {
-        try {
-          await _player.play();
-        } catch (_) {}
-        await _waitUntilPlaying(playGen);
-      }
-      if (playGen != _playFileGeneration || !_player.playing) {
-        return;
-      }
-      mediaItem.add(item);
-      queue.add([item]);
-      onClipSessionChanged?.call();
+      await _ensureAudible(playGen);
 
       // Fire-and-forget watcher: if the native player never reaches a playable
       // state within 5s, emit `onPlaybackStartFailure` so the coordinator can

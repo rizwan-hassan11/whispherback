@@ -471,9 +471,8 @@ class WhisperPlaybackService : Service() {
                 currentClipTitle = title
                 userPaused = false
                 wantPlaying = true
-                // Do NOT notify STATE_PLAYING until MediaPlayer.start() in
-                // onPrepared — early PLAYING made Flutter think skip worked
-                // while audio was still silent (same dead-next / resume bug).
+                // Update metadata immediately (title on notification / Flutter)
+                // but only claim PLAYING once onPrepared starts the player.
                 writeState(STATE_PAUSED)
                 notifyListener(STATE_PAUSED)
                 postPlaybackNotification(isPlaying = false)

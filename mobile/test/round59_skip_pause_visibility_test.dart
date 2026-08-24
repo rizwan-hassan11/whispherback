@@ -67,14 +67,14 @@ void main() {
         () {
       final handler = _read('lib/services/audio/whisper_audio_handler.dart');
       final idx = handler.indexOf('Future<bool> playFile(');
-      final end = handler.indexOf('Future<void> _playFileBound(', idx);
+      final end = handler.indexOf('Future<void> _ensureAudible(', idx);
       final body = handler.substring(idx, end);
-      expect(body, contains('_waitUntilPlaying'));
-      expect(body, contains('_player.playing'));
+      expect(body, contains('_ensureAudible(playGen)'));
+      expect(body, contains('mediaItem.value?.id != path'));
+      expect(body, contains('return true;'));
       expect(
-        body.contains('return mediaItem.value?.id == path;'),
+        body.contains('Bound for this path counts as success even if'),
         isFalse,
-        reason: 'Must not succeed on silent MediaItem bind (Round 60).',
       );
     });
 
