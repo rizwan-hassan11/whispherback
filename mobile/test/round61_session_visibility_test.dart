@@ -47,7 +47,7 @@ void main() {
       final idx = handler.indexOf('Future<bool> playFile(');
       final end = handler.indexOf('Future<void> _ensureAudible(', idx);
       final body = handler.substring(idx, end);
-      expect(body, contains('mediaItem.value?.id != path'));
+      expect(body, contains('isExoBoundTo(path)'));
       expect(body, contains('_ensureAudible(playGen)'));
       expect(body, contains('return true;'));
       expect(
@@ -60,7 +60,7 @@ void main() {
 
     test('playClip never stop()s when MediaItem already owns the clip', () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
-      expect(src, contains('_audio.boundPath == clip.filePath'));
+      expect(src, contains('_audio.isExoBoundTo(clip.filePath)'));
       expect(src, contains('never tear down a live MediaSession'));
       expect(
         src.contains(

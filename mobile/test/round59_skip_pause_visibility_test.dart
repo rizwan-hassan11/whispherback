@@ -61,7 +61,7 @@ void main() {
       final end = handler.indexOf('Future<void> _ensureAudible(', idx);
       final body = handler.substring(idx, end);
       expect(body, contains('_ensureAudible(playGen)'));
-      expect(body, contains('mediaItem.value?.id != path'));
+      expect(body, contains('isExoBoundTo(path)'));
       expect(body, contains('return true;'));
       expect(
         body.contains('Bound for this path counts as success even if'),

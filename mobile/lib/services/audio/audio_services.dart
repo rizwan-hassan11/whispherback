@@ -315,14 +315,14 @@ class AudioPlaybackService {
   Future<void> pause() => _handler.runFromAppTransport(_handler.pause);
   Future<void> resume() => _handler.runFromAppTransport(_handler.play);
 
-  /// Instant notification/MediaSession title for next/prev (before bind).
+  /// Instant notification title for next/prev (before ExoPlayer bind).
+  /// Does NOT claim [currentPath]/[boundPath] — only display metadata.
   void publishPendingClip({
     required String path,
     required String title,
     String? playlistName,
     String? subtitle,
   }) {
-    _currentPath = path;
     _handler.publishPendingClip(
       path: path,
       title: title,
@@ -336,8 +336,11 @@ class AudioPlaybackService {
     _currentPath = path;
   }
 
-  /// Path of the MediaItem currently published to the session (bound clip).
-  String? get boundPath => _handler.mediaItem.value?.id ?? _currentPath;
+  /// Path ExoPlayer actually has loaded (never optimistic MediaItem metadata).
+  String? get boundPath => _handler.exoBoundPath ?? _currentPath;
+
+  /// True when ExoPlayer is loaded to [path].
+  bool isExoBoundTo(String path) => _handler.isExoBoundTo(path);
 
   /// Stops the current clip source immediately without ending the session.
   Future<void> flushCurrentSource() =>

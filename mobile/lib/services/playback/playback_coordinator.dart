@@ -68,7 +68,7 @@ class PlaybackCoordinator {
 
   /// Bump when shipping a manual playback transport fix. Shown in Settings
   /// so QA can confirm the installed APK contains this logic (not a stale build).
-  static const transportBuildId = 'R71-instant-transport';
+  static const transportBuildId = 'R72-exo-bind-truth';
 
   final AppStateRepository _appState;
   final PlaylistRepository _playlists;
@@ -1132,6 +1132,36 @@ class PlaybackCoordinator {
             } catch (_) {}
           }
           return;
+        }
+        // Round 72: title can lead ExoPlayer by a frame; if the committed
+        // queue path is not actually bound, bind it now. Never "succeed"
+        // a skip that only changed MediaItem metadata.
+        if (!_nativeOwnsPlayback) {
+          final wantPath = _queueCommittedPath();
+          if (wantPath != null &&
+              !_audio.isExoBoundTo(wantPath) &&
+              !_latestTransportPausesPlayback &&
+              !_userInitiatedPause) {
+            try {
+              await _audio.playFile(
+                wantPath,
+                title: _snapshot.clipTitle ?? '',
+                playlistName: _snapshot.playlistId != null
+                    ? _snapshot.playlistName
+                    : null,
+                subtitle: _snapshot.playlistId != null
+                    ? RuntimeCopy.l10n.nowPlaying
+                    : RuntimeCopy.l10n.libraryPreview,
+                playlistMode: _snapshot.playlistId != null ||
+                    _libraryQueue.length > 1,
+                sourceSwap: true,
+              );
+            } catch (e, st) {
+              if (kDebugMode) {
+                debugPrint('skip: force-bind committed path failed: $e\n$st');
+              }
+            }
+          }
         }
         _userInitiatedPause = false;
         // playFile now refuses success unless ExoPlayer is actually playing.
@@ -2278,11 +2308,11 @@ class PlaybackCoordinator {
         if (_userInitiatedPause || _latestTransportPausesPlayback) {
           return;
         }
-        // If ExoPlayer already owns this path, confirm playing UI.
+        // Round 72: only treat as bound when ExoPlayer actually loaded the
+        // file. Optimistic MediaItem.id must never trigger resume-of-old-clip.
         // Round 61: never tear down a live MediaSession just because the
         // playing flag lagged.
-        if (_audio.boundPath == clip.filePath ||
-            _audio.mediaItem?.id == clip.filePath) {
+        if (_audio.isExoBoundTo(clip.filePath)) {
           _audio.restoreCurrentPath(clip.filePath);
           try {
             await _audio.resume();
@@ -2322,8 +2352,7 @@ class PlaybackCoordinator {
       }
       // Skip swaps must NOT call stop() — that hides the Spotify mini-player.
       if (skipSnapshotEmit) {
-        if (_audio.boundPath == clip.filePath ||
-            _audio.mediaItem?.id == clip.filePath) {
+        if (_audio.isExoBoundTo(clip.filePath)) {
           _audio.restoreCurrentPath(clip.filePath);
           _confirmSkipPlaying(clip);
           return;

@@ -136,6 +136,12 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
 
   String? _clipTitle;
 
+  /// Path actually loaded into ExoPlayer after a successful setAudioSource.
+  /// Distinct from [mediaItem] id — Round 71 publishPendingClip updated
+  /// MediaItem before bind, so mediaItem.id lied and skip "recovered" by
+  /// resume()ing the previous clip (title changed, audio did not).
+  String? _exoBoundPath;
+
   /// True while [playFile] is mid source-swap. Transient `_player.stop()` must
   /// not publish paused to the notification / lock screen — that made next/prev
   /// look like pause (QA Round 48).
@@ -211,6 +217,13 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
       (_keepAlive && mediaItem.value != null) ||
       _player.processingState != ProcessingState.idle;
   String? get currentClipTitle => _clipTitle;
+
+  /// File path ExoPlayer actually has loaded (null if flushed / not bound).
+  String? get exoBoundPath => _exoBoundPath;
+
+  /// True when ExoPlayer is loaded to [path] (not merely MediaItem metadata).
+  bool isExoBoundTo(String path) =>
+      path.isNotEmpty && _exoBoundPath == path;
 
   /// Pre-warms the audio session so the very first `playFile` doesn't race
   /// with native session activation. Without this, on Samsung / fresh installs
@@ -503,6 +516,7 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     _standalonePlayback = false;
     _silenceSuspendedForExternal = false;
     _clipTitle = null;
+    _exoBoundPath = null;
     // Each call is independently try/caught so the master Active
     // toggle's OFF path never throws a PlatformException out to the
     // UI callback. The user expects "tap toggle off" to ALWAYS
@@ -602,7 +616,8 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
         await _pauseIfInvalidatedForPause(playGen);
         return false;
       }
-      if (mediaItem.value?.id != path) return false;
+      // Round 72: success requires ExoPlayer bind, not optimistic MediaItem.
+      if (!isExoBoundTo(path)) return false;
 
       // Force audible start under this generation.
       await _ensureAudible(playGen);
@@ -610,7 +625,7 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
         await _pauseIfInvalidatedForPause(playGen);
         return false;
       }
-      if (mediaItem.value?.id != path) return false;
+      if (!isExoBoundTo(path)) return false;
 
       // Owned bind of this path is success. If OEM still reports !playing
       // while ready/buffering, keep the session (MediaItem is live) — the
@@ -764,6 +779,8 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
         await _pauseIfInvalidatedForPause(playGen);
         return;
       }
+      // ExoPlayer owns this path only after setAudioSource succeeds.
+      _exoBoundPath = path;
       final item = _clipMediaItem(
         path: path,
         title: title,
@@ -831,6 +848,7 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   Future<void> _flushPlayerSource() async {
+    _exoBoundPath = null;
     try {
       if (_player.playing ||
           _player.processingState == ProcessingState.ready ||
@@ -950,9 +968,10 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     });
   }
 
-  /// Publishes MediaItem metadata immediately (notification title) without
-  /// waiting for ExoPlayer bind. Used on next/prev tap so the shade matches
-  /// the in-app bar; [playFile] then binds the matching source.
+  /// Updates notification/in-app title immediately on next/prev WITHOUT
+  /// claiming ExoPlayer is bound to [path]. Round 72: never set MediaItem.id
+  /// (or exoBoundPath) to the target path before setAudioSource — that made
+  /// skip recovery resume() the previous clip under the new title.
   void publishPendingClip({
     required String path,
     required String title,
@@ -962,14 +981,30 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     _playingClip = true;
     _clipTitle = title;
     if (!_keepAlive) _standalonePlayback = true;
-    final item = _clipMediaItem(
-      path: path,
-      title: title,
-      playlistName: playlistName,
-      subtitle: subtitle,
-    );
-    mediaItem.add(item);
-    queue.add([item]);
+    final current = mediaItem.value;
+    if (current != null) {
+      // Keep the bound file id until playFile rebinds — title/album only.
+      final line = subtitle ?? current.artist ?? RuntimeCopy.l10n.nowPlaying;
+      mediaItem.add(current.copyWith(
+        title: title,
+        displayTitle: title,
+        album: playlistName ?? current.album,
+        artist: line,
+        displaySubtitle: playlistName ?? line,
+        displayDescription: line,
+      ));
+    } else {
+      // No session yet — publish a loading card. Id is informational until
+      // exoBoundPath is set by playFile; recovery must use isExoBoundTo.
+      final item = _clipMediaItem(
+        path: path,
+        title: title,
+        playlistName: playlistName,
+        subtitle: subtitle,
+      );
+      mediaItem.add(item);
+      queue.add([item]);
+    }
     _publishClipControls(
       playing: true,
       processing: ProcessingState.loading,
@@ -1025,6 +1060,7 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
 
     _playingClip = false;
     _clipTitle = null;
+    _exoBoundPath = null;
 
     // EVERY native bridge call below is independently try/caught.
     // `_player.stop()`, `mediaItem.add(null)`, `queue.add([])`,
@@ -1273,6 +1309,7 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> hideClipMediaNotification() async {
     if (!_playingClip) return;
     _playingClip = false;
+    _exoBoundPath = null;
     try {
       mediaItem.add(null);
       queue.add([]);

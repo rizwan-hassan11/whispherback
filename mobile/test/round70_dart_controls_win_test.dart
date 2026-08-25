@@ -59,7 +59,7 @@ void main() {
 
     test('build id stamped R70', () {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
-      expect(coord, contains("transportBuildId = 'R71-instant-transport'"));
+      expect(coord, contains("transportBuildId = 'R72-exo-bind-truth'"));
     });
   });
 }
