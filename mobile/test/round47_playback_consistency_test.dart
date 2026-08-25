@@ -82,12 +82,28 @@ void main() {
       final body = handler.substring(idx, end);
       expect(body, contains('preload: true'));
       expect(body.contains('preload: !swapping'), isFalse);
-      expect(
-        body.contains('await _player.pause()'),
-        isFalse,
-        reason: 'Superseded playFile must not pause the newer clip.',
-      );
       expect(body, contains('await _player.stop()'));
+      // Round 47/74: soft supersede must not pause the newer clip.
+      // User-pause invalidate may pause — only behind `_invalidateForPause`.
+      final ensureIdx = body.indexOf('Future<void> _ensureAudible(');
+      expect(ensureIdx, greaterThanOrEqualTo(0));
+      final ensure = body.substring(ensureIdx);
+      expect(ensure, contains('Soft supersede'));
+      expect(ensure, contains('if (_invalidateForPause)'));
+      // Every raw pause in ensureAudible is gated on user-pause invalidate.
+      var searchFrom = 0;
+      while (true) {
+        final pauseAt = ensure.indexOf('await _player.pause()', searchFrom);
+        if (pauseAt < 0) break;
+        final windowStart = pauseAt > 120 ? pauseAt - 120 : 0;
+        final window = ensure.substring(windowStart, pauseAt);
+        expect(
+          window.contains('_invalidateForPause'),
+          isTrue,
+          reason: 'await _player.pause() must only run for user-pause invalidate',
+        );
+        searchFrom = pauseAt + 1;
+      }
     });
   });
 }

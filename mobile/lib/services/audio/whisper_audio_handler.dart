@@ -675,23 +675,29 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     if (_player.playing) return;
     for (var attempt = 0; attempt < 8; attempt++) {
       if (playGen != _playFileGeneration) {
+        // Soft supersede (newer skip): do NOT pause — that stops the newer clip.
         await _pauseIfInvalidatedForPause(playGen);
         return;
       }
       // Round 74: user pause invalidated this load — never force play().
       if (_invalidateForPause) {
-        await _pauseIfInvalidatedForPause(playGen);
+        try {
+          await _player.pause();
+        } catch (_) {}
         return;
       }
       if (_player.playing) return;
       try {
         await _player.play();
       } catch (_) {}
-      if (playGen != _playFileGeneration || _invalidateForPause) {
+      if (playGen != _playFileGeneration) {
+        await _pauseIfInvalidatedForPause(playGen);
+        return;
+      }
+      if (_invalidateForPause) {
         try {
           await _player.pause();
         } catch (_) {}
-        await _pauseIfInvalidatedForPause(playGen);
         return;
       }
       if (_player.playing) return;
