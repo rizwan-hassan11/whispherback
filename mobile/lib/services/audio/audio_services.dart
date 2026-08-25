@@ -331,6 +331,8 @@ class AudioPlaybackService {
     );
   }
 
+  void clearPlayEchoSuppress() => _handler.clearPlayEchoSuppress();
+
   /// Restores the logical path after an aborted skip without touching ExoPlayer.
   void restoreCurrentPath(String? path) {
     _currentPath = path;

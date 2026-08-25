@@ -68,7 +68,7 @@ class PlaybackCoordinator {
 
   /// Bump when shipping a manual playback transport fix. Shown in Settings
   /// so QA can confirm the installed APK contains this logic (not a stale build).
-  static const transportBuildId = 'R73-pause-then-skip';
+  static const transportBuildId = 'R74-notif-pause-sticks';
 
   final AppStateRepository _appState;
   final PlaylistRepository _playlists;
@@ -2534,6 +2534,7 @@ class PlaybackCoordinator {
     }
     _userInitiatedPause = false;
     _audio.suppressMediaSessionPauseEcho = false;
+    _audio.clearPlayEchoSuppress();
     if (!_snapshot.isPlaying && _snapshot.state != AppPlaybackState.inactive) {
       _emit(_snapshot.copyWith(isPlaying: true));
     }

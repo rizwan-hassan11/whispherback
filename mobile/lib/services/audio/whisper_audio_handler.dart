@@ -160,6 +160,10 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   /// made notification pause a permanent no-op after next/prev.
   DateTime? _suppressPauseEchoUntil;
 
+  /// Round 74: MediaSession often echoes PLAY immediately after a user
+  /// PAUSE on the notification shade — that auto-resumed the clip.
+  DateTime? _suppressPlayEchoUntil;
+
   set suppressMediaSessionPauseEcho(bool value) {
     if (value) {
       _suppressPauseEchoUntil =
@@ -172,6 +176,19 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   bool get suppressMediaSessionPauseEcho =>
       _suppressPauseEchoUntil != null &&
       DateTime.now().isBefore(_suppressPauseEchoUntil!);
+
+  bool get _suppressPlayEchoActive =>
+      _suppressPlayEchoUntil != null &&
+      DateTime.now().isBefore(_suppressPlayEchoUntil!);
+
+  void _armPlayEchoSuppress() {
+    _suppressPlayEchoUntil =
+        DateTime.now().add(const Duration(milliseconds: 800));
+  }
+
+  void clearPlayEchoSuppress() {
+    _suppressPlayEchoUntil = null;
+  }
 
   /// Runs [action] without firing coordinator transport callbacks.
   Future<T> runFromAppTransport<T>(Future<T> Function() action) async {
@@ -661,10 +678,22 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
         await _pauseIfInvalidatedForPause(playGen);
         return;
       }
+      // Round 74: user pause invalidated this load — never force play().
+      if (_invalidateForPause) {
+        await _pauseIfInvalidatedForPause(playGen);
+        return;
+      }
       if (_player.playing) return;
       try {
         await _player.play();
       } catch (_) {}
+      if (playGen != _playFileGeneration || _invalidateForPause) {
+        try {
+          await _player.pause();
+        } catch (_) {}
+        await _pauseIfInvalidatedForPause(playGen);
+        return;
+      }
       if (_player.playing) return;
       try {
         await _player.playerStateStream
@@ -1222,6 +1251,22 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> play() async {
     if (!_playingClip) return;
 
+    // Round 74: OEM MediaSession often echoes PLAY right after the user
+    // taps PAUSE on the shade — that auto-resumed the clip. Ignore those
+    // echoes; in-app resume uses depth > 0 and is never blocked.
+    if (_appTransportDepth == 0 && _suppressPlayEchoActive) {
+      if (kDebugMode) {
+        debugPrint(
+            'handler.play: ignored MediaSession play echo after pause');
+      }
+      _publishClipControls(
+        playing: false,
+        processing: _player.processingState,
+      );
+      return;
+    }
+    clearPlayEchoSuppress();
+
     // Round 45: mid-clip resume — skip AudioSession churn. setActive +
     // _ensureAudioSession on every pause→play added hundreds of ms and
     // made the notification / mini-player play button feel dead.
@@ -1348,6 +1393,9 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     // reflect paused, not a stuck "loading/playing" notification.
     _sourceSwapInFlight = false;
     _suppressPauseEchoUntil = null;
+    // Block the immediate MediaSession PLAY echo that follows PAUSE on
+    // many OEMs (QA Round 74: notification pause auto-resumes).
+    _armPlayEchoSuppress();
 
     _publishClipControls(
       playing: false,
