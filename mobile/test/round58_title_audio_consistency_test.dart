@@ -91,9 +91,14 @@ void main() {
       final idx = src.indexOf('Future<void> _abortInFlightTransport(');
       final end = src.indexOf('Future<T> _serializeTransport', idx);
       final body = src.substring(idx, end);
-      expect(body, contains('must NEVER change which clip'));
+      // Round 66: may restore optimistic title if bind never finished, but
+      // must never rewrite queue indices (clip identity).
       expect(body.contains('final committed ='), isFalse);
       expect(body.contains('_libraryIndex = _preSkipLibraryIndex'), isFalse);
+      expect(
+          body.contains('_playlistClipIndex = _preSkipPlaylistIndex'), isFalse);
+      expect(body, contains('bound == targetPath'));
+      expect(body, contains('invalidateInFlightPlay(forPause: true)'));
     });
 
     test('resume and notification play never revert a committed skip', () {

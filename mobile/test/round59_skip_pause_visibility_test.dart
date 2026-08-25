@@ -31,10 +31,13 @@ void main() {
       final idx = src.indexOf('Future<void> _abortInFlightTransport(');
       final end = src.indexOf('Future<T> _serializeTransport', idx);
       final body = src.substring(idx, end);
-      expect(body, contains('must NEVER change which clip'));
+      // Round 59: never restore queue indices after a committed skip.
+      // Round 66: unbound optimistic TITLE may revert; bound skip keeps title.
       expect(body.contains('_libraryIndex = _preSkipLibraryIndex'), isFalse);
       expect(
           body.contains('_playlistClipIndex = _preSkipPlaylistIndex'), isFalse);
+      expect(body, contains('bound == targetPath'));
+      expect(body, contains('_revertOptimisticSkipTitle()'));
       expect(body, contains('invalidateInFlightPlay(forPause: true)'));
       expect(body, contains('await _audio.pause()'));
       expect(

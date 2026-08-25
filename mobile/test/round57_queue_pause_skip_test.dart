@@ -69,13 +69,17 @@ void main() {
 
     test('pause restores pre-skip queue indices and sets sentinel first', () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
-      // Round 59: pause must NOT restore pre-skip indices (that changed clips).
+      // Round 59/66: pause must NEVER restore queue indices (that changed
+      // clips). Round 66 may restore an unbound optimistic TITLE only.
       final abort = src.substring(
         src.indexOf('Future<void> _abortInFlightTransport('),
         src.indexOf('Future<T> _serializeTransport'),
       );
       expect(abort.contains('_libraryIndex = _preSkipLibraryIndex'), isFalse);
-      expect(abort, contains('must NEVER change which clip'));
+      expect(
+          abort.contains('_playlistClipIndex = _preSkipPlaylistIndex'), isFalse);
+      expect(abort, contains('bound == targetPath'));
+      expect(abort, contains('_revertOptimisticSkipTitle()'));
 
       final pauseIdx = src.indexOf('Future<void> pause()');
       final pauseBody = src.substring(pauseIdx, pauseIdx + 700);
