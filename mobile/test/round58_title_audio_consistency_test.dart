@@ -68,7 +68,7 @@ void main() {
 
     test('skip ensure-playing is gated on pause intent', () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
-      final idx = src.indexOf('Future<void> _runOneSkip(bool next) async');
+      final idx = src.indexOf('Future<void> _runOneSkip(bool next');
       final end = src.indexOf('Future<void> _skipPlaylistClip(', idx);
       final body = src.substring(idx, end);
       expect(body,
@@ -106,12 +106,15 @@ void main() {
       final playIdx = src.indexOf('Future<void> _handleNotificationPlay()');
       final playEnd = src.indexOf('Future<void> _systemPause()', playIdx);
       final playBody = src.substring(playIdx, playEnd);
-      expect(playBody, contains('revertOptimisticSkip: false'));
+      // Round 71: notification play shares resume() — no skip-title revert.
+      expect(playBody, contains('return resume()'));
+      expect(playBody.contains('revertOptimisticSkip: true'), isFalse);
 
       final resumeIdx = src.indexOf('Future<void> resume()');
-      final resumeEnd = src.indexOf('Future<void> stop() async', resumeIdx);
+      final resumeEnd = src.indexOf('Future<void> dismissPlayer()', resumeIdx);
       final resumeBody = src.substring(resumeIdx, resumeEnd);
-      expect(resumeBody, contains('revertOptimisticSkip: false'));
+      expect(resumeBody.contains('revertOptimisticSkip: true'), isFalse);
+      expect(resumeBody, contains('_queueCommittedPath()'));
     });
 
     test('native idle during skip does not drop native ownership', () {

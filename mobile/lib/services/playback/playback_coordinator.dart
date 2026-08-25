@@ -68,7 +68,7 @@ class PlaybackCoordinator {
 
   /// Bump when shipping a manual playback transport fix. Shown in Settings
   /// so QA can confirm the installed APK contains this logic (not a stale build).
-  static const transportBuildId = 'R69-serial-manual-pause';
+  static const transportBuildId = 'R71-instant-transport';
 
   final AppStateRepository _appState;
   final PlaylistRepository _playlists;
@@ -125,16 +125,6 @@ class PlaybackCoordinator {
   int _playbackGeneration = 0;
 
   /// Suppresses the `_userInitiatedPause = true` assignment inside
-  /// `_syncPlayingSnapshot(false)` while a SYSTEM pause (sleep mode,
-  /// prayer window, etc.) is going through `_handler.pause()`. Without
-  /// this, sleep / prayer pauses would arm the suppression sentinel and
-  /// the very next natural completion (e.g. of a short clip whose end
-  /// raced the system pause) would be treated as a user pause — leaving
-  /// playlists stuck on track 1 and scheduled fires never stamping
-  /// completion. Set true around the system pause call, reset in
-  /// `finally`.
-  bool _systemDrivenPauseInFlight = false;
-
   /// Schedule id behind the currently running scheduled playback (if any).
   /// Lets us stamp `lastFired = completionTime` so the user-configured
   /// interval is measured from the END of playback, not the START.
@@ -192,11 +182,6 @@ class PlaybackCoordinator {
   /// superseded skip body does not pause the clip the user just skipped to.
   bool _latestTransportPausesPlayback = false;
 
-  /// MediaSession often echoes PAUSE after a source swap even after
-  /// `_sourceSwapInFlight` clears. While this is set, ignore those echoes so
-  /// next/prev is not immediately paused (QA Round 59: skip dead until resume).
-  DateTime? _ignoreSessionPauseUntil;
-
   bool _transportCurrent(int epoch) => epoch == _transportEpoch;
 
   /// Stops an in-flight skip / playFile without tearing down the media session.
@@ -212,7 +197,6 @@ class PlaybackCoordinator {
       {required bool revertOptimisticSkip}) async {
     if (revertOptimisticSkip) {
       _optimisticSkipClip = null;
-      _ignoreSessionPauseUntil = null;
       _audio.suppressMediaSessionPauseEcho = false;
       _pendingSkipNext = null;
     }
@@ -518,13 +502,22 @@ class PlaybackCoordinator {
 
   /// Native FG MediaPlayer owns the session (playing or paused).
   ///
-  /// Round 63/64: only while UI is [AppPlaybackState.scheduledPlaying].
-  /// Sticky `nativeActive` prefs after a prior schedule must NOT steal
-  /// library/manual next/prev/pause onto `skipNative`.
-  bool get _nativeOwnsPlayback =>
-      _snapshot.state == AppPlaybackState.scheduledPlaying &&
-      (_nativeScheduledActive ||
-          NativeAlarmsBridge.instance.lastSnapshot.isNativeActive);
+  /// Round 70: Dart ExoPlayer sessions ALWAYS win. Sticky `nativeActive`
+  /// after a schedule used to leave `_nativeOwnsPlayback` true while the
+  /// user played Clip Library audio — then pause/next called pauseNative /
+  /// skipNative (no-ops) and both the mini-player and notification looked
+  /// dead.
+  bool get _nativeOwnsPlayback {
+    if (_snapshot.state == AppPlaybackState.manualPlaying) return false;
+    if (_audio.isPlayingClip || _audio.currentPath != null) return false;
+    if (_audio.mediaItem != null &&
+        _snapshot.state != AppPlaybackState.scheduledPlaying) {
+      return false;
+    }
+    return _snapshot.state == AppPlaybackState.scheduledPlaying &&
+        (_nativeScheduledActive ||
+            NativeAlarmsBridge.instance.lastSnapshot.isNativeActive);
+  }
 
   /// Dart ExoPlayer owns a Clip Library / playlist session.
   /// While this is true, native prefs/polls must not rewrite the snapshot
@@ -871,90 +864,23 @@ class PlaybackCoordinator {
   }
 
   /// Lock-screen / audio_service notification already invoked
-  /// [WhisperAudioHandler.pause]. Preempt any in-flight skip and sync
-  /// coordinator + native state without double-pausing ExoPlayer.
+  /// [WhisperAudioHandler.pause]. Round 70/71: share [pause] so notification
+  /// and in-app cannot diverge.
   Future<void> _handleNotificationPause() {
-    // Round 62: only ignore a short OEM MediaSession echo window — never
-    // ignore a real pause for the whole `_skipInFlight` latch. Swallowing
-    // pause during skip left the skip body free to finish and start the
-    // next clip when the user later tapped pause again.
-    if (_ignoreSessionPauseUntil != null &&
-        DateTime.now().isBefore(_ignoreSessionPauseUntil!) &&
-        !_userInitiatedPause) {
-      if (kDebugMode) {
-        debugPrint('notification pause: ignored OEM echo settle window');
-      }
-      return Future<void>.value();
-    }
-    // Round 51: in-app pause already flipped the snapshot. A second
-    // entry (legacy echo) must not preempt transport / revert skip titles.
+    // Round 51: in-app pause already flipped the snapshot.
     if (_userInitiatedPause && !_snapshot.isPlaying) {
       return Future<void>.value();
     }
-    // Mirror in-app pause(): arm the sentinel before transport serialization
-    // so a concurrent ProcessingState.completed cannot auto-advance while
-    // this notification pause waits on the transport gate (QA Round 57).
-    if (_snapshot.state != AppPlaybackState.inactive &&
-        !_systemDrivenPauseInFlight) {
-      _userInitiatedPause = true;
-    }
-    _suppressTransientNotPlaying = false;
-    _pendingSkipNext = null;
-    if (_snapshot.isPlaying) {
-      _emit(_snapshot.copyWith(isPlaying: false));
-    }
-    return _serializeTransport(
-      (epoch) async {
-        if (!_transportCurrent(epoch)) return;
-        _userInitiatedPause = true;
-        if (_nativeOwnsPlayback) {
-          try {
-            await NativeAlarmsBridge.instance.pauseNative();
-          } catch (e, st) {
-            if (kDebugMode) {
-              debugPrint('notification pause: native failed: $e\n$st');
-            }
-          }
-        }
-        // Manual: ExoPlayer was already paused by the handler. Do nothing
-        // else — Round 69 serial pause must not abort an in-flight skip.
-      },
-      // Round 69: never hard-preempt a manual skip from notification pause.
-      preempt: _nativeOwnsPlayback,
-      revertOptimisticSkip: _nativeOwnsPlayback,
-      pausesPlayback: true,
-    );
+    return pause();
   }
 
   /// Lock-screen play after [WhisperAudioHandler.play] already resumed
-  /// ExoPlayer — sync coordinator + native and cancel stale skips.
+  /// ExoPlayer — Round 71: share [resume] (same contract as pause).
   Future<void> _handleNotificationPlay() {
-    // Round 51: in-app resume / playFile already owns the snapshot.
     if (!_userInitiatedPause && _snapshot.isPlaying) {
       return Future<void>.value();
     }
-    return _serializeTransport(
-      (epoch) async {
-        if (!_transportCurrent(epoch)) return;
-        if (_snapshot.state != AppPlaybackState.inactive) {
-          _userInitiatedPause = false;
-        }
-        if (!_snapshot.isPlaying) {
-          _emit(_snapshot.copyWith(isPlaying: true));
-        }
-        if (_nativeOwnsPlayback) {
-          try {
-            await NativeAlarmsBridge.instance.resumeNative();
-          } catch (e, st) {
-            if (kDebugMode) {
-              debugPrint('notification play: native failed: $e\n$st');
-            }
-          }
-        }
-      },
-      preempt: true,
-      revertOptimisticSkip: false,
-    );
+    return resume();
   }
 
   /// Wraps a system-driven pause (sleep mode, prayer pause, scheduled
@@ -964,12 +890,7 @@ class PlaybackCoordinator {
   /// swallowed as if the user had paused — collapsing playlist auto-
   /// advance and stamping no scheduled completion.
   Future<void> _systemPause() async {
-    _systemDrivenPauseInFlight = true;
-    try {
-      await _audio.pause();
-    } finally {
-      _systemDrivenPauseInFlight = false;
-    }
+    await _audio.pause();
   }
 
   Future<void> _finalizeClipStopFromNotification() async {
@@ -1040,6 +961,14 @@ class PlaybackCoordinator {
         durationMs: clip.durationMs,
         modalVisible: false,
       ));
+      // Notification card must track the same title on the tap frame —
+      // waiting for playFile bind left the shade on the previous clip.
+      _audio.publishPendingClip(
+        path: clip.filePath,
+        title: clip.title,
+        playlistName: clip.title,
+        subtitle: RuntimeCopy.l10n.libraryPreview,
+      );
       _warmLibraryNeighborsAt(nextIndex);
       return;
     }
@@ -1071,6 +1000,14 @@ class PlaybackCoordinator {
       durationMs: clip.durationMs,
       modalVisible: false,
     ));
+    _audio.publishPendingClip(
+      path: clip.filePath,
+      title: clip.title,
+      playlistName: _snapshot.playlistName,
+      subtitle: fromSchedule
+          ? RuntimeCopy.l10n.scheduledWhisper
+          : RuntimeCopy.l10n.nowPlaying,
+    );
     _warmPlaylistNeighborsAt(nextIndex);
   }
 
@@ -1126,6 +1063,13 @@ class PlaybackCoordinator {
     // _skipInFlight for seconds and every retry tap was silently ignored.
     if (_skipInFlight) {
       _pendingSkipNext = next;
+      // Round 71: commit title + index on THIS tap too. Otherwise rapid
+      // next taps left both bars on the first target until the bind finished.
+      _primeOptimisticSkip(next);
+      try {
+        _audio.invalidateInFlightPlay(forPause: false);
+      } catch (_) {}
+      ++_transportEpoch;
       return;
     }
 
@@ -1133,20 +1077,28 @@ class PlaybackCoordinator {
     while (_pendingSkipNext != null) {
       final pending = _pendingSkipNext!;
       _pendingSkipNext = null;
-      await _runOneSkip(pending);
+      // Index/title already committed while the prior skip was in flight.
+      await _runOneSkip(pending, alreadyPrimed: true);
     }
   }
 
   /// One next/prev execution: show target immediately, bind audio, keep playing.
-  Future<void> _runOneSkip(bool next) async {
+  Future<void> _runOneSkip(bool next, {bool alreadyPrimed = false}) async {
     _skipInFlight = true;
+    // Round 70/71: brief echo shield only (handler time-bounds it).
     _audio.suppressMediaSessionPauseEcho = true;
     try {
-      if (_snapshot.playlistId != null) {
-        await _ensurePlaylistCache(_snapshot.playlistId);
+      // Instant title/index BEFORE any native stop / cache IO.
+      if (!alreadyPrimed) {
+        if (_snapshot.playlistId != null && _playlistClipCache.isEmpty) {
+          await _ensurePlaylistCache(_snapshot.playlistId);
+        }
+        _primeOptimisticSkip(next);
       }
-
-      _primeOptimisticSkip(next);
+      if (!_nativeOwnsPlayback) {
+        // Fire-and-forget native teardown — never block the clip swap.
+        unawaited(_claimDartManualSession());
+      }
 
       // Invalidate in-flight completion BEFORE the transport body so stop()
       // cannot auto-advance the playlist (that looked like skip to wrong clip).
@@ -1158,6 +1110,12 @@ class PlaybackCoordinator {
           (epoch) => _skipPlaylistClip(epoch, next: next),
           preempt: true,
         );
+        // A newer next/prev tap superseded this bind — do not resume the
+        // intermediate clip (pending skip already owns the queue index).
+        if (_pendingSkipNext != null) {
+          _suppressTransientNotPlaying = false;
+          return;
+        }
         // Pause/dismiss won while this skip was binding — do not force-resume
         // or re-emit playing:true (that started the deferred next clip).
         if (_latestTransportPausesPlayback || _userInitiatedPause) {
@@ -1165,6 +1123,13 @@ class PlaybackCoordinator {
           _pendingSkipNext = null;
           if (_snapshot.isPlaying) {
             _emit(_snapshot.copyWith(isPlaying: false));
+          }
+          // Skip body may have rebound ExoPlayer after the pause tap —
+          // pause again so audio matches the paused UI.
+          if (!_nativeOwnsPlayback) {
+            try {
+              await _audio.pause();
+            } catch (_) {}
           }
           return;
         }
@@ -1212,10 +1177,9 @@ class PlaybackCoordinator {
             modalVisible: false,
           ));
         }
-        // Hold the MediaSession pause-echo shield briefly after skip so a
-        // late OEM echo cannot pause the clip we just started.
-        _ignoreSessionPauseUntil =
-            DateTime.now().add(const Duration(milliseconds: 1200));
+        // Round 71: do NOT arm a post-skip pause-ignore window. That made
+        // notification pause a 1.2s no-op after every next/prev. Echo
+        // protection is only the handler's short source-swap suppress.
         _audio.suppressMediaSessionPauseEcho = true;
       } catch (e, st) {
         if (kDebugMode) {
@@ -1245,19 +1209,16 @@ class PlaybackCoordinator {
       // failed bind never reported playing — next/prev and pause then
       // looked dead because player-state updates were ignored.
       _suppressTransientNotPlaying = false;
-      final settleUntil = _ignoreSessionPauseUntil;
-      if (settleUntil != null) {
-        final remaining = settleUntil.difference(DateTime.now());
-        if (remaining > Duration.zero) {
-          unawaited(Future<void>.delayed(remaining, () {
-            if (_ignoreSessionPauseUntil == settleUntil) {
-              _audio.suppressMediaSessionPauseEcho = false;
-            }
-          }));
-        } else {
-          _audio.suppressMediaSessionPauseEcho = false;
-        }
-      } else if (!_latestTransportPausesPlayback && !_userInitiatedPause) {
+      if (!_latestTransportPausesPlayback && !_userInitiatedPause) {
+        // Clear echo shield shortly; handler also time-bounds the flag.
+        unawaited(Future<void>.delayed(const Duration(milliseconds: 450), () {
+          if (!_skipInFlight &&
+              !_latestTransportPausesPlayback &&
+              !_userInitiatedPause) {
+            _audio.suppressMediaSessionPauseEcho = false;
+          }
+        }));
+      } else {
         _audio.suppressMediaSessionPauseEcho = false;
       }
     }
@@ -2477,40 +2438,27 @@ class PlaybackCoordinator {
     return ClipPathGuard.isAllowed(path);
   }
 
-  Future<void> pause() {
-    // Flip the pause sentinel BEFORE transport so a concurrent
-    // ProcessingState.completed cannot auto-advance and look like "pause
-    // skipped to next" (QA Round 57).
+  Future<void> pause() async {
+    // Round 70: pause IMMEDIATELY for Dart sessions — never wait on the
+    // transport gate. Also invalidate any in-flight playFile so a slow
+    // skip cannot start the next clip after the user already paused
+    // (that looked like "pause does nothing" / "resume changes the clip").
     _userInitiatedPause = true;
+    _latestTransportPausesPlayback = true;
     _suppressTransientNotPlaying = false;
     _pendingSkipNext = null;
-    _ignoreSessionPauseUntil = null;
     _audio.suppressMediaSessionPauseEcho = false;
-    // Round 63: never debounce-away the real audio pause. Returning early
-    // after only flipping the snapshot left audio playing while the icon
-    // disagreed with what the user heard.
+    // Supersede any skip/play body still running on the transport gate.
+    ++_transportEpoch;
     if (_snapshot.isPlaying) {
       _emit(_snapshot.copyWith(isPlaying: false));
     }
-    // Round 69: manual pause SERIALIZES behind an in-flight next/prev.
-    // Hard-preempt + cancelInFlightPlay was the real "pause changes the
-    // clip / then nothing works" bug — every pause stopped ExoPlayer mid
-    // swap and left resume to rebind a different path.
-    final native = _nativeOwnsPlayback;
-    return _serializeTransport((epoch) async {
-      if (!_transportCurrent(epoch)) return;
-      _userInitiatedPause = true;
-      if (native || _nativeOwnsPlayback) {
-        _nativeScheduledActive = true;
-        try {
-          await NativeAlarmsBridge.instance.pauseNative();
-        } catch (e, st) {
-          if (kDebugMode) {
-            debugPrint('pause: native pause failed: $e\n$st');
-          }
-        }
-        return;
-      }
+
+    if (!_nativeOwnsPlayback) {
+      _nativeScheduledActive = false;
+      try {
+        _audio.invalidateInFlightPlay(forPause: true);
+      } catch (_) {}
       try {
         await _audio.pause();
       } catch (e, st) {
@@ -2519,10 +2467,87 @@ class PlaybackCoordinator {
               'pause: _audio.pause failed (UI already updated): $e\n$st');
         }
       }
-    },
-        preempt: native,
-        revertOptimisticSkip: native,
-        pausesPlayback: true);
+      return;
+    }
+
+    _nativeScheduledActive = true;
+    try {
+      await NativeAlarmsBridge.instance.pauseNative();
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint('pause: native pause failed: $e\n$st');
+      }
+    }
+  }
+
+  Future<void> resume() async {
+    if (_snapshot.isPlaying && !_userInitiatedPause) {
+      return;
+    }
+    _userInitiatedPause = false;
+    _audio.suppressMediaSessionPauseEcho = false;
+    if (!_snapshot.isPlaying && _snapshot.state != AppPlaybackState.inactive) {
+      _emit(_snapshot.copyWith(isPlaying: true));
+    }
+
+    if (_nativeOwnsPlayback) {
+      _nativeScheduledActive = true;
+      try {
+        await NativeAlarmsBridge.instance.resumeNative();
+      } catch (e, st) {
+        if (kDebugMode) {
+          debugPrint('resume: native resume failed: $e\n$st');
+        }
+        _emit(_snapshot.copyWith(isPlaying: false));
+      }
+      return;
+    }
+
+    final previous = _snapshot;
+    try {
+      // Round 67: resume the clip the queue index points at — never a
+      // stale ExoPlayer path from a cancelled mid-skip bind.
+      final queuePath = _queueCommittedPath();
+      final path = queuePath ?? _audio.boundPath ?? _audio.currentPath;
+      if (path == null) {
+        _emit(previous.copyWith(isPlaying: false));
+        return;
+      }
+      if (queuePath != null && _audio.currentPath != queuePath) {
+        _audio.restoreCurrentPath(queuePath);
+      }
+      final ps = _audio.player.processingState;
+      // Round 69/70: only rebind when ExoPlayer truly has no source.
+      // Rebinding because boundPath != queuePath made resume change clips.
+      final needsRebind =
+          ps == ProcessingState.completed || ps == ProcessingState.idle;
+      if (needsRebind) {
+        await _audio.playFile(
+          path,
+          title: _snapshot.clipTitle ?? '',
+          playlistName:
+              _snapshot.playlistId != null ? _snapshot.playlistName : null,
+          subtitle: _snapshot.playlistId != null
+              ? RuntimeCopy.l10n.nowPlaying
+              : RuntimeCopy.l10n.libraryPreview,
+          playlistMode:
+              _snapshot.playlistId != null || _libraryQueue.length > 1,
+        );
+      } else {
+        await _audio.resume();
+      }
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint('resume: failed, rolling back snapshot: $e\n$st');
+      }
+      _emit(previous.copyWith(isPlaying: false));
+      if (!_errorController.isClosed) {
+        _errorController.add(PlaybackErrorEvent(
+          PlaybackErrorReason.decodeFailed,
+          clipTitle: previous.clipTitle,
+        ));
+      }
+    }
   }
 
   /// Pauses the current clip AND hides the mini-player + modal — but does
@@ -2661,101 +2686,6 @@ class PlaybackCoordinator {
         }
       }
     }, preempt: true, revertOptimisticSkip: true, pausesPlayback: true);
-  }
-
-  Future<void> resume() {
-    // Round 63: never debounce-away a real resume. If already playing, no-op.
-    if (_snapshot.isPlaying && !_userInitiatedPause) {
-      return Future<void>.value();
-    }
-    _userInitiatedPause = false;
-    if (!_snapshot.isPlaying && _snapshot.state != AppPlaybackState.inactive) {
-      _emit(_snapshot.copyWith(isPlaying: true));
-    }
-    return _serializeTransport((epoch) async {
-      if (!_transportCurrent(epoch)) return;
-      _userInitiatedPause = false;
-      // Optimistic UI flip first — the user expects the play icon to
-      // flip to pause the instant they tap. We roll back below if the
-      // native call fails. CRITICAL: do NOT force `modalVisible: true`.
-      // The QA report "I tap pause, the detail popup opens, I tap
-      // resume and everything disappears" was exactly this bug —
-      // `resume` was forcing the modal open, the modal's own dismiss
-      // action then ran `dismissModal()` which set `modalVisible:
-      // false`, and the mini-player check `snapshot.modalVisible` was
-      // satisfied by the brief `true` window so it never re-attached.
-      // Preserve the user's current modal visibility instead — they
-      // keep the mini-player if they were on it, or the modal if they
-      // were in it.
-      final previous = _snapshot;
-      if (!_snapshot.isPlaying) {
-        _emit(_snapshot.copyWith(isPlaying: true));
-      }
-
-      // Round 22 — when the visible scheduledPlaying snapshot is owned by
-      // the native FG service, the resume tap must go back to native so
-      // the MediaPlayer actually resumes. just_audio's resume would be a
-      // no-op (nothing was queued in it).
-      if (_nativeOwnsPlayback) {
-        _nativeScheduledActive = true;
-        try {
-          await NativeAlarmsBridge.instance.resumeNative();
-        } catch (e, st) {
-          if (kDebugMode) {
-            debugPrint('resume: native resume failed: $e\n$st');
-          }
-          _emit(previous);
-        }
-        return;
-      }
-
-      try {
-        // Round 67: resume the clip the queue index points at — never a
-        // stale ExoPlayer path from a cancelled mid-skip bind (that made
-        // pause/resume change the audible clip).
-        final queuePath = _queueCommittedPath();
-        final path = queuePath ?? _audio.boundPath ?? _audio.currentPath;
-        if (path == null) {
-          _emit(previous);
-          return;
-        }
-        if (queuePath != null && _audio.currentPath != queuePath) {
-          _audio.restoreCurrentPath(queuePath);
-        }
-        final ps = _audio.player.processingState;
-        // Round 69: only rebind when ExoPlayer truly has no source.
-        // Rebinding because boundPath != queuePath made resume change clips.
-        final needsRebind =
-            ps == ProcessingState.completed || ps == ProcessingState.idle;
-        if (needsRebind) {
-          await _audio.playFile(
-            path,
-            title: _snapshot.clipTitle ?? '',
-            playlistName: _snapshot.playlistId != null
-                ? _snapshot.playlistName
-                : null,
-            subtitle: _snapshot.playlistId != null
-                ? RuntimeCopy.l10n.nowPlaying
-                : RuntimeCopy.l10n.libraryPreview,
-            playlistMode: _snapshot.playlistId != null ||
-                _libraryQueue.length > 1,
-          );
-        } else {
-          await _audio.resume();
-        }
-      } catch (e, st) {
-        if (kDebugMode) {
-          debugPrint('resume: failed, rolling back snapshot: $e\n$st');
-        }
-        _emit(previous);
-        if (!_errorController.isClosed) {
-          _errorController.add(PlaybackErrorEvent(
-            PlaybackErrorReason.decodeFailed,
-            clipTitle: previous.clipTitle,
-          ));
-        }
-      }
-    }, preempt: true, revertOptimisticSkip: false);
   }
 
   Future<void> stop() async {

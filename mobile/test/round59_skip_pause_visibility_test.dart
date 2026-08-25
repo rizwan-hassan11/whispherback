@@ -71,14 +71,15 @@ void main() {
 
     test('skip ensures playing after transport when not user-paused', () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
-      final idx = src.indexOf('Future<void> _runOneSkip(bool next) async');
+      final idx = src.indexOf('Future<void> _runOneSkip(bool next');
       final end = src.indexOf('Future<void> _skipPlaylistClip(', idx);
       final body = src.substring(idx, end);
       expect(body, contains('await _audio.resume()'));
       expect(body,
           contains('_latestTransportPausesPlayback || _userInitiatedPause'));
       expect(body, contains('suppressMediaSessionPauseEcho = true'));
-      expect(body, contains('_ignoreSessionPauseUntil'));
+      // Round 71: post-skip pause-ignore window removed (blocked real pause).
+      expect(body.contains('_ignoreSessionPauseUntil'), isFalse);
     });
 
     test('resume prefers boundPath over stale currentPath', () {
@@ -107,18 +108,18 @@ void main() {
       );
     });
 
-    test('handler ignores MediaSession pause echo during skip settle', () {
+    test('handler ignores MediaSession pause echo during source swap only', () {
       final handler = _read('lib/services/audio/whisper_audio_handler.dart');
       expect(handler, contains('suppressMediaSessionPauseEcho'));
       final idx = handler.indexOf('Future<void> pause() async');
       final end = handler.indexOf('Future<void> seek(', idx);
       final body = handler.substring(idx, end);
+      expect(body, contains('_sourceSwapInFlight &&'));
+      expect(body, contains('suppressMediaSessionPauseEcho &&'));
+      expect(body, contains('_appTransportDepth == 0'));
       expect(
-        body,
-        contains(
-          '(_sourceSwapInFlight || suppressMediaSessionPauseEcho) &&\n'
-          '        _appTransportDepth == 0',
-        ),
+        body.contains('(_sourceSwapInFlight || suppressMediaSessionPauseEcho)'),
+        isFalse,
       );
     });
 

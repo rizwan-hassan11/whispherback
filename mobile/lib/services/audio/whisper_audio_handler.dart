@@ -149,9 +149,23 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   /// the notification stayed correct).
   int _appTransportDepth = 0;
 
-  /// When true, MediaSession pause echoes are ignored (depth 0 only). Set by
-  /// the coordinator for the duration of a next/prev settle window.
-  bool suppressMediaSessionPauseEcho = false;
+  /// When set, MediaSession pause echoes are ignored (depth 0 only) until
+  /// this timestamp. Round 70: MUST be time-bounded — a sticky `true` bool
+  /// made notification pause a permanent no-op after next/prev.
+  DateTime? _suppressPauseEchoUntil;
+
+  set suppressMediaSessionPauseEcho(bool value) {
+    if (value) {
+      _suppressPauseEchoUntil =
+          DateTime.now().add(const Duration(milliseconds: 450));
+    } else {
+      _suppressPauseEchoUntil = null;
+    }
+  }
+
+  bool get suppressMediaSessionPauseEcho =>
+      _suppressPauseEchoUntil != null &&
+      DateTime.now().isBefore(_suppressPauseEchoUntil!);
 
   /// Runs [action] without firing coordinator transport callbacks.
   Future<T> runFromAppTransport<T>(Future<T> Function() action) async {
@@ -936,6 +950,33 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     });
   }
 
+  /// Publishes MediaItem metadata immediately (notification title) without
+  /// waiting for ExoPlayer bind. Used on next/prev tap so the shade matches
+  /// the in-app bar; [playFile] then binds the matching source.
+  void publishPendingClip({
+    required String path,
+    required String title,
+    String? playlistName,
+    String? subtitle,
+  }) {
+    _playingClip = true;
+    _clipTitle = title;
+    if (!_keepAlive) _standalonePlayback = true;
+    final item = _clipMediaItem(
+      path: path,
+      title: title,
+      playlistName: playlistName,
+      subtitle: subtitle,
+    );
+    mediaItem.add(item);
+    queue.add([item]);
+    _publishClipControls(
+      playing: true,
+      processing: ProcessingState.loading,
+    );
+    onClipSessionChanged?.call();
+  }
+
   MediaItem _clipMediaItem({
     required String path,
     required String title,
@@ -1253,14 +1294,11 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> pause() async {
     if (!_playingClip) return;
 
-    // Source-swap `stop()` makes Android MediaSession echo PAUSE into
-    // audio_service. Ignore ONLY that echo (`_appTransportDepth == 0`).
-    // In-app / coordinator pause uses `runFromAppTransport` (depth > 0) and
-    // MUST always win — swallowing it left skip running so "pause" looked
-    // like it advanced the queue (QA Round 58).
-    // Round 59: also honor the coordinator settle window — OEM echoes often
-    // arrive AFTER `_sourceSwapInFlight` clears and paused the new clip.
-    if ((_sourceSwapInFlight || suppressMediaSessionPauseEcho) &&
+    // Round 70: only ignore OEM pause ECHO while a source swap is actively
+    // in flight. A sticky suppress flag alone used to swallow real
+    // notification pause taps after next/prev (QA: pause does nothing).
+    if (_sourceSwapInFlight &&
+        suppressMediaSessionPauseEcho &&
         _appTransportDepth == 0) {
       if (kDebugMode) {
         debugPrint(
@@ -1271,6 +1309,7 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     // User pause always ends the swap latch so subsequent state publishes
     // reflect paused, not a stuck "loading/playing" notification.
     _sourceSwapInFlight = false;
+    _suppressPauseEchoUntil = null;
 
     _publishClipControls(
       playing: false,
@@ -1283,19 +1322,6 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     _startWatchdog?.cancel();
     _startWatchdog = null;
 
-    // Round 15 hardening: any failure from `_player.pause()` MUST be
-    // swallowed locally. On Samsung One UI + just_audio, calling
-    // `pause()` while a previous `play()` is still being awaited by
-    // ExoPlayer's native thread throws a PlatformException("(-38)
-    // MediaPlayerNative") that — if rethrown — surfaces through
-    // audio_service's PlaybackEvent listener as an uncaught
-    // PlatformChannel error and crashes the host activity. The user's
-    // QA report "rapid pause/play crashes the app" is reliably
-    // reproducible on Galaxy A series with this exact failure mode.
-    // The optimistic UI flip above has already informed the coordinator;
-    // the player will settle into its real state on the next
-    // playerStateStream event regardless of whether THIS pause call
-    // succeeded.
     try {
       await _player.pause();
     } catch (e, st) {

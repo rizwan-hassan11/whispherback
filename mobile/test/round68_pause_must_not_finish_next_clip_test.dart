@@ -1,5 +1,5 @@
-// Round 68 (superseded by Round 69) — cancelInFlightPlay on every pause made
-// controls worse. Round 69 serializes manual pause instead.
+// Round 68 (superseded by Round 70) — cancelInFlightPlay on every pause made
+// controls worse. Round 70 pauses immediately without stop()-tearing source.
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -14,7 +14,7 @@ String _read(String relPath) {
 
 void main() {
   group('Round 68 — pause must not finish the next clip', () {
-    test('hard abort no longer cancelInFlightPlay (Round 69)', () {
+    test('hard abort no longer cancelInFlightPlay', () {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
       final idx = coord.indexOf('Future<void> _abortInFlightTransport(');
       final end = coord.indexOf('Future<T> _serializeTransport', idx);
@@ -23,10 +23,15 @@ void main() {
       expect(body, contains('invalidateInFlightPlay(forPause: true)'));
     });
 
-    test('manual pause serializes (Round 69)', () {
+    test('manual pause is immediate and invalidates playFile (Round 70)', () {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
-      expect(coord, contains('preempt: native'));
-      expect(coord, contains('R69-serial-manual-pause'));
+      expect(coord, contains('R71-instant-transport'));
+      final idx = coord.indexOf('Future<void> pause() async');
+      final end = coord.indexOf('Future<void> resume() async', idx);
+      final body = coord.substring(idx, end);
+      expect(body, contains('invalidateInFlightPlay(forPause: true)'));
+      expect(body, contains('await _audio.pause()'));
+      expect(body.contains('_serializeTransport'), isFalse);
     });
 
     test('playFileBound still checks generation before flush', () {

@@ -315,6 +315,22 @@ class AudioPlaybackService {
   Future<void> pause() => _handler.runFromAppTransport(_handler.pause);
   Future<void> resume() => _handler.runFromAppTransport(_handler.play);
 
+  /// Instant notification/MediaSession title for next/prev (before bind).
+  void publishPendingClip({
+    required String path,
+    required String title,
+    String? playlistName,
+    String? subtitle,
+  }) {
+    _currentPath = path;
+    _handler.publishPendingClip(
+      path: path,
+      title: title,
+      playlistName: playlistName,
+      subtitle: subtitle,
+    );
+  }
+
   /// Restores the logical path after an aborted skip without touching ExoPlayer.
   void restoreCurrentPath(String? path) {
     _currentPath = path;

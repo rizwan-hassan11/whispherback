@@ -83,11 +83,9 @@ void main() {
       final pauseIdx = src.indexOf('Future<void> pause()');
       final pauseEnd = src.indexOf('Future<void> dismissPlayer()', pauseIdx);
       final pauseBody = src.substring(pauseIdx, pauseEnd);
-      expect(
-        pauseBody.indexOf('_userInitiatedPause = true'),
-        lessThan(pauseBody.indexOf('_serializeTransport')),
-      );
-      expect(pauseBody, contains('preempt: native'));
+      expect(pauseBody, contains('_userInitiatedPause = true'));
+      expect(pauseBody, contains('invalidateInFlightPlay(forPause: true)'));
+      expect(pauseBody.contains('_serializeTransport'), isFalse);
     });
 
     test('notification pause arms user-pause sentinel before transport', () {
@@ -95,11 +93,8 @@ void main() {
       final idx = src.indexOf('Future<void> _handleNotificationPause()');
       final end = src.indexOf('Future<void> _handleNotificationPlay()', idx);
       final body = src.substring(idx, end);
-      expect(
-        body.indexOf('_userInitiatedPause = true'),
-        lessThan(body.indexOf('_serializeTransport')),
-        reason: 'Notification shade pause must not lose the completion race.',
-      );
+      // Round 70: notification pause shares pause() — same sentinel path.
+      expect(body, contains('return pause()'));
     });
 
     test('duplicate completion events cannot double-advance queue', () {

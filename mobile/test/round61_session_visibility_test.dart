@@ -72,7 +72,7 @@ void main() {
 
     test('skip keeps manualPlaying session after transport', () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
-      final idx = src.indexOf('Future<void> _runOneSkip(bool next) async');
+      final idx = src.indexOf('Future<void> _runOneSkip(bool next');
       final end = src.indexOf('Future<void> _skipPlaylistClip(', idx);
       final body = src.substring(idx, end);
       expect(body, contains('AppPlaybackState.manualPlaying'));

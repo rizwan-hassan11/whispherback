@@ -35,19 +35,17 @@ void main() {
       expect(body, contains('return;'));
     });
 
-    test('notification pause ignored during skip latch', () {
+    test('notification pause shares in-app pause()', () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
       final idx = src.indexOf('Future<void> _handleNotificationPause()');
       final end = src.indexOf('Future<void> _handleNotificationPlay()', idx);
       final body = src.substring(idx, end);
-      expect(body, contains('_suppressTransientNotPlaying'));
-      expect(body, contains('_skipInFlight'));
-      expect(body, contains('return Future<void>.value()'));
+      expect(body, contains('return pause()'));
     });
 
     test('guardedSkip ensure-playing after transport when not paused', () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
-      final idx = src.indexOf('Future<void> _runOneSkip(bool next) async');
+      final idx = src.indexOf('Future<void> _runOneSkip(bool next');
       final end = src.indexOf('Future<void> _skipPlaylistClip(', idx);
       final body = src.substring(idx, end);
       expect(body, contains('await _audio.resume()'));

@@ -1,6 +1,6 @@
-// Round 69 — manual pause must SERIALIZE behind skip, never hard-preempt
-// with cancelInFlightPlay. That stop-on-every-pause was why controls felt
-// unchanged across "fixes": every pause destroyed the ExoPlayer source.
+// Round 69 (superseded by Round 70) — serial pause behind skip left
+// pause dead while skip held the gate. Round 70 pauses Dart sessions
+// immediately and invalidates in-flight playFile.
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -14,18 +14,8 @@ String _read(String relPath) {
 }
 
 void main() {
-  group('Round 69 — serial manual pause', () {
-    test('manual pause does not hard-preempt', () {
-      final coord = _read('lib/services/playback/playback_coordinator.dart');
-      final idx = coord.indexOf('Future<void> pause()');
-      final end = coord.indexOf('Future<void> dismissPlayer()', idx);
-      final body = coord.substring(idx, end);
-      expect(body, contains('Round 69'));
-      expect(body, contains('preempt: native'));
-      expect(body, contains('revertOptimisticSkip: native'));
-      expect(body.contains('preempt: true, revertOptimisticSkip: true'), isFalse);
-    });
-
+  group('Round 69 → 70 — pause must not destroy source via cancelInFlightPlay',
+      () {
     test('hard abort does not cancelInFlightPlay', () {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
       final idx = coord.indexOf('Future<void> _abortInFlightTransport(');
@@ -37,9 +27,9 @@ void main() {
       expect(body, contains('await _audio.pause()'));
     });
 
-    test('transport build id is stamped for QA', () {
+    test('transport build id stamped for QA (Round 70)', () {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
-      expect(coord, contains("transportBuildId = 'R69-serial-manual-pause'"));
+      expect(coord, contains("transportBuildId = 'R71-instant-transport'"));
       final settings = _read('lib/features/settings/settings_screen.dart');
       expect(settings, contains('PlaybackCoordinator.transportBuildId'));
     });

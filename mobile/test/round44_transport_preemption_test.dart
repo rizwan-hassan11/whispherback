@@ -41,9 +41,10 @@ void main() {
       final pauseEnd =
           coord.indexOf('\n  /// Pauses the current clip', pauseIdx);
       final pauseBody = coord.substring(pauseIdx, pauseEnd);
-      // Round 69: manual pause serializes (preempt: native only).
-      expect(pauseBody, contains('preempt: native'));
-      expect(pauseBody, contains('revertOptimisticSkip: native'));
+      // Round 70: Dart pause is immediate (no transport serialize).
+      expect(pauseBody, contains('invalidateInFlightPlay(forPause: true)'));
+      expect(pauseBody, contains('await _audio.pause()'));
+      expect(pauseBody.contains('_serializeTransport'), isFalse);
       expect(coord, contains('revertOptimisticSkip: true'));
     });
 
