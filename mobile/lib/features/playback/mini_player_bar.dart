@@ -187,7 +187,6 @@ class _MiniPlayerBody extends StatelessWidget {
     final snapSubtitle = snapshot.playlistName?.trim();
     final mediaTitle = mediaItem?.title.trim();
     final mediaSubtitle = mediaItem?.album?.trim() ?? mediaItem?.artist?.trim();
-    final skipPending = coordinator.skipTransportActive;
 
     // Round 63: in-app bar follows the coordinator snapshot (optimistic next /
     // pause), NOT MediaSession. Preferring mediaTitle after skip ended made
@@ -214,11 +213,11 @@ class _MiniPlayerBody extends StatelessWidget {
     final displaySubtitle =
         (subtitle != null && subtitle.isNotEmpty) ? subtitle : 'WhisperBack';
 
-    // Round 63: play/pause icon follows snapshot.isPlaying (flipped on tap).
-    // mediaSessionPlaying lagged or stuck after skip/pause, so the button
-    // called the wrong action (pause when already paused, etc.).
+    // Round 63/67: play/pause icon follows snapshot.isPlaying only.
+    // Forcing play while skipTransportActive made pause during next look
+    // like the clip was still playing / like pause advanced the queue.
     final displayPlaying = dartOwns
-        ? (skipPending || snapshot.isPlaying)
+        ? snapshot.isPlaying
         : (nativeLive ? native.isPlaying : snapshot.isPlaying);
 
     final progressKey = ValueKey<String>(

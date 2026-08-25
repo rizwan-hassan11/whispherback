@@ -90,7 +90,7 @@ void main() {
       expect(coord, contains('hasSession'));
     });
 
-    test('shuffle commits playlist index only after successful bind', () {
+    test('shuffle plays the tap-committed clip without re-rolling', () {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
       final shuffleIdx = coord.indexOf('if (shuffle) {');
       expect(shuffleIdx, greaterThanOrEqualTo(0));
@@ -99,16 +99,13 @@ void main() {
         shuffleIdx,
       );
       expect(playFileCall, greaterThan(shuffleIdx));
-      // Nothing between shuffle entry and the playFile call may commit index.
       final beforePlay = coord.substring(shuffleIdx, playFileCall);
-      expect(
-        beforePlay.contains('_playlistClipIndex = idx'),
-        isFalse,
-        reason: 'Must not commit queue index before playFile is invoked.',
-      );
+      // Index was committed in prime; shuffle body must not re-roll.
+      expect(beforePlay, contains('_optimisticSkipClip'));
+      expect(beforePlay.contains('_nextShuffledClip'), isFalse);
       expect(
         coord,
-        contains('Commit queue pointer only after a successful bind'),
+        contains('Clip + index were chosen on the tap frame'),
       );
     });
   });

@@ -47,11 +47,11 @@ void main() {
       );
     });
 
-    test('failed skip bind reverts optimistic title', () {
+    test('failed skip bind keeps committed title (no revert)', () {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
-      expect(coord, contains('_preSkipSnapshot'));
-      expect(coord, contains('_revertOptimisticSkipTitle'));
-      expect(coord, contains('bind failed for THIS skip'));
+      expect(coord.contains('_preSkipSnapshot'), isFalse);
+      expect(coord.contains('_revertOptimisticSkipTitle'), isFalse);
+      expect(coord, contains('never revert title/index'));
     });
 
     test('canSkipClips requires a multi-clip queue', () {

@@ -31,13 +31,12 @@ void main() {
       final idx = src.indexOf('Future<void> _abortInFlightTransport(');
       final end = src.indexOf('Future<T> _serializeTransport', idx);
       final body = src.substring(idx, end);
-      // Round 59: never restore queue indices after a committed skip.
-      // Round 66: unbound optimistic TITLE may revert; bound skip keeps title.
+      // Round 67: pause never restores indices or titles.
       expect(body.contains('_libraryIndex = _preSkipLibraryIndex'), isFalse);
       expect(
           body.contains('_playlistClipIndex = _preSkipPlaylistIndex'), isFalse);
-      expect(body, contains('bound == targetPath'));
-      expect(body, contains('_revertOptimisticSkipTitle()'));
+      expect(body.contains('_revertOptimisticSkipTitle'), isFalse);
+      expect(body, contains('Never touch queue index or title'));
       expect(body, contains('invalidateInFlightPlay(forPause: true)'));
       expect(body, contains('await _audio.pause()'));
       expect(
@@ -54,17 +53,10 @@ void main() {
       final body = src.substring(idx, end);
       expect(body, contains('_emit('));
       expect(body, contains('clipTitle: clip.title'));
-      expect(
-        body.contains('_libraryIndex = nextIndex'),
-        isFalse,
-        reason: 'Index must wait for bind success.',
-      );
-      expect(
-        body.contains('_playlistClipIndex = nextIndex'),
-        isFalse,
-        reason: 'Index must wait for bind success.',
-      );
-      expect(body, contains('_optimisticSkipIndex = nextIndex'));
+      // Round 67: index IS committed on tap (Spotify-like). Body must not
+      // advance a second time from the old pointer.
+      expect(body, contains('_libraryIndex = nextIndex'));
+      expect(body, contains('_playlistClipIndex = nextIndex'));
     });
 
     test('playFile success requires audible playing, not just mediaItem bind',
@@ -139,7 +131,7 @@ void main() {
       final bar = _read('lib/features/playback/mini_player_bar.dart');
       expect(bar, contains('coordinator.skipTransportActive'));
       expect(bar, contains('snapTitle?.isNotEmpty == true'));
-      expect(bar, contains('skipPending || snapshot.isPlaying'));
+      expect(bar.contains('skipPending || snapshot.isPlaying'), isFalse);
       expect(bar, contains('elevation: 8'));
       final shell = _read('lib/core/widgets/main_shell.dart');
       expect(shell, contains('skipTransportActive'));

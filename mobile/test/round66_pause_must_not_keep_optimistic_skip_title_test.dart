@@ -1,7 +1,5 @@
-// Round 66 — pause during an in-flight next/prev must restore the previous
-// title when the new clip has not bound yet. Leaving the optimistic title
-// made pause look like it changed the track. Also: playFile returning false
-// after ExoPlayer already owns the target path must not wipe that title.
+// Round 66 (superseded by Round 67) — title revert on pause was replaced by
+// commit-on-tap + pause-never-touches-title.
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -16,39 +14,28 @@ String _read(String relPath) {
 
 void main() {
   group('Round 66 — pause/skip title integrity', () {
-    test('hard abort reverts optimistic title when new path is not bound', () {
+    test('hard abort never reverts titles (Round 67)', () {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
       final idx = coord.indexOf('Future<void> _abortInFlightTransport(');
       expect(idx, greaterThanOrEqualTo(0));
       final body = coord.substring(idx, idx + 1200);
-      expect(body, contains('targetPath'));
-      expect(body, contains('_revertOptimisticSkipTitle()'));
-      expect(body, contains('bound == targetPath'));
+      expect(body.contains('_revertOptimisticSkipTitle'), isFalse);
+      expect(body, contains('Never touch queue index or title'));
     });
 
-    test('preSkipSnapshot is only set when a multi-clip title flips', () {
+    test('prime commits index instead of capturing preSkipSnapshot', () {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
       final idx = coord.indexOf('void _primeOptimisticSkip(');
       final end = coord.indexOf('void _warmLibraryNeighbors(', idx);
       final body = coord.substring(idx, end);
-      expect(
-        body,
-        contains('only capture `_preSkipSnapshot` when we actually flip'),
-      );
-      // Must not assign _preSkipSnapshot at the top before the early returns.
-      final firstAssign = body.indexOf('_preSkipSnapshot = _snapshot');
-      final libraryEarlyReturn = body.indexOf('_libraryQueue.length <= 1');
-      expect(firstAssign, greaterThan(libraryEarlyReturn));
+      expect(body, contains('_libraryIndex = nextIndex'));
+      expect(body.contains('_preSkipSnapshot'), isFalse);
     });
 
-    test('failed playFile still commits when path is already bound', () {
+    test('failed playFile keeps committed title', () {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
-      expect(coord, contains('bool _isPathBound(String path)'));
-      expect(coord, contains('void _commitSkipBindSuccess('));
-      expect(
-        coord,
-        contains('playFile may return false after ExoPlayer already bound'),
-      );
+      expect(coord, contains('never revert title/index'));
+      expect(coord, contains('void _confirmSkipPlaying('));
     });
   });
 }

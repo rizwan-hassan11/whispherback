@@ -41,7 +41,7 @@ void main() {
       final bar = _read('lib/features/playback/mini_player_bar.dart');
       expect(bar, contains('skipTransportActive'));
       expect(bar, contains('snapTitle?.isNotEmpty == true'));
-      expect(bar, contains('skipPending || snapshot.isPlaying'));
+      expect(bar.contains('skipPending || snapshot.isPlaying'), isFalse);
     });
 
     test('in-flight skip taps queue instead of debounce-reject', () {

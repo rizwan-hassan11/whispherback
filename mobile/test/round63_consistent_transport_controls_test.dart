@@ -20,7 +20,7 @@ void main() {
       final bar = _read('lib/features/playback/mini_player_bar.dart');
       expect(bar, contains('Round 63: in-app bar follows the coordinator'));
       expect(bar, contains('snapTitle?.isNotEmpty == true'));
-      expect(bar, contains('skipPending || snapshot.isPlaying'));
+      expect(bar.contains('skipPending || snapshot.isPlaying'), isFalse);
       expect(
         bar.contains('skipPending ? true : mediaSessionPlaying'),
         isFalse,

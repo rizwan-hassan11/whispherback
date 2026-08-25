@@ -83,7 +83,8 @@ void main() {
       final body = src.substring(idx, end);
       expect(body, contains('_emit('));
       expect(body, contains('clipTitle: clip.title'));
-      expect(body, contains('_optimisticSkipTargetPath'));
+      expect(body, contains('_libraryIndex = nextIndex'));
+      expect(body, contains('_optimisticSkipClip = clip'));
     });
 
     test('pause abort never changes clip identity', () {
@@ -91,13 +92,12 @@ void main() {
       final idx = src.indexOf('Future<void> _abortInFlightTransport(');
       final end = src.indexOf('Future<T> _serializeTransport', idx);
       final body = src.substring(idx, end);
-      // Round 66: may restore optimistic title if bind never finished, but
-      // must never rewrite queue indices (clip identity).
+      // Round 67: pause never rewrites queue indices or titles.
       expect(body.contains('final committed ='), isFalse);
       expect(body.contains('_libraryIndex = _preSkipLibraryIndex'), isFalse);
       expect(
           body.contains('_playlistClipIndex = _preSkipPlaylistIndex'), isFalse);
-      expect(body, contains('bound == targetPath'));
+      expect(body.contains('_revertOptimisticSkipTitle'), isFalse);
       expect(body, contains('invalidateInFlightPlay(forPause: true)'));
     });
 
@@ -128,7 +128,8 @@ void main() {
     test('mini-player may prefer snapshot title while skip is pending', () {
       final bar = _read('lib/features/playback/mini_player_bar.dart');
       expect(bar, contains('snapTitle?.isNotEmpty == true'));
-      expect(bar, contains('skipPending || snapshot.isPlaying'));
+      expect(bar.contains('skipPending || snapshot.isPlaying'), isFalse);
+      expect(bar, contains('snapshot.isPlaying'));
     });
   });
 }

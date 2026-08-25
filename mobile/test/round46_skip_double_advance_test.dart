@@ -24,12 +24,10 @@ String _read(String relPath) {
 
 void main() {
   group('Round 46 — skip must not double-advance or soft-stop', () {
-    test('prime records `_optimisticSkipIndex` and skip consumes it once', () {
+    test('prime commits index once; skip body does not advance again', () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
-      expect(src, contains('int? _optimisticSkipIndex'));
-      expect(src, contains('_optimisticSkipIndex = nextIndex'));
-      expect(src, contains('final primed = _optimisticSkipIndex'));
-      expect(src, contains('_optimisticSkipIndex = null'));
+      expect(src, contains('_libraryIndex = nextIndex'));
+      expect(src, contains('_playlistClipIndex = nextIndex'));
 
       final skipIdx = src.indexOf('Future<void> _skipPlaylistClip(');
       expect(skipIdx, greaterThanOrEqualTo(0));
@@ -37,15 +35,14 @@ void main() {
           src.indexOf('\n  Future<void> _playClipAtIndex(', skipIdx);
       final body = src.substring(skipIdx, skipEnd);
 
-      // Must not re-advance from the already-primed library/playlist index
-      // with another `(currentIndex + 1) %` before reading `primed`.
+      // Must not re-advance from the already-committed library index.
       expect(
-        body.contains('final nextIndex = next\n          ? (currentIndex + 1)'),
+        body.contains('((_libraryIndex < 0 ? 0 : _libraryIndex) + 1)'),
         isFalse,
-        reason: 'Re-computing next after prime double-advances the queue.',
+        reason: 'Re-computing next after commit double-advances the queue.',
       );
-      expect(body, contains('final primed = _optimisticSkipIndex'),
-          reason: 'Skip body must play the primed target index.');
+      expect(body, contains('index was committed on the tap frame'),
+          reason: 'Skip body must play the committed queue index.');
     });
 
     test('soft abort invalidates generation without stopping ExoPlayer', () {

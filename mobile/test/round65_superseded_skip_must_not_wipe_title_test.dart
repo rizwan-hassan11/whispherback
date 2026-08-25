@@ -1,8 +1,5 @@
-// Round 65 — a superseded skip's playFile returned false and called
-// `_revertOptimisticSkipTitle()`, which shared `_preSkipSnapshot` with the
-// newer next/prev. That painted the OLD title over the new skip and made
-// next/prev look permanently broken. Also stopNative-on-every-skip fought
-// ExoPlayer focus.
+// Round 65 (superseded by Round 67) — title wipe came from shared revert.
+// Round 67 deletes revert entirely and commits index on tap.
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -17,27 +14,16 @@ String _read(String relPath) {
 
 void main() {
   group('Round 65 — superseded skip must not wipe newer title', () {
-    test('revert is a no-op when transport epoch is stale', () {
+    test('title revert helper is gone (Round 67)', () {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
-      expect(
-          coord, contains('_revertOptimisticSkipTitle({int? transportEpoch})'));
-      final idx = coord.indexOf(
-          'A superseded skip must never paint over a newer next/prev');
-      expect(idx, greaterThanOrEqualTo(0));
-      final body = coord.substring(idx, idx + 600);
-      expect(body, contains('!_transportCurrent(transportEpoch)'));
+      expect(coord.contains('_revertOptimisticSkipTitle'), isFalse);
+      expect(coord.contains('PlaybackSnapshot? _preSkipSnapshot'), isFalse);
     });
 
-    test('failed bind skips revert when a newer skip owns transport', () {
+    test('failed bind does not paint an old title over a newer skip', () {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
-      expect(
-        coord,
-        contains('if a newer skip/pause already owns transport, do nothing'),
-      );
-      expect(
-        coord,
-        contains('OLD title over the newer skip'),
-      );
+      expect(coord, contains('never revert title/index'));
+      expect(coord, contains('queue index + title are already committed on tap'));
     });
 
     test('stopNative is not called on every next/prev swap', () {
@@ -47,11 +33,11 @@ void main() {
         contains('claim exclusive Dart ownership only when STARTING'),
       );
       final idx = coord.indexOf('Future<void> _playClipInternal(');
-      final end = coord.indexOf('void _revertOptimisticSkipTitle(', idx);
+      final end = coord.indexOf('void _confirmSkipPlaying(', idx);
+      expect(end, greaterThan(idx));
       final body = coord.substring(idx, end);
       expect(body, contains('if (!skipSnapshotEmit)'));
       expect(body, contains('await _claimDartManualSession()'));
-      // Must not claim on skip swaps (skipSnapshotEmit true).
       expect(
         body.contains('if (!skipSnapshotEmit ||'),
         isFalse,

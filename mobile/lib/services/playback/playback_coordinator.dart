@@ -163,18 +163,9 @@ class PlaybackCoordinator {
   /// audio playing when the user asked to pause.
   int _transportEpoch = 0;
 
-  /// Index chosen by [_primeOptimisticSkip]. The skip body plays THIS index
-  /// instead of advancing again (double-advance made 2-clip queues wrap to
-  /// the same track and feel like pause/seek-0).
-  int? _optimisticSkipIndex;
-
-  /// Concrete clip chosen at tap time (incl. shuffle). Body must play THIS
-  /// clip — never re-roll shuffle or the title/audio diverge.
+  /// Clip chosen at tap time for shuffle (body must not re-roll). Sequential
+  /// skips play `_libraryIndex` / `_playlistClipIndex` committed on tap.
   AudioClip? _optimisticSkipClip;
-
-  /// File path primed at tap time. Skip body binds THIS path so title and
-  /// audio cannot diverge from a later re-roll.
-  String? _optimisticSkipTargetPath;
 
   /// Sized for playFile's 8s setAudioSource cap plus native MethodChannel
   /// skip / pause round-trips.
@@ -206,34 +197,19 @@ class PlaybackCoordinator {
 
   /// Stops an in-flight skip / playFile without tearing down the media session.
   ///
-  /// [revertOptimisticSkip] distinguishes hard abort (pause/dismiss) from soft
-  /// abort (skip/play preempting a prior load):
-  /// - Hard: pause native (cancels deferred prepare via skipGeneration) and
-  ///   stop ExoPlayer load.
-  /// - Soft: invalidate Dart playFile generation only — never stop() and never
-  ///   pauseNative. Soft stop made every next/prev pause audio and reset the
-  ///   scrubber to 0; pauseNative raced skipNative and cancelled prepares.
+  /// [revertOptimisticSkip] means hard abort (pause/dismiss) vs soft abort
+  /// (newer skip/play preempting a prior load):
+  /// - Hard: pause native / ExoPlayer. Never touch queue index or title —
+  ///   those were committed on the next/prev tap (Round 67).
+  /// - Soft: invalidate Dart playFile generation only — never pauseNative.
   Future<void> _abortInFlightTransport(
       {required bool revertOptimisticSkip}) async {
     if (revertOptimisticSkip) {
-      // Pause/dismiss: cancel the unfinished load. If next/prev had only
-      // painted an optimistic title (bind not done), restore the previous
-      // title — otherwise pause looks like it changed the clip (Round 66).
-      // If the new path already bound, keep that title and just pause.
-      final targetPath = _optimisticSkipTargetPath;
-      _optimisticSkipIndex = null;
+      // Never touch queue index or title — they were committed on next/prev.
+      // Pause/dismiss only cancels the unfinished load.
       _optimisticSkipClip = null;
-      _optimisticSkipTargetPath = null;
       _ignoreSessionPauseUntil = null;
       _audio.suppressMediaSessionPauseEcho = false;
-      final bound = _audio.boundPath ?? _audio.currentPath;
-      if (_preSkipSnapshot != null) {
-        if (targetPath != null && bound == targetPath) {
-          _preSkipSnapshot = null;
-        } else {
-          _revertOptimisticSkipTitle();
-        }
-      }
     }
     final nativeActive = _nativeOwnsPlayback;
     if (nativeActive) {
@@ -246,10 +222,8 @@ class PlaybackCoordinator {
     }
     if (revertOptimisticSkip) {
       // Invalidate the load, then PAUSE — do not stop()/cancelInFlightPlay.
-      // Stopping destroyed the newly bound source so resume rebound a
-      // different clip than the one that was audible (QA Round 59).
       // Round 62: forPause so a dying playFile cannot leave the next clip
-      // playing (that made pause appear to change the track).
+      // playing after the user asked to pause.
       try {
         _audio.invalidateInFlightPlay(forPause: true);
       } catch (_) {}
@@ -283,8 +257,8 @@ class PlaybackCoordinator {
       } else {
         // Soft skip/play: wait for the previous body so setAudioSource does
         // not interleave, and invalidate its playFile generation so it exits.
-        // Round 65: the dying body must NOT revert titles (see
-        // `_revertOptimisticSkipTitle`) — that wiped the newer skip's UI.
+        // Round 67: queue index + title are already committed on tap — a
+        // dying body must not paint anything over the newer skip.
         unawaited(abort);
         previous = _transportGate;
       }
@@ -314,9 +288,7 @@ class PlaybackCoordinator {
         if (!completer.isCompleted) completer.completeError(e, st);
       } finally {
         if (_transportCurrent(epoch)) {
-          _optimisticSkipIndex = null;
           _optimisticSkipClip = null;
-          _optimisticSkipTargetPath = null;
         }
       }
     });
@@ -768,7 +740,7 @@ class PlaybackCoordinator {
               _audio.mediaItem != null;
           final skipInFlight = _skipInFlight ||
               _suppressTransientNotPlaying ||
-              _optimisticSkipIndex != null;
+              _optimisticSkipClip != null;
           final hasSessionMeta =
               _snapshot.clipTitle != null || _snapshot.playlistName != null;
           if (dartOwnsClip || skipInFlight || hasSessionMeta) {
@@ -1014,22 +986,16 @@ class PlaybackCoordinator {
   Future<void> skipNext() => _guardedSkip(next: true);
   Future<void> skipPrevious() => _guardedSkip(next: false);
 
-  /// Snapshot before an optimistic skip title flip. Restored when bind fails
-  /// so the bar never keeps a title whose audio never started (Round 64).
-  PlaybackSnapshot? _preSkipSnapshot;
-
-  /// Resolve next/prev target and show it immediately. Queue indices are
-  /// applied only after a successful bind so a cancelled skip cannot leave
-  /// the session pointing at a clip that never played (QA Round 59).
+  /// Commit next/prev on the tap frame (Spotify-like).
+  ///
+  /// Round 67: queue index is the source of truth and is advanced HERE —
+  /// not after bind. Title follows that index immediately. Pause never
+  /// rolls either back. Deferred commit-after-bind + title revert was the
+  /// root of "title changes once, pause changes the clip, then nothing works".
   void _primeOptimisticSkip(bool next) {
     _userInitiatedPause = false;
     _playbackGeneration++;
-    _optimisticSkipIndex = null;
     _optimisticSkipClip = null;
-    _optimisticSkipTargetPath = null;
-    // Round 66: only capture `_preSkipSnapshot` when we actually flip the
-    // title to another clip. Setting it on single-clip / no-op primes left
-    // a stale snapshot that later reverts wiped a real next/prev.
 
     final native = _nativeOwnsPlayback;
     if (native) {
@@ -1055,11 +1021,8 @@ class PlaybackCoordinator {
           ? (currentIndex + 1) % _libraryQueue.length
           : (currentIndex - 1 + _libraryQueue.length) % _libraryQueue.length;
       final clip = _libraryQueue[nextIndex];
-      _optimisticSkipIndex = nextIndex;
+      _libraryIndex = nextIndex;
       _optimisticSkipClip = clip;
-      _optimisticSkipTargetPath = clip.filePath;
-      _preSkipSnapshot = _snapshot;
-      // Do NOT assign `_libraryIndex` yet — wait for bind success.
       _emit(_snapshot.copyWith(
         state: AppPlaybackState.manualPlaying,
         clipTitle: clip.title,
@@ -1087,10 +1050,8 @@ class PlaybackCoordinator {
       clip = clips[nextIndex];
     }
     if (nextIndex < 0) return;
-    _optimisticSkipIndex = nextIndex;
+    _playlistClipIndex = nextIndex;
     _optimisticSkipClip = clip;
-    _optimisticSkipTargetPath = clip.filePath;
-    _preSkipSnapshot = _snapshot;
     final fromSchedule = _snapshot.state == AppPlaybackState.scheduledPlaying;
     _emit(_snapshot.copyWith(
       state: fromSchedule
@@ -1303,7 +1264,6 @@ class PlaybackCoordinator {
     // skip used to call just_audio, which is idle in that state — the
     // mini-player and notification next/prev looked dead.
     if (_nativeOwnsPlayback) {
-      _optimisticSkipIndex = null;
       try {
         await NativeAlarmsBridge.instance.skipNative(next: next);
       } catch (e, st) {
@@ -1319,31 +1279,15 @@ class PlaybackCoordinator {
 
     final playlistId = _snapshot.playlistId;
     if (playlistId == null) {
-      // Library-queue context: walk through the currently shown clip list.
+      // Library-queue: index was committed on the tap frame in
+      // `_primeOptimisticSkip`. Play THAT clip — never advance again.
       if (_libraryQueue.length <= 1) {
-        // Single clip — restart from the top so the button still feels alive
-        // instead of silently doing nothing.
         if (_libraryQueue.isEmpty) return;
-        _optimisticSkipIndex = null;
         await _audio.seek(Duration.zero);
         await _audio.resume();
         return;
       }
-      // Prefer the index primed on the tap frame. Only re-compute when prime
-      // could not resolve (empty queue at tap time) — never advance twice.
-      final primed = _optimisticSkipIndex;
-      _optimisticSkipIndex = null;
-      final nextIndex = primed ??
-          (next
-              ? ((_libraryIndex < 0 ? 0 : _libraryIndex) + 1) %
-                  _libraryQueue.length
-              : ((_libraryIndex < 0 ? 0 : _libraryIndex) -
-                      1 +
-                      _libraryQueue.length) %
-                  _libraryQueue.length);
-      // Commit the queue pointer only after bind succeeds (inside
-      // `_playClipInternal`) so a cancelled skip cannot leave us on a clip
-      // that never played.
+      final nextIndex = _libraryIndex < 0 ? 0 : _libraryIndex;
       final clip = _libraryQueue[nextIndex];
       await _playClipInternal(
         clip,
@@ -1362,10 +1306,7 @@ class PlaybackCoordinator {
     }
     if (clips.isEmpty) return;
     if (clips.length <= 1) {
-      // Single-clip playlist: replay from the top instead of stopping —
-      // matches user expectation for a "next" tap on a one-track playlist.
       _playlistClipIndex = 0;
-      _optimisticSkipIndex = null;
       await _playClipAtIndex(
         playlistId,
         clips,
@@ -1377,21 +1318,18 @@ class PlaybackCoordinator {
       return;
     }
 
-    // Prefer snapshot flags — avoid a SQLite getById on every next/prev tap.
     final shuffle = _snapshot.shuffleEnabled;
     final fromSchedule = _snapshot.state == AppPlaybackState.scheduledPlaying;
 
     if (shuffle) {
-      // Prefer the clip resolved at tap time so we never re-roll shuffle
-      // (that made the audible clip disagree with any primed metadata).
-      final clip = _optimisticSkipClip ?? _nextShuffledClip(playlistId, clips);
+      // Clip + index were chosen on the tap frame — never re-roll shuffle.
+      final clip = _optimisticSkipClip ??
+          (clips[(_playlistClipIndex ?? 0).clamp(0, clips.length - 1)]);
       _optimisticSkipClip = null;
-      _optimisticSkipIndex = null;
       final idx = clips.indexWhere((c) => c.id == clip.id);
-      final path = _optimisticSkipTargetPath ?? clip.filePath;
       try {
         final ok = await _audio.playFile(
-          path,
+          clip.filePath,
           title: clip.title,
           playlistName: _snapshot.playlistName,
           subtitle: fromSchedule
@@ -1401,29 +1339,8 @@ class PlaybackCoordinator {
           sourceSwap: true,
         );
         if (!ok) {
+          // Round 67: keep committed title/index even on bind failure.
           if (!_transportCurrent(epoch)) return;
-          // Round 66: false from playFile after a real bind must not wipe
-          // the primed title — treat a matching MediaItem as success.
-          if (_isPathBound(path) || _isPathBound(clip.filePath)) {
-            if (idx >= 0) _playlistClipIndex = idx;
-            _warmPlaylistNeighbors();
-            if (_transportCurrent(epoch)) {
-              _emit(_snapshot.copyWith(
-                state: fromSchedule
-                    ? AppPlaybackState.scheduledPlaying
-                    : AppPlaybackState.manualPlaying,
-                clipTitle: clip.title,
-                isPlaying: true,
-                durationMs: clip.durationMs,
-                modalVisible: false,
-              ));
-              _optimisticSkipTargetPath = null;
-              _preSkipSnapshot = null;
-            }
-            await _honorSupersededTransport(epoch);
-            return;
-          }
-          _revertOptimisticSkipTitle(transportEpoch: epoch);
           await _honorSupersededTransport(epoch);
           return;
         }
@@ -1432,31 +1349,9 @@ class PlaybackCoordinator {
           debugPrint('skip shuffle playFile failed: $e\n$st');
         }
         if (!_transportCurrent(epoch)) return;
-        if (_isPathBound(clip.filePath)) {
-          if (idx >= 0) _playlistClipIndex = idx;
-          _warmPlaylistNeighbors();
-          if (_transportCurrent(epoch)) {
-            _emit(_snapshot.copyWith(
-              state: fromSchedule
-                  ? AppPlaybackState.scheduledPlaying
-                  : AppPlaybackState.manualPlaying,
-              clipTitle: clip.title,
-              isPlaying: true,
-              durationMs: clip.durationMs,
-              modalVisible: false,
-            ));
-            _optimisticSkipTargetPath = null;
-            _preSkipSnapshot = null;
-          }
-          await _honorSupersededTransport(epoch);
-          return;
-        }
-        _revertOptimisticSkipTitle(transportEpoch: epoch);
         await _honorSupersededTransport(epoch);
         return;
       }
-      // Commit queue pointer only after a successful bind, and only if this
-      // skip still owns transport (a newer next/prev must not inherit our index).
       if (_transportCurrent(epoch)) {
         if (idx >= 0) _playlistClipIndex = idx;
         _warmPlaylistNeighbors();
@@ -1469,24 +1364,17 @@ class PlaybackCoordinator {
           durationMs: clip.durationMs,
           modalVisible: false,
         ));
-        _optimisticSkipTargetPath = null;
-        _preSkipSnapshot = null;
       }
       _refreshScheduleNotificationsDeferred();
       await _honorSupersededTransport(epoch);
       return;
     }
 
-    // Prefer primed index; only advance here when prime had no cache yet.
-    final primed = _optimisticSkipIndex;
-    _optimisticSkipIndex = null;
-    final nextIndex = primed ??
+    // Index already committed on tap — play it (recover if prime had no cache).
+    final nextIndex = _playlistClipIndex ??
         (next
-            ? ((_playlistClipIndex ?? 0) + 1) % clips.length
-            : ((_playlistClipIndex ?? 0) - 1 + clips.length) % clips.length);
-    // Walk forward/back from the target so a missing file never leaves the
-    // mini-player stranded mid-skip (which looked like "next hid the bar").
-    // `_advanceToNextPlayable` commits `_playlistClipIndex` only after bind.
+            ? 0
+            : (clips.isEmpty ? 0 : clips.length - 1));
     final played = await _advanceToNextPlayable(
       playlistId,
       clips,
@@ -1495,8 +1383,6 @@ class PlaybackCoordinator {
       transportEpoch: epoch,
     );
     if (played == null && clips.isNotEmpty) {
-      // Absolute fallback: restart the first playable clip so next never
-      // feels like a stop.
       await _advanceToNextPlayable(
         playlistId,
         clips,
@@ -1571,7 +1457,6 @@ class PlaybackCoordinator {
       ),
     );
     _optimisticSkipClip = null;
-    _optimisticSkipTargetPath = null;
     _refreshScheduleNotificationsDeferred();
   }
 
@@ -1853,7 +1738,6 @@ class PlaybackCoordinator {
             ),
           );
           _optimisticSkipClip = null;
-          _optimisticSkipTargetPath = null;
           _refreshScheduleNotificationsDeferred();
           return index;
         } catch (_) {
@@ -2415,45 +2299,25 @@ class PlaybackCoordinator {
         sourceSwap: skipSnapshotEmit,
       );
       if (!ok) {
-        // Round 65: if a newer skip/pause already owns transport, do nothing.
-        // Reverting here used the shared `_preSkipSnapshot` and painted the
-        // OLD title over the newer skip — next looked permanently broken.
+        // Round 67: never revert title/index. They were committed on tap.
+        // A newer transport (pause/next) simply exits; pause already paused.
         if (transportEpoch != null && !_transportCurrent(transportEpoch)) {
           return;
         }
-        // Round 62: NEVER resume a skip that pause/dismiss superseded.
+        // NEVER resume a skip that pause/dismiss superseded.
         if (_userInitiatedPause || _latestTransportPausesPlayback) {
-          _revertOptimisticSkipTitle(transportEpoch: transportEpoch);
           return;
         }
-        // Round 66: playFile may return false after ExoPlayer already bound
-        // this path (generation race / mediaItem check). Treat as success
-        // so we never paint the old title over audio that is already live.
-        if (skipSnapshotEmit && _isPathBound(clip.filePath)) {
-          _audio.restoreCurrentPath(clip.filePath);
-          _commitSkipBindSuccess(
-            clip: clip,
-            effectivePlaylistId: effectivePlaylistId,
-            resolvedQueue: resolvedQueue,
-            transportEpoch: transportEpoch,
-          );
-          return;
-        }
-        // Round 64/65: bind failed for THIS skip — restore previous title.
-        if (skipSnapshotEmit) {
-          _revertOptimisticSkipTitle(transportEpoch: transportEpoch);
-          return;
-        }
-        // Round 61: never tear down a live MediaSession just because the
-        // playing flag lagged. If this clip is already the bound MediaItem,
-        // keep the Spotify bar + notification and try resume.
+        // If ExoPlayer already owns this path, confirm playing UI.
         if (_audio.boundPath == clip.filePath ||
             _audio.mediaItem?.id == clip.filePath) {
           _audio.restoreCurrentPath(clip.filePath);
           try {
             await _audio.resume();
           } catch (_) {}
-          if (!skipSnapshotEmit) {
+          if (skipSnapshotEmit) {
+            _confirmSkipPlaying(clip);
+          } else {
             _emit(_snapshot.copyWith(
               state: AppPlaybackState.manualPlaying,
               playlistId: effectivePlaylistId ?? _snapshot.playlistId,
@@ -2468,6 +2332,13 @@ class PlaybackCoordinator {
           }
           return;
         }
+        // True bind failure: keep committed title/index; surface error on skip.
+        if (skipSnapshotEmit && !_errorController.isClosed) {
+          _errorController.add(PlaybackErrorEvent(
+            PlaybackErrorReason.decodeFailed,
+            clipTitle: clip.title,
+          ));
+        }
         return;
       }
     } catch (e, st) {
@@ -2477,17 +2348,12 @@ class PlaybackCoordinator {
       if (kDebugMode) {
         debugPrint('playClip: playFile failed: $e\n$st');
       }
-      // Skip swaps must NOT call stop() — that emits activeIdle and hides
-      // the Spotify mini-player while the user is still tapping next/prev.
+      // Skip swaps must NOT call stop() — that hides the Spotify mini-player.
       if (skipSnapshotEmit) {
-        if (_isPathBound(clip.filePath)) {
+        if (_audio.boundPath == clip.filePath ||
+            _audio.mediaItem?.id == clip.filePath) {
           _audio.restoreCurrentPath(clip.filePath);
-          _commitSkipBindSuccess(
-            clip: clip,
-            effectivePlaylistId: effectivePlaylistId,
-            resolvedQueue: resolvedQueue,
-            transportEpoch: transportEpoch,
-          );
+          _confirmSkipPlaying(clip);
           return;
         }
         if (!_errorController.isClosed) {
@@ -2496,11 +2362,9 @@ class PlaybackCoordinator {
             clipTitle: clip.title,
           ));
         }
-        _revertOptimisticSkipTitle(transportEpoch: transportEpoch);
         return;
       }
-      // Only wipe the session when nothing is bound. Round 60's false
-      // negatives called stop() here and removed bar + notification.
+      // Only wipe the session when nothing is bound.
       if (_audio.mediaItem != null || _audio.currentPath != null) {
         try {
           await _audio.resume();
@@ -2538,73 +2402,33 @@ class PlaybackCoordinator {
     }
     if (skipSnapshotEmit &&
         (transportEpoch == null || _transportCurrent(transportEpoch))) {
-      _commitSkipBindSuccess(
-        clip: clip,
-        effectivePlaylistId: effectivePlaylistId,
-        resolvedQueue: resolvedQueue,
-        transportEpoch: transportEpoch,
-      );
+      _confirmSkipPlaying(clip);
     }
   }
 
-  /// True when ExoPlayer / MediaSession already owns [path].
-  bool _isPathBound(String path) {
-    return _audio.boundPath == path ||
-        _audio.mediaItem?.id == path ||
-        _audio.currentPath == path;
-  }
-
-  /// Commits queue pointer + title after a successful (or effectively
-  /// successful) skip bind. Shared by the happy path and Round 66's
-  /// "playFile returned false but path is already bound" recovery.
-  void _commitSkipBindSuccess({
-    required AudioClip clip,
-    required String? effectivePlaylistId,
-    required List<AudioClip> resolvedQueue,
-    int? transportEpoch,
-  }) {
-    if (transportEpoch != null && !_transportCurrent(transportEpoch)) {
-      return;
-    }
-    if (effectivePlaylistId != null) {
-      final idx = resolvedQueue.indexWhere((c) => c.id == clip.id);
-      _playlistClipIndex = idx < 0 ? 0 : idx;
-    } else {
-      _libraryIndex = _libraryQueue.indexWhere((c) => c.id == clip.id);
-      if (_libraryIndex < 0) _libraryIndex = 0;
-    }
+  /// Confirms playing UI after a skip bind. Index/title were already set on tap.
+  void _confirmSkipPlaying(AudioClip clip) {
+    _optimisticSkipClip = null;
     _emit(_snapshot.copyWith(
       state: AppPlaybackState.manualPlaying,
-      playlistId: effectivePlaylistId ?? _snapshot.playlistId,
-      playlistName: effectivePlaylistId != null
-          ? (_snapshot.playlistName ?? clip.title)
-          : clip.title,
       clipTitle: clip.title,
       isPlaying: true,
       durationMs: clip.durationMs,
       modalVisible: false,
     ));
-    _optimisticSkipClip = null;
-    _optimisticSkipTargetPath = null;
-    _preSkipSnapshot = null;
   }
 
-  /// Restores the pre-skip snapshot only when [transportEpoch] still owns
-  /// transport. A superseded skip must never paint over a newer next/prev.
-  void _revertOptimisticSkipTitle({int? transportEpoch}) {
-    if (transportEpoch != null && !_transportCurrent(transportEpoch)) {
-      return;
+  /// Path for the clip the queue index currently points at (manual sessions).
+  String? _queueCommittedPath() {
+    if (_snapshot.playlistId != null) {
+      if (_playlistClipCache.isEmpty) return null;
+      final i = (_playlistClipIndex ?? 0).clamp(0, _playlistClipCache.length - 1);
+      return _playlistClipCache[i].filePath;
     }
-    final previous = _preSkipSnapshot;
-    _preSkipSnapshot = null;
-    _optimisticSkipIndex = null;
-    _optimisticSkipClip = null;
-    _optimisticSkipTargetPath = null;
-    if (previous == null) return;
-    _emit(previous.copyWith(
-      isPlaying: _audio.isPlaying,
-      modalVisible: false,
-    ));
+    if (_libraryQueue.isEmpty) return null;
+    final i = (_libraryIndex < 0 ? 0 : _libraryIndex)
+        .clamp(0, _libraryQueue.length - 1);
+    return _libraryQueue[i].filePath;
   }
 
   /// True when the user is in any clip-playing context.
@@ -2871,60 +2695,40 @@ class PlaybackCoordinator {
       }
 
       try {
-        // Library clip preview does not require the master toggle.
-        if (_snapshot.playlistId == null) {
-          // Prefer the bound MediaItem path so resume cannot rebind an older
-          // currentPath after a skip (QA Round 59: pause/resume changed clip).
-          final path = _audio.boundPath ?? _audio.currentPath;
-          if (path == null) {
-            _emit(previous);
-            return;
-          }
-          if (_audio.currentPath != path) {
-            _audio.restoreCurrentPath(path);
-          }
-          final ps = _audio.player.processingState;
-          final needsRebind =
-              ps == ProcessingState.completed || ps == ProcessingState.idle;
-          if (needsRebind) {
-            await _audio.playFile(
-              path,
-              title: _snapshot.clipTitle ?? '',
-              subtitle: RuntimeCopy.l10n.libraryPreview,
-            );
-          } else {
-            await _audio.resume();
-          }
-          return;
-        }
-
-        // Fast path: already in a play session (paused mid-clip). Resume
-        // ExoPlayer without re-running sleep/prayer GPS lookups — that was
-        // multi-hundred-ms lag on every pause→play tap.
-        if (_snapshot.state == AppPlaybackState.manualPlaying ||
-            _snapshot.state == AppPlaybackState.scheduledPlaying) {
-          final path = _audio.boundPath ?? _audio.currentPath;
-          final ps = _audio.player.processingState;
-          if (path != null &&
-              (ps == ProcessingState.idle || ps == ProcessingState.completed)) {
-            await _audio.playFile(
-              path,
-              title: _snapshot.clipTitle ?? '',
-              playlistName: _snapshot.playlistName,
-              subtitle: RuntimeCopy.l10n.nowPlaying,
-              playlistMode: true,
-            );
-          } else {
-            await _audio.resume();
-          }
-          return;
-        }
-
-        if (!await _canPlay()) {
+        // Round 67: resume the clip the queue index points at — never a
+        // stale ExoPlayer path from a cancelled mid-skip bind (that made
+        // pause/resume change the audible clip).
+        final queuePath = _queueCommittedPath();
+        final path = queuePath ?? _audio.boundPath ?? _audio.currentPath;
+        if (path == null) {
           _emit(previous);
           return;
         }
-        await _audio.resume();
+        if (queuePath != null && _audio.currentPath != queuePath) {
+          _audio.restoreCurrentPath(queuePath);
+        }
+        final ps = _audio.player.processingState;
+        final needsRebind = ps == ProcessingState.completed ||
+            ps == ProcessingState.idle ||
+            (queuePath != null &&
+                _audio.boundPath != null &&
+                _audio.boundPath != queuePath);
+        if (needsRebind) {
+          await _audio.playFile(
+            path,
+            title: _snapshot.clipTitle ?? '',
+            playlistName: _snapshot.playlistId != null
+                ? _snapshot.playlistName
+                : null,
+            subtitle: _snapshot.playlistId != null
+                ? RuntimeCopy.l10n.nowPlaying
+                : RuntimeCopy.l10n.libraryPreview,
+            playlistMode: _snapshot.playlistId != null ||
+                _libraryQueue.length > 1,
+          );
+        } else {
+          await _audio.resume();
+        }
       } catch (e, st) {
         if (kDebugMode) {
           debugPrint('resume: failed, rolling back snapshot: $e\n$st');
