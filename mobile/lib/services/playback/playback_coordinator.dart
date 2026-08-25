@@ -2309,6 +2309,8 @@ class PlaybackCoordinator {
           return;
         }
         // If ExoPlayer already owns this path, confirm playing UI.
+        // Round 61: never tear down a live MediaSession just because the
+        // playing flag lagged.
         if (_audio.boundPath == clip.filePath ||
             _audio.mediaItem?.id == clip.filePath) {
           _audio.restoreCurrentPath(clip.filePath);
