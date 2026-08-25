@@ -55,7 +55,7 @@ void main() {
 
     test('build id stamped R71', () {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
-      expect(coord, contains("transportBuildId = 'R72-exo-bind-truth'"));
+      expect(coord, contains("transportBuildId = 'R73-pause-then-skip'"));
     });
 
     test('Dart ownership and immediate pause still hold', () {

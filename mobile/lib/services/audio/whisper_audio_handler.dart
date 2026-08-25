@@ -1331,15 +1331,16 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> pause() async {
     if (!_playingClip) return;
 
-    // Round 70: only ignore OEM pause ECHO while a source swap is actively
-    // in flight. A sticky suppress flag alone used to swallow real
-    // notification pause taps after next/prev (QA: pause does nothing).
-    if (_sourceSwapInFlight &&
-        suppressMediaSessionPauseEcho &&
-        _appTransportDepth == 0) {
+    // Round 73: NEVER ignore pause while audio is actually playing — that
+    // swallowed notification shade taps after next/prev (QA: pause does
+    // nothing). Only ignore a silent OEM stop()-echo mid source swap.
+    if (_appTransportDepth == 0 &&
+        _sourceSwapInFlight &&
+        !_player.playing &&
+        suppressMediaSessionPauseEcho) {
       if (kDebugMode) {
         debugPrint(
-            'handler.pause: ignored MediaSession echo during source swap');
+            'handler.pause: ignored silent MediaSession echo during source swap');
       }
       return;
     }

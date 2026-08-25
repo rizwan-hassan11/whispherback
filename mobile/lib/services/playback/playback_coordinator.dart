@@ -68,7 +68,7 @@ class PlaybackCoordinator {
 
   /// Bump when shipping a manual playback transport fix. Shown in Settings
   /// so QA can confirm the installed APK contains this logic (not a stale build).
-  static const transportBuildId = 'R72-exo-bind-truth';
+  static const transportBuildId = 'R73-pause-then-skip';
 
   final AppStateRepository _appState;
   final PlaylistRepository _playlists;
@@ -1070,6 +1070,10 @@ class PlaybackCoordinator {
         _audio.invalidateInFlightPlay(forPause: false);
       } catch (_) {}
       ++_transportEpoch;
+      // Stop audible intermediate clip under the newer title.
+      if (!_nativeOwnsPlayback) {
+        unawaited(_audio.pause());
+      }
       return;
     }
 
@@ -1082,11 +1086,35 @@ class PlaybackCoordinator {
     }
   }
 
+  /// Round 73: stop the current clip before binding next/prev.
+  /// QA: next while playing only changed the title; pause-then-next worked.
+  /// Pausing + flushing first matches that working path and clears OEM
+  /// MediaSession races that left the old ExoPlayer source audible.
+  Future<void> _pauseCurrentBeforeSkip() async {
+    if (_nativeOwnsPlayback) return;
+    _audio.suppressMediaSessionPauseEcho = false;
+    try {
+      _audio.invalidateInFlightPlay(forPause: false);
+    } catch (_) {}
+    try {
+      await _audio.pause();
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint('skip: pre-pause failed: $e\n$st');
+      }
+    }
+    try {
+      await _audio.flushCurrentSource();
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint('skip: pre-flush failed: $e\n$st');
+      }
+    }
+  }
+
   /// One next/prev execution: show target immediately, bind audio, keep playing.
   Future<void> _runOneSkip(bool next, {bool alreadyPrimed = false}) async {
     _skipInFlight = true;
-    // Round 70/71: brief echo shield only (handler time-bounds it).
-    _audio.suppressMediaSessionPauseEcho = true;
     try {
       // Instant title/index BEFORE any native stop / cache IO.
       if (!alreadyPrimed) {
@@ -1098,6 +1126,8 @@ class PlaybackCoordinator {
       if (!_nativeOwnsPlayback) {
         // Fire-and-forget native teardown — never block the clip swap.
         unawaited(_claimDartManualSession());
+        // Round 73: pause+flush the audible clip first (user-confirmed path).
+        await _pauseCurrentBeforeSkip();
       }
 
       // Invalidate in-flight completion BEFORE the transport body so stop()
@@ -1105,6 +1135,8 @@ class PlaybackCoordinator {
       _playbackGeneration++;
       _suppressTransientNotPlaying = true;
       _userInitiatedPause = false;
+      // Brief echo shield only while the NEW source binds — not before pause.
+      _audio.suppressMediaSessionPauseEcho = true;
       try {
         await _serializeTransport(
           (epoch) => _skipPlaylistClip(epoch, next: next),
@@ -1207,10 +1239,8 @@ class PlaybackCoordinator {
             modalVisible: false,
           ));
         }
-        // Round 71: do NOT arm a post-skip pause-ignore window. That made
-        // notification pause a 1.2s no-op after every next/prev. Echo
-        // protection is only the handler's short source-swap suppress.
-        _audio.suppressMediaSessionPauseEcho = true;
+        // Round 73: do not re-arm pause-echo suppress after skip — that
+        // made notification pause miss real taps.
       } catch (e, st) {
         if (kDebugMode) {
           debugPrint('skip${next ? 'Next' : 'Previous'} failed: $e\n$st');
@@ -1239,18 +1269,7 @@ class PlaybackCoordinator {
       // failed bind never reported playing — next/prev and pause then
       // looked dead because player-state updates were ignored.
       _suppressTransientNotPlaying = false;
-      if (!_latestTransportPausesPlayback && !_userInitiatedPause) {
-        // Clear echo shield shortly; handler also time-bounds the flag.
-        unawaited(Future<void>.delayed(const Duration(milliseconds: 450), () {
-          if (!_skipInFlight &&
-              !_latestTransportPausesPlayback &&
-              !_userInitiatedPause) {
-            _audio.suppressMediaSessionPauseEcho = false;
-          }
-        }));
-      } else {
-        _audio.suppressMediaSessionPauseEcho = false;
-      }
+      _audio.suppressMediaSessionPauseEcho = false;
     }
   }
 

@@ -18,10 +18,8 @@ void main() {
       final handler = _read('lib/services/audio/whisper_audio_handler.dart');
       expect(handler, contains('_suppressPauseEchoUntil'));
       expect(handler, contains('Duration(milliseconds: 450)'));
-      expect(
-        handler,
-        contains('_sourceSwapInFlight &&'),
-      );
+      expect(handler, contains('_sourceSwapInFlight &&'));
+      expect(handler, contains('!_player.playing'));
       expect(
         handler.contains(
             '(_sourceSwapInFlight || suppressMediaSessionPauseEcho)'),
@@ -59,7 +57,7 @@ void main() {
 
     test('build id stamped R70', () {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
-      expect(coord, contains("transportBuildId = 'R72-exo-bind-truth'"));
+      expect(coord, contains("transportBuildId = 'R73-pause-then-skip'"));
     });
   });
 }

@@ -115,7 +115,7 @@ void main() {
       final end = handler.indexOf('Future<void> seek(', idx);
       final body = handler.substring(idx, end);
       expect(body, contains('_sourceSwapInFlight &&'));
-      expect(body, contains('suppressMediaSessionPauseEcho &&'));
+      expect(body, contains('!_player.playing'));
       expect(body, contains('_appTransportDepth == 0'));
       expect(
         body.contains('(_sourceSwapInFlight || suppressMediaSessionPauseEcho)'),
