@@ -56,15 +56,17 @@ void main() {
       expect(
         abortBody.contains('await _audio.pause()'),
         isTrue,
-        reason: 'Hard abort (pause) must pause without destroying the bind.',
+        reason: 'Hard abort (pause) must still pause ExoPlayer.',
       );
+      // Round 68: hard abort MUST cancelInFlightPlay so a dying next cannot
+      // finish setAudioSource under the pause tap.
       expect(
         abortBody.contains('await _audio.cancelInFlightPlay()'),
-        isFalse,
-        reason: 'Hard abort must not stop() a newly bound skip source.',
+        isTrue,
+        reason: 'Hard abort must kill the in-flight source swap.',
       );
       // Soft branch must not stop — only invalidate.
-      final softIdx = abortBody.indexOf('} else {');
+      final softIdx = abortBody.lastIndexOf('} else {');
       expect(softIdx, greaterThanOrEqualTo(0));
       final softBranch = abortBody.substring(softIdx);
       expect(softBranch, contains('invalidateInFlightPlay(forPause: false)'));

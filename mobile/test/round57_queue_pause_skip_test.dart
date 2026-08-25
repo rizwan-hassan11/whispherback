@@ -77,8 +77,8 @@ void main() {
       expect(abort.contains('_libraryIndex = _preSkipLibraryIndex'), isFalse);
       expect(
           abort.contains('_playlistClipIndex = _preSkipPlaylistIndex'), isFalse);
-      expect(abort.contains('_revertOptimisticSkipTitle'), isFalse);
-      expect(abort, contains('Never touch queue index or title'));
+      expect(abort, contains('_reconcileSessionToBoundPath'));
+      expect(abort, contains('cancelInFlightPlay'));
 
       final pauseIdx = src.indexOf('Future<void> pause()');
       final pauseBody = src.substring(pauseIdx, pauseIdx + 700);

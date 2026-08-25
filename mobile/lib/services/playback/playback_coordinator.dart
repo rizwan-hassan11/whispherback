@@ -199,17 +199,30 @@ class PlaybackCoordinator {
   ///
   /// [revertOptimisticSkip] means hard abort (pause/dismiss) vs soft abort
   /// (newer skip/play preempting a prior load):
-  /// - Hard: pause native / ExoPlayer. Never touch queue index or title —
-  ///   those were committed on the next/prev tap (Round 67).
+  /// - Hard: kill the in-flight source swap, snap queue/title back to the
+  ///   clip ExoPlayer actually holds, then pause. Round 68: commit-on-tap
+  ///   left index on B while pause still finished binding B — that is the
+  ///   "pause changes the clip" QA failure.
   /// - Soft: invalidate Dart playFile generation only — never pauseNative.
   Future<void> _abortInFlightTransport(
       {required bool revertOptimisticSkip}) async {
     if (revertOptimisticSkip) {
-      // Never touch queue index or title — they were committed on next/prev.
-      // Pause/dismiss only cancels the unfinished load.
+      // Capture the audible clip BEFORE invalidating — a dying setAudioSource
+      // must not redefine what "current" means for the snap-back below.
+      final boundBefore = _audio.boundPath ?? _audio.currentPath;
       _optimisticSkipClip = null;
       _ignoreSessionPauseUntil = null;
       _audio.suppressMediaSessionPauseEcho = false;
+      _pendingSkipNext = null;
+      try {
+        _audio.invalidateInFlightPlay(forPause: true);
+      } catch (_) {}
+      // Stop any mid-flight setAudioSource so pause cannot finish loading the
+      // next clip under the user's finger.
+      try {
+        await _audio.cancelInFlightPlay();
+      } catch (_) {}
+      _reconcileSessionToBoundPath(boundBefore, paused: true);
     }
     final nativeActive = _nativeOwnsPlayback;
     if (nativeActive) {
@@ -221,12 +234,6 @@ class PlaybackCoordinator {
       return;
     }
     if (revertOptimisticSkip) {
-      // Invalidate the load, then PAUSE — do not stop()/cancelInFlightPlay.
-      // Round 62: forPause so a dying playFile cannot leave the next clip
-      // playing after the user asked to pause.
-      try {
-        _audio.invalidateInFlightPlay(forPause: true);
-      } catch (_) {}
       try {
         await _audio.pause();
       } catch (_) {}
@@ -234,6 +241,60 @@ class PlaybackCoordinator {
       try {
         _audio.invalidateInFlightPlay(forPause: false);
       } catch (_) {}
+    }
+  }
+
+  /// After pause kills an in-flight next/prev, make queue index + title match
+  /// the clip that was actually bound (or still bound) so resume cannot jump.
+  void _reconcileSessionToBoundPath(String? boundPath, {required bool paused}) {
+    if (_nativeOwnsPlayback) {
+      if (paused && _snapshot.isPlaying) {
+        _emit(_snapshot.copyWith(isPlaying: false));
+      }
+      return;
+    }
+    final path = boundPath ?? _audio.boundPath ?? _audio.currentPath;
+    if (path == null) {
+      if (paused && _snapshot.isPlaying) {
+        _emit(_snapshot.copyWith(isPlaying: false));
+      }
+      return;
+    }
+    _audio.restoreCurrentPath(path);
+
+    if (_snapshot.playlistId != null && _playlistClipCache.isNotEmpty) {
+      final idx = _playlistClipCache.indexWhere((c) => c.filePath == path);
+      if (idx >= 0) {
+        _playlistClipIndex = idx;
+        final clip = _playlistClipCache[idx];
+        _emit(_snapshot.copyWith(
+          state: AppPlaybackState.manualPlaying,
+          clipTitle: clip.title,
+          durationMs: clip.durationMs,
+          isPlaying: paused ? false : _audio.isPlaying,
+          modalVisible: false,
+        ));
+        return;
+      }
+    }
+    if (_libraryQueue.isNotEmpty) {
+      final idx = _libraryQueue.indexWhere((c) => c.filePath == path);
+      if (idx >= 0) {
+        _libraryIndex = idx;
+        final clip = _libraryQueue[idx];
+        _emit(_snapshot.copyWith(
+          state: AppPlaybackState.manualPlaying,
+          clipTitle: clip.title,
+          playlistName: clip.title,
+          durationMs: clip.durationMs,
+          isPlaying: paused ? false : _audio.isPlaying,
+          modalVisible: false,
+        ));
+        return;
+      }
+    }
+    if (paused && _snapshot.isPlaying) {
+      _emit(_snapshot.copyWith(isPlaying: false));
     }
   }
 

@@ -687,6 +687,12 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     _startWatchdog?.cancel();
     _startWatchdog = null;
     try {
+      // Round 68: if pause already invalidated this load, do NOT flush or
+      // swap sources — that made pause audibly change the clip mid-next.
+      if (playGen != _playFileGeneration) {
+        await _pauseIfInvalidatedForPause(playGen);
+        return;
+      }
       await _flushPlayerSource();
       if (playGen != _playFileGeneration) {
         await _pauseIfInvalidatedForPause(playGen);
@@ -700,6 +706,10 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
       await _player.setVolume(1);
       await _player.setSpeed(1);
       await _player.setLoopMode(LoopMode.off);
+      if (playGen != _playFileGeneration) {
+        await _pauseIfInvalidatedForPause(playGen);
+        return;
+      }
       // CRITICAL: cap setAudioSource. The just_audio future can hang
       // indefinitely if the underlying ExoPlayer / native MediaPlayer
       // gets into a stuck state (observed on Samsung One UI after rapid
@@ -721,6 +731,10 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
         try {
           await _player.stop();
         } catch (_) {}
+        if (playGen != _playFileGeneration) {
+          await _pauseIfInvalidatedForPause(playGen);
+          return;
+        }
         try {
           await _player
               .setAudioSource(_clipFileSource(path), preload: true)

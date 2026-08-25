@@ -36,13 +36,13 @@ void main() {
       expect(
           body.contains('_playlistClipIndex = _preSkipPlaylistIndex'), isFalse);
       expect(body.contains('_revertOptimisticSkipTitle'), isFalse);
-      expect(body, contains('Never touch queue index or title'));
+      expect(body, contains('_reconcileSessionToBoundPath'));
       expect(body, contains('invalidateInFlightPlay(forPause: true)'));
+      expect(body, contains('await _audio.cancelInFlightPlay()'));
       expect(body, contains('await _audio.pause()'));
       expect(
-        body.contains('cancelInFlightPlay()'),
+        body.contains('Hard abort must pause, not stop the newly bound source.'),
         isFalse,
-        reason: 'Hard abort must pause, not stop the newly bound source.',
       );
     });
 
