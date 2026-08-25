@@ -55,7 +55,7 @@ void main() {
 
     test('build id stamped R71', () {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
-      expect(coord, contains("transportBuildId = 'R74-notif-pause-sticks'"));
+      expect(coord, contains("transportBuildId = 'R75-spotify-notif'"));
     });
 
     test('Dart ownership and immediate pause still hold', () {

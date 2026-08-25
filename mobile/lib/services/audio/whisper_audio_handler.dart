@@ -164,6 +164,14 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   /// PAUSE on the notification shade — that auto-resumed the clip.
   DateTime? _suppressPlayEchoUntil;
 
+  /// Round 75: sticky user-pause latch. While set, MediaSession must stay
+  /// paused (no loading→playing upgrade, no OEM play echo). Cleared only
+  /// by an intentional resume / new playFile.
+  bool _userPausedClip = false;
+
+  /// Shade card was swiped away while paused. Next play/resume republishes.
+  bool _notificationDismissed = false;
+
   set suppressMediaSessionPauseEcho(bool value) {
     if (value) {
       _suppressPauseEchoUntil =
@@ -182,12 +190,19 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
       DateTime.now().isBefore(_suppressPlayEchoUntil!);
 
   void _armPlayEchoSuppress() {
+    // 2s covers slow OEM MediaSession play echoes after pause.
     _suppressPlayEchoUntil =
-        DateTime.now().add(const Duration(milliseconds: 800));
+        DateTime.now().add(const Duration(milliseconds: 2000));
   }
 
   void clearPlayEchoSuppress() {
     _suppressPlayEchoUntil = null;
+  }
+
+  void _clearUserPauseLatch() {
+    _userPausedClip = false;
+    _notificationDismissed = false;
+    clearPlayEchoSuppress();
   }
 
   /// Runs [action] without firing coordinator transport callbacks.
@@ -737,6 +752,7 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     _clipTitle = title;
     if (!_keepAlive) _standalonePlayback = true;
     _sourceSwapInFlight = true;
+    _clearUserPauseLatch();
 
     // Round 53 (BUG-001): do NOT publish MediaItem until the new file is
     // bound. Publishing first made next/prev show the new title while
@@ -1257,10 +1273,12 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> play() async {
     if (!_playingClip) return;
 
-    // Round 74: OEM MediaSession often echoes PLAY right after the user
-    // taps PAUSE on the shade — that auto-resumed the clip. Ignore those
-    // echoes; in-app resume uses depth > 0 and is never blocked.
-    if (_appTransportDepth == 0 && _suppressPlayEchoActive) {
+    // Round 74/75: OEM MediaSession often echoes PLAY right after PAUSE.
+    // While the user-pause latch is set, ignore depth-0 play during the
+    // echo window and keep the shade on the paused icon.
+    if (_appTransportDepth == 0 &&
+        _userPausedClip &&
+        _suppressPlayEchoActive) {
       if (kDebugMode) {
         debugPrint(
             'handler.play: ignored MediaSession play echo after pause');
@@ -1271,7 +1289,8 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
       );
       return;
     }
-    clearPlayEchoSuppress();
+    _clearUserPauseLatch();
+    await _ensureMediaNotificationVisible();
 
     // Round 45: mid-clip resume — skip AudioSession churn. setActive +
     // _ensureAudioSession on every pause→play added hundreds of ms and
@@ -1282,11 +1301,6 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
         (ps == ProcessingState.completed);
 
     if (!quickResume) {
-      // Round 15: each of these calls is independently try/caught so a
-      // single failure (e.g. audio focus revoked because we're rapidly
-      // toggling) cannot block the player.play() below or surface as
-      // an uncaught exception that crashes the activity. See the
-      // matching comment in `pause()` for the full failure mode.
       try {
         await _ensureAudioSession();
       } catch (e, st) {
@@ -1321,7 +1335,6 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
 
     try {
       await _player.play();
-      // Only MediaSession / external play should ping the coordinator.
       if (_appTransportDepth == 0) {
         try {
           onPlayRequested?.call();
@@ -1335,12 +1348,6 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
         playing: false,
         processing: _player.processingState,
       );
-      // Round 15: do NOT rethrow. The coordinator's `resume()` already
-      // optimistically flipped the UI to "playing"; if we throw here
-      // the `_safeCall` wrapper swallows the error but the UI is now
-      // stuck on "playing" while the player is actually paused. By
-      // returning normally, the next `playerStateStream` event drives
-      // the UI back to its true state.
     }
   }
 
@@ -1399,8 +1406,9 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     // reflect paused, not a stuck "loading/playing" notification.
     _sourceSwapInFlight = false;
     _suppressPauseEchoUntil = null;
+    _userPausedClip = true;
     // Block the immediate MediaSession PLAY echo that follows PAUSE on
-    // many OEMs (QA Round 74: notification pause auto-resumes).
+    // many OEMs (QA Round 74/75: notification pause auto-resumes).
     _armPlayEchoSuppress();
 
     _publishClipControls(
@@ -1510,7 +1518,23 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
         NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
       return;
     }
-    if (_keepAlive && !_playingClip) {
+    // Round 75: keep the clip MediaSession alive when the user swipes the
+    // app away — otherwise shade controls die and the card vanishes.
+    if (_playingClip) {
+      try {
+        await _ensureMediaNotificationVisible();
+        _publishClipControls(
+          playing: _player.playing && !_userPausedClip,
+          processing: _player.processingState,
+        );
+      } catch (e, st) {
+        if (kDebugMode) {
+          debugPrint('onTaskRemoved: clip session refresh failed: $e\n$st');
+        }
+      }
+      return;
+    }
+    if (_keepAlive) {
       try {
         playbackState.add(
           playbackState.value.copyWith(
@@ -1529,22 +1553,39 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     }
   }
 
-  /// Called when the user swipes the WhisperBack media notification away.
-  /// The base implementation calls `stop()` — but for our keep-alive
-  /// architecture that would prematurely tear down the silence loop and
-  /// let the OS reap the FG service.
-  ///
-  /// Branch on Active:
-  ///   - Active ON: rebuild the silence loop and republish a `playing:
-  ///     true` state so the lock-screen card and the FG binding both
-  ///     come back. The user's intent was almost certainly "remove that
-  ///     notification card", not "stop scheduling".
-  ///   - Active OFF: honor the swipe — call super.onNotificationDeleted
-  ///     so the service tears down cleanly.
+  /// Spotify-like shade dismiss:
+  /// - While playing: refuse — republish the media card.
+  /// - While paused: allow hide; next play/resume brings it back.
   @override
   Future<void> onNotificationDeleted() async {
     if (_silenceSuspendedForExternal ||
         NativeAlarmsBridge.instance.lastSnapshot.isNativeActive) {
+      return;
+    }
+    if (_playingClip) {
+      final playing = _player.playing && !_userPausedClip;
+      if (playing) {
+        try {
+          await _ensureMediaNotificationVisible();
+          _publishClipControls(
+            playing: true,
+            processing: _player.processingState,
+          );
+        } catch (_) {}
+        return;
+      }
+      // Paused: allow dismiss — keep ExoPlayer session for in-app resume.
+      _notificationDismissed = true;
+      try {
+        mediaItem.add(null);
+        playbackState.add(
+          playbackState.value.copyWith(
+            controls: const [],
+            processingState: AudioProcessingState.ready,
+            playing: false,
+          ),
+        );
+      } catch (_) {}
       return;
     }
     if (_keepAlive) {
@@ -1559,6 +1600,22 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
       return;
     }
     await super.onNotificationDeleted();
+  }
+
+  /// Re-publish MediaItem after a paused dismiss so the shade card returns.
+  Future<void> _ensureMediaNotificationVisible() async {
+    if (!_playingClip) return;
+    _notificationDismissed = false;
+    final current = mediaItem.value;
+    if (current != null) return;
+    final path = _exoBoundPath;
+    if (path == null || path.isEmpty) return;
+    final item = _clipMediaItem(
+      path: path,
+      title: _clipTitle ?? 'WhisperBack',
+    );
+    mediaItem.add(item);
+    queue.add([item]);
   }
 
   @override
@@ -1609,6 +1666,15 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   /// Broadcasts state to the system notification + lock screen (official pattern).
   void _broadcastState(PlaybackEvent event) {
     if (!_playingClip) return;
+    // Round 75: user pause wins over every transient player event.
+    if (_userPausedClip) {
+      _sourceSwapInFlight = false;
+      _publishClipControls(
+        playing: false,
+        processing: _player.processingState,
+      );
+      return;
+    }
     // Round 48/49: during source swap keep notification on "playing" until
     // ExoPlayer actually reports playing — then clear the latch.
     if (_sourceSwapInFlight) {
@@ -1642,10 +1708,15 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     required bool playing,
     required ProcessingState processing,
   }) {
+    if (_notificationDismissed && !playing && _userPausedClip) {
+      // Shade was swiped away while paused — stay hidden until play.
+      return;
+    }
     final loading = processing == ProcessingState.loading ||
         processing == ProcessingState.buffering;
     final completed = processing == ProcessingState.completed;
-    final reportPlaying = !completed && (playing || loading);
+    final reportPlaying =
+        !completed && !_userPausedClip && (playing || loading);
 
     // CRITICAL: the controls array must keep the SAME positions for the
     // same logical buttons across loading / playing / completed states.
@@ -1701,7 +1772,7 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
         androidCompactActionIndices: compactIndices,
         processingState: completed
             ? AudioProcessingState.completed
-            : (loading
+            : (loading && reportPlaying
                 ? AudioProcessingState.loading
                 : _mapProcessingState(processing)),
         playing: reportPlaying,
