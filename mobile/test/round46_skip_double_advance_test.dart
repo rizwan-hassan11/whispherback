@@ -58,12 +58,11 @@ void main() {
         isTrue,
         reason: 'Hard abort (pause) must still pause ExoPlayer.',
       );
-      // Round 68: hard abort MUST cancelInFlightPlay so a dying next cannot
-      // finish setAudioSource under the pause tap.
+      // Round 69: hard abort must NOT cancelInFlightPlay (that stop()d every pause).
       expect(
         abortBody.contains('await _audio.cancelInFlightPlay()'),
-        isTrue,
-        reason: 'Hard abort must kill the in-flight source swap.',
+        isFalse,
+        reason: 'Hard abort must not stop() the bound clip on pause.',
       );
       // Soft branch must not stop — only invalidate.
       final softIdx = abortBody.lastIndexOf('} else {');

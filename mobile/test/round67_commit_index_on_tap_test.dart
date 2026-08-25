@@ -35,8 +35,8 @@ void main() {
       expect(body.contains('_revertOptimisticSkipTitle'), isFalse);
       expect(body.contains('_preSkipSnapshot'), isFalse);
       expect(body.contains('_libraryIndex = _preSkipLibraryIndex'), isFalse);
-      expect(body, contains('_reconcileSessionToBoundPath'));
-      expect(body, contains('await _audio.cancelInFlightPlay()'));
+      expect(body.contains('cancelInFlightPlay'), isFalse);
+      expect(body, contains('invalidateInFlightPlay(forPause: true)'));
       expect(body, contains('await _audio.pause()'));
     });
 

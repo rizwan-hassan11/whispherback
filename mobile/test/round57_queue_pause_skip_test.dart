@@ -77,15 +77,17 @@ void main() {
       expect(abort.contains('_libraryIndex = _preSkipLibraryIndex'), isFalse);
       expect(
           abort.contains('_playlistClipIndex = _preSkipPlaylistIndex'), isFalse);
-      expect(abort, contains('_reconcileSessionToBoundPath'));
-      expect(abort, contains('cancelInFlightPlay'));
+      expect(abort.contains('cancelInFlightPlay'), isFalse);
+      expect(abort, contains('invalidateInFlightPlay(forPause: true)'));
 
       final pauseIdx = src.indexOf('Future<void> pause()');
-      final pauseBody = src.substring(pauseIdx, pauseIdx + 700);
+      final pauseEnd = src.indexOf('Future<void> dismissPlayer()', pauseIdx);
+      final pauseBody = src.substring(pauseIdx, pauseEnd);
       expect(
         pauseBody.indexOf('_userInitiatedPause = true'),
         lessThan(pauseBody.indexOf('_serializeTransport')),
       );
+      expect(pauseBody, contains('preempt: native'));
     });
 
     test('notification pause arms user-pause sentinel before transport', () {

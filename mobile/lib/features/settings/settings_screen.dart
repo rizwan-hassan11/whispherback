@@ -12,6 +12,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/widgets/premium_screen_background.dart';
 import '../../l10n/app_localizations.dart';
 import '../../providers/settings_provider.dart';
+import '../../services/playback/playback_coordinator.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -167,7 +168,8 @@ class SettingsScreen extends ConsumerWidget {
               const SizedBox(height: 24),
               Center(
                 child: Text(
-                  l10n.versionFooter,
+                  '${l10n.versionFooter}\n${PlaybackCoordinator.transportBuildId}',
+                  textAlign: TextAlign.center,
                   style: TextStyle(
                       fontSize: 11, color: theme.muted.withValues(alpha: 0.85)),
                 ),

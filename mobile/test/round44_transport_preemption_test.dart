@@ -41,8 +41,10 @@ void main() {
       final pauseEnd =
           coord.indexOf('\n  /// Pauses the current clip', pauseIdx);
       final pauseBody = coord.substring(pauseIdx, pauseEnd);
-      expect(pauseBody, contains('preempt: true'));
-      expect(pauseBody, contains('revertOptimisticSkip: true'));
+      // Round 69: manual pause serializes (preempt: native only).
+      expect(pauseBody, contains('preempt: native'));
+      expect(pauseBody, contains('revertOptimisticSkip: native'));
+      expect(coord, contains('revertOptimisticSkip: true'));
     });
 
     test('playFile fast swap + neighbor cache warm', () {

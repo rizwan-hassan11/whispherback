@@ -20,7 +20,8 @@ void main() {
       expect(idx, greaterThanOrEqualTo(0));
       final body = coord.substring(idx, idx + 1200);
       expect(body.contains('_revertOptimisticSkipTitle'), isFalse);
-      expect(body, contains('_reconcileSessionToBoundPath'));
+      expect(body.contains('cancelInFlightPlay'), isFalse);
+      expect(body, contains('invalidateInFlightPlay(forPause: true)'));
     });
 
     test('prime commits index instead of capturing preSkipSnapshot', () {

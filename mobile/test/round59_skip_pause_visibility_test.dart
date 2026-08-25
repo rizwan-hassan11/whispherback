@@ -36,14 +36,9 @@ void main() {
       expect(
           body.contains('_playlistClipIndex = _preSkipPlaylistIndex'), isFalse);
       expect(body.contains('_revertOptimisticSkipTitle'), isFalse);
-      expect(body, contains('_reconcileSessionToBoundPath'));
+      expect(body.contains('cancelInFlightPlay'), isFalse);
       expect(body, contains('invalidateInFlightPlay(forPause: true)'));
-      expect(body, contains('await _audio.cancelInFlightPlay()'));
       expect(body, contains('await _audio.pause()'));
-      expect(
-        body.contains('Hard abort must pause, not stop the newly bound source.'),
-        isFalse,
-      );
     });
 
     test('prime emits target title but does not advance queue indices', () {

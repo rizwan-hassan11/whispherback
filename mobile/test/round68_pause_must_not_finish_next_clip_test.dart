@@ -1,9 +1,5 @@
-// Round 68 — pause during next/prev was still changing the audible clip.
-// Commit-on-tap put index/title on B while a dying playFile finished
-// setAudioSource(B) under the pause finger. Fix: on hard pause, capture the
-// bound path, cancelInFlightPlay to kill the swap, snap queue+title back to
-// that bound clip, then pause. Handler also refuses flush/setAudioSource
-// after a pause invalidate.
+// Round 68 (superseded by Round 69) — cancelInFlightPlay on every pause made
+// controls worse. Round 69 serializes manual pause instead.
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -18,28 +14,22 @@ String _read(String relPath) {
 
 void main() {
   group('Round 68 — pause must not finish the next clip', () {
-    test('hard abort cancels in-flight swap and reconciles to bound path', () {
+    test('hard abort no longer cancelInFlightPlay (Round 69)', () {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
       final idx = coord.indexOf('Future<void> _abortInFlightTransport(');
       final end = coord.indexOf('Future<T> _serializeTransport', idx);
       final body = coord.substring(idx, end);
-      expect(body, contains('boundBefore'));
-      expect(body, contains('await _audio.cancelInFlightPlay()'));
-      expect(body, contains('_reconcileSessionToBoundPath'));
+      expect(body.contains('cancelInFlightPlay'), isFalse);
       expect(body, contains('invalidateInFlightPlay(forPause: true)'));
     });
 
-    test('reconcile sets library/playlist index from bound path', () {
+    test('manual pause serializes (Round 69)', () {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
-      expect(coord, contains('void _reconcileSessionToBoundPath('));
-      final idx = coord.indexOf('void _reconcileSessionToBoundPath(');
-      final body = coord.substring(idx, idx + 1200);
-      expect(body, contains('_libraryIndex = idx'));
-      expect(body, contains('_playlistClipIndex = idx'));
-      expect(body, contains('filePath == path'));
+      expect(coord, contains('preempt: native'));
+      expect(coord, contains('R69-serial-manual-pause'));
     });
 
-    test('playFileBound refuses flush/swap after pause invalidate', () {
+    test('playFileBound still checks generation before flush', () {
       final handler = _read('lib/services/audio/whisper_audio_handler.dart');
       final idx = handler.indexOf('Future<void> _playFileBound(');
       final end = handler.indexOf('await _flushPlayerSource();', idx);
@@ -47,7 +37,6 @@ void main() {
       expect(
         beforeFlush.contains('playGen != _playFileGeneration'),
         isTrue,
-        reason: 'Must check generation before flushing the current clip.',
       );
     });
   });

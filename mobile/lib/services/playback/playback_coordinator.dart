@@ -66,6 +66,10 @@ class PlaybackCoordinator {
         _audio = playbackService,
         _schedules = scheduleRepository;
 
+  /// Bump when shipping a manual playback transport fix. Shown in Settings
+  /// so QA can confirm the installed APK contains this logic (not a stale build).
+  static const transportBuildId = 'R69-serial-manual-pause';
+
   final AppStateRepository _appState;
   final PlaylistRepository _playlists;
   final SleepRepository _sleep;
@@ -197,32 +201,20 @@ class PlaybackCoordinator {
 
   /// Stops an in-flight skip / playFile without tearing down the media session.
   ///
-  /// [revertOptimisticSkip] means hard abort (pause/dismiss) vs soft abort
-  /// (newer skip/play preempting a prior load):
-  /// - Hard: kill the in-flight source swap, snap queue/title back to the
-  ///   clip ExoPlayer actually holds, then pause. Round 68: commit-on-tap
-  ///   left index on B while pause still finished binding B — that is the
-  ///   "pause changes the clip" QA failure.
-  /// - Soft: invalidate Dart playFile generation only — never pauseNative.
+  /// [revertOptimisticSkip] means hard abort (dismiss / native) vs soft abort
+  /// (newer skip preempting a prior load):
+  /// - Hard: invalidate + pause. Do NOT cancelInFlightPlay/stop — that made
+  ///   every pause destroy the bound clip (QA: pause/resume changes track).
+  /// - Soft: invalidate Dart playFile generation only.
+  /// Round 69: manual in-app pause no longer hard-preempts; it waits in line
+  /// behind an in-flight skip, then pauses whatever clip that skip settled on.
   Future<void> _abortInFlightTransport(
       {required bool revertOptimisticSkip}) async {
     if (revertOptimisticSkip) {
-      // Capture the audible clip BEFORE invalidating — a dying setAudioSource
-      // must not redefine what "current" means for the snap-back below.
-      final boundBefore = _audio.boundPath ?? _audio.currentPath;
       _optimisticSkipClip = null;
       _ignoreSessionPauseUntil = null;
       _audio.suppressMediaSessionPauseEcho = false;
       _pendingSkipNext = null;
-      try {
-        _audio.invalidateInFlightPlay(forPause: true);
-      } catch (_) {}
-      // Stop any mid-flight setAudioSource so pause cannot finish loading the
-      // next clip under the user's finger.
-      try {
-        await _audio.cancelInFlightPlay();
-      } catch (_) {}
-      _reconcileSessionToBoundPath(boundBefore, paused: true);
     }
     final nativeActive = _nativeOwnsPlayback;
     if (nativeActive) {
@@ -235,66 +227,15 @@ class PlaybackCoordinator {
     }
     if (revertOptimisticSkip) {
       try {
+        _audio.invalidateInFlightPlay(forPause: true);
+      } catch (_) {}
+      try {
         await _audio.pause();
       } catch (_) {}
     } else {
       try {
         _audio.invalidateInFlightPlay(forPause: false);
       } catch (_) {}
-    }
-  }
-
-  /// After pause kills an in-flight next/prev, make queue index + title match
-  /// the clip that was actually bound (or still bound) so resume cannot jump.
-  void _reconcileSessionToBoundPath(String? boundPath, {required bool paused}) {
-    if (_nativeOwnsPlayback) {
-      if (paused && _snapshot.isPlaying) {
-        _emit(_snapshot.copyWith(isPlaying: false));
-      }
-      return;
-    }
-    final path = boundPath ?? _audio.boundPath ?? _audio.currentPath;
-    if (path == null) {
-      if (paused && _snapshot.isPlaying) {
-        _emit(_snapshot.copyWith(isPlaying: false));
-      }
-      return;
-    }
-    _audio.restoreCurrentPath(path);
-
-    if (_snapshot.playlistId != null && _playlistClipCache.isNotEmpty) {
-      final idx = _playlistClipCache.indexWhere((c) => c.filePath == path);
-      if (idx >= 0) {
-        _playlistClipIndex = idx;
-        final clip = _playlistClipCache[idx];
-        _emit(_snapshot.copyWith(
-          state: AppPlaybackState.manualPlaying,
-          clipTitle: clip.title,
-          durationMs: clip.durationMs,
-          isPlaying: paused ? false : _audio.isPlaying,
-          modalVisible: false,
-        ));
-        return;
-      }
-    }
-    if (_libraryQueue.isNotEmpty) {
-      final idx = _libraryQueue.indexWhere((c) => c.filePath == path);
-      if (idx >= 0) {
-        _libraryIndex = idx;
-        final clip = _libraryQueue[idx];
-        _emit(_snapshot.copyWith(
-          state: AppPlaybackState.manualPlaying,
-          clipTitle: clip.title,
-          playlistName: clip.title,
-          durationMs: clip.durationMs,
-          isPlaying: paused ? false : _audio.isPlaying,
-          modalVisible: false,
-        ));
-        return;
-      }
-    }
-    if (paused && _snapshot.isPlaying) {
-      _emit(_snapshot.copyWith(isPlaying: false));
     }
   }
 
@@ -448,6 +389,10 @@ class PlaybackCoordinator {
   }
 
   Future<void> initialize() async {
+    if (kDebugMode) {
+      debugPrint(
+          'PlaybackCoordinator transport build: $transportBuildId');
+    }
     final active = await _appState.isActive();
     ActiveModeBinding.instance.attach(_deactivateFromNotification);
     _audio.onStopRequested = () => unawaited(_deactivateFromNotification());
@@ -971,9 +916,12 @@ class PlaybackCoordinator {
             }
           }
         }
+        // Manual: ExoPlayer was already paused by the handler. Do nothing
+        // else — Round 69 serial pause must not abort an in-flight skip.
       },
-      preempt: true,
-      revertOptimisticSkip: true,
+      // Round 69: never hard-preempt a manual skip from notification pause.
+      preempt: _nativeOwnsPlayback,
+      revertOptimisticSkip: _nativeOwnsPlayback,
       pausesPlayback: true,
     );
   }
@@ -2544,14 +2492,15 @@ class PlaybackCoordinator {
     if (_snapshot.isPlaying) {
       _emit(_snapshot.copyWith(isPlaying: false));
     }
+    // Round 69: manual pause SERIALIZES behind an in-flight next/prev.
+    // Hard-preempt + cancelInFlightPlay was the real "pause changes the
+    // clip / then nothing works" bug — every pause stopped ExoPlayer mid
+    // swap and left resume to rebind a different path.
+    final native = _nativeOwnsPlayback;
     return _serializeTransport((epoch) async {
       if (!_transportCurrent(epoch)) return;
       _userInitiatedPause = true;
-      // Round 22 — when a scheduled clip is being played by the native
-      // FG service (not just_audio), `_audio.pause()` is a no-op. Route
-      // the pause request through the native bridge so the actual
-      // audio actually stops.
-      if (_nativeOwnsPlayback) {
+      if (native || _nativeOwnsPlayback) {
         _nativeScheduledActive = true;
         try {
           await NativeAlarmsBridge.instance.pauseNative();
@@ -2570,7 +2519,10 @@ class PlaybackCoordinator {
               'pause: _audio.pause failed (UI already updated): $e\n$st');
         }
       }
-    }, preempt: true, revertOptimisticSkip: true, pausesPlayback: true);
+    },
+        preempt: native,
+        revertOptimisticSkip: native,
+        pausesPlayback: true);
   }
 
   /// Pauses the current clip AND hides the mini-player + modal — but does
@@ -2771,11 +2723,10 @@ class PlaybackCoordinator {
           _audio.restoreCurrentPath(queuePath);
         }
         final ps = _audio.player.processingState;
-        final needsRebind = ps == ProcessingState.completed ||
-            ps == ProcessingState.idle ||
-            (queuePath != null &&
-                _audio.boundPath != null &&
-                _audio.boundPath != queuePath);
+        // Round 69: only rebind when ExoPlayer truly has no source.
+        // Rebinding because boundPath != queuePath made resume change clips.
+        final needsRebind =
+            ps == ProcessingState.completed || ps == ProcessingState.idle;
         if (needsRebind) {
           await _audio.playFile(
             path,
