@@ -34,7 +34,9 @@ void main() {
         coord,
         contains('state == AppPlaybackState.scheduledPlaying &&'),
       );
-      expect(coord, contains('Sticky `nativeActive` prefs'));
+      // Round 70: Dart sessions always win over sticky nativeActive.
+      expect(coord, contains('Sticky `nativeActive`'));
+      expect(coord, contains('Dart ExoPlayer sessions ALWAYS win'));
     });
 
     test('skip finally clears suppress latch', () {
@@ -51,7 +53,7 @@ void main() {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
       final idx = coord.indexOf('Future<void> pause()');
       expect(idx, greaterThanOrEqualTo(0));
-      final end = coord.indexOf('Future<void> dismissPlayer()', idx);
+      final end = coord.indexOf('Future<void> resume()', idx);
       final body = coord.substring(idx, end);
       expect(
         body.contains('if (!_acceptPlayPauseControl())'),
@@ -59,7 +61,9 @@ void main() {
         reason: 'Debounced pause left audio playing with a wrong icon.',
       );
       expect(body, contains('await _audio.pause()'));
-      expect(body, contains('pausesPlayback: true'));
+      // Round 70/71: pause is immediate (no serialize / pausesPlayback gate).
+      expect(body, contains('invalidateInFlightPlay(forPause: true)'));
+      expect(body.contains('_serializeTransport'), isFalse);
     });
   });
 }
