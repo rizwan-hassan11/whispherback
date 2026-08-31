@@ -89,7 +89,7 @@ void main() {
       expect(ensureIdx, greaterThanOrEqualTo(0));
       final ensure = body.substring(ensureIdx);
       expect(ensure, contains('Soft supersede'));
-      expect(ensure, contains('if (_invalidateForPause)'));
+      expect(ensure, contains('if (_invalidateForPause || _userPausedClip)'));
       // Every raw pause in ensureAudible is gated on user-pause invalidate.
       var searchFrom = 0;
       while (true) {
