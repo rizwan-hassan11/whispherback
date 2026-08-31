@@ -1,16 +1,14 @@
 import 'package:flutter/material.dart';
 
-import 'responsive.dart';
+import '../theme/app_colors.dart';
 
 /// Root [ScaffoldMessenger] key so snackbars survive route pops & sit above
 /// the floating bottom navigation bar.
 final GlobalKey<ScaffoldMessengerState> rootMessengerKey =
     GlobalKey<ScaffoldMessengerState>();
 
-/// Resolves a context that's safe to read MediaQuery / layout from when
-/// computing the snackbar's bottom margin. After a `context.pop()` the calling
-/// context is unmounted, so we prefer the root messenger's context which sits
-/// on the still-mounted MaterialApp.
+/// Resolves a context that's safe to read Theme from when the calling
+/// context may already be unmounted after a `pop()`.
 BuildContext _resolveMessengerContext(BuildContext fallback) {
   final state = rootMessengerKey.currentState;
   final ctx = state?.context;
@@ -18,53 +16,37 @@ BuildContext _resolveMessengerContext(BuildContext fallback) {
   return fallback;
 }
 
-/// Snackbars and toasts that float just above the shell bottom navigation
-/// bar.
+/// Oceanic floating toasts that sit just above the shell bottom chrome.
 ///
 /// Safe to call right after `context.pop()` — the snackbar is enqueued on the
-/// root [ScaffoldMessenger] (not the local Scaffold) so it survives the route
-/// transition, and its bottom margin is measured against the destination
-/// (shell) context so it sits above the nav bar instead of behind it.
+/// root [ScaffoldMessenger] so it survives the route transition.
 ///
-/// Styling: the snackbar uses a high-contrast dark background with WHITE
-/// text, WHITE close icon, and WHITE action label so it stays legible in
-/// both light and dark themes. The previous default theme left the close
-/// icon and action label rendered in onSurface (dark) on a dark-backed
-/// snackbar → user reported "CROSS ICON and OPEN SETTINGS button text is
-/// black and hence not visible in dark theme".
+/// Placement: Scaffold already parks floating snackbars above
+/// [Scaffold.bottomNavigationBar]. We only add a thin 8px gap — previously
+/// stacking a full chrome-height margin on top of that inset pushed
+/// toasts toward the middle of the screen.
 extension ShellMessenger on BuildContext {
   void showShellSnackBar(
     String message, {
     SnackBarAction? action,
-    Duration duration = const Duration(milliseconds: 2200),
+    Duration duration = const Duration(milliseconds: 2800),
     IconData? icon,
   }) {
-    // Defer one frame so any in-flight pop completes first; otherwise the
-    // bottom inset is measured against the dying route which has no nav bar,
-    // and the snackbar ends up rendered behind the shell's floating bar.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final messenger = rootMessengerKey.currentState;
       if (messenger == null) return;
       final ctx = _resolveMessengerContext(this);
-      // Sit JUST above the floating nav bar — only the safe-area padding
-      // plus a thin 4 px gap so the snackbar visually anchors to the
-      // navigation bar instead of floating in the middle of the screen.
-      // The previous +12 was visible as a fat empty gap on Samsung
-      // devices and was the "notifications are coming too much on top
-      // and distanced from the bottom navbar" QA complaint.
-      final reserved =
-          ShellMetrics.reservedBottomHeight(ctx, miniPlayerVisible: false);
-      final bottom = reserved + 4;
 
-      // Promote the action label to white so it stays legible on the
-      // forced-dark snackbar background. Without this, on light theme
-      // the action label would inherit the theme's onSurface (dark)
-      // color and disappear against the dark snackbar fill.
+      final isDark = Theme.of(ctx).brightness == Brightness.dark;
+      final bg = isDark ? AppColors.cardElevated : AppColors.deep;
+      const fg = Colors.white;
+      const accent = AppColors.neonCyan;
+
       final styledAction = action == null
           ? null
           : SnackBarAction(
               label: action.label,
-              textColor: Colors.white,
+              textColor: accent,
               onPressed: action.onPressed,
             );
 
@@ -72,29 +54,38 @@ extension ShellMessenger on BuildContext {
         ..hideCurrentSnackBar()
         ..showSnackBar(
           SnackBar(
-            backgroundColor: const Color(0xFF1B1F2A),
+            backgroundColor: bg,
+            elevation: 16,
+            dismissDirection: DismissDirection.down,
             content: DefaultTextStyle.merge(
-              style: const TextStyle(color: Colors.white),
+              style: const TextStyle(
+                color: fg,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                height: 1.35,
+              ),
               child: Row(
                 children: [
                   if (icon != null) ...[
-                    Icon(icon, size: 18, color: Colors.white),
+                    Icon(icon, size: 18, color: accent),
                     const SizedBox(width: 10),
                   ],
-                  Expanded(
-                    child: Text(
-                      message,
-                      style: const TextStyle(color: Colors.white),
-                    ),
-                  ),
+                  Expanded(child: Text(message, style: const TextStyle(color: fg))),
                 ],
               ),
             ),
             behavior: SnackBarBehavior.floating,
-            margin: EdgeInsets.fromLTRB(12, 0, 12, bottom),
+            margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: BorderSide(
+                color: accent.withValues(alpha: isDark ? 0.35 : 0.45),
+              ),
+            ),
             duration: duration,
             showCloseIcon: true,
-            closeIconColor: Colors.white,
+            closeIconColor: fg.withValues(alpha: 0.9),
             action: styledAction,
           ),
         );

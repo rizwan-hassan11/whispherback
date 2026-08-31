@@ -333,6 +333,10 @@ class AudioPlaybackService {
 
   void clearPlayEchoSuppress() => _handler.clearPlayEchoSuppress();
 
+  bool get isUserPausedClip => _handler.isUserPausedClip;
+
+  bool get suppressPlayEchoActive => _handler.suppressPlayEchoActive;
+
   /// Restores the logical path after an aborted skip without touching ExoPlayer.
   void restoreCurrentPath(String? path) {
     _currentPath = path;

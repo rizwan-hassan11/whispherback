@@ -52,10 +52,12 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
       // `withData: true` is critical on Android 10+ / Samsung One UI where the
       // OS returns a content:// URI with no real file path. With bytes we can
       // always copy into the app sandbox even when `path` is null.
+      // Round 77: allow multiple files so users aren't limited to one-at-a-time.
       result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['mp3', 'm4a'],
         withData: true,
+        allowMultiple: true,
       );
     } catch (e) {
       if (mounted) {
@@ -72,45 +74,87 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
       return;
     }
 
-    final picked = result.files.single;
-    final path = picked.path;
-    final bytes = picked.bytes;
-    final title = picked.name;
-
-    if ((path == null || path.isEmpty) && (bytes == null || bytes.isEmpty)) {
-      // Picker returned a file we can neither read nor copy — this used to
-      // silently no-op and made the Import button look broken on Samsung.
-      if (mounted) {
-        context.showShellSnackBar(
-          l10n.importFailed,
-          icon: AppIcons.alertCircle,
-        );
-      }
-      return;
-    }
+    // Cap batch size so withData:true cannot OOM on huge multi-selects.
+    const maxBatch = 30;
+    final files = result.files.take(maxBatch).toList();
 
     setState(() {
       _importing = true;
       _progress = 0;
-      _fileName = title;
+      _fileName = files.length == 1
+          ? files.first.name
+          : l10n.importedClipsCount(files.length);
     });
 
+    var imported = 0;
+    var failed = 0;
+    String? lastTitle;
+
     try {
-      await for (final p in ref.read(audioImportServiceProvider).importFile(
-            path,
-            title,
-            sourceBytes: bytes,
-            fileName: title,
-          )) {
-        if (mounted) setState(() => _progress = p);
+      for (var i = 0; i < files.length; i++) {
+        if (!mounted) return;
+        final picked = files[i];
+        final path = picked.path;
+        final bytes = picked.bytes;
+        final title = picked.name;
+
+        if ((path == null || path.isEmpty) &&
+            (bytes == null || bytes.isEmpty)) {
+          failed++;
+          continue;
+        }
+
+        setState(() {
+          _fileName = title;
+          _progress = i / files.length;
+        });
+
+        try {
+          await for (final p
+              in ref.read(audioImportServiceProvider).importFile(
+                    path,
+                    title,
+                    sourceBytes: bytes,
+                    fileName: title,
+                  )) {
+            if (!mounted) return;
+            // Map per-file progress into the overall batch bar.
+            setState(() => _progress = (i + p.clamp(0.0, 1.0)) / files.length);
+          }
+          imported++;
+          lastTitle = title;
+        } catch (e) {
+          failed++;
+          if (mounted) {
+            debugPrint('import batch item failed ($title): $e');
+          }
+        }
       }
 
       ref.invalidate(clipsProvider);
 
-      if (mounted) {
-        context.pop();
-        context.showShellSnackBar(l10n.importedClip(title),
-            icon: AppIcons.checkCircle);
+      if (!mounted) return;
+      context.pop();
+      if (imported == 0) {
+        context.showShellSnackBar(
+          l10n.importFailed,
+          icon: AppIcons.alertCircle,
+        );
+      } else if (imported == 1 && failed == 0 && lastTitle != null) {
+        context.showShellSnackBar(
+          l10n.importedClip(lastTitle),
+          icon: AppIcons.checkCircle,
+        );
+      } else if (failed == 0) {
+        context.showShellSnackBar(
+          l10n.importedClipsCount(imported),
+          icon: AppIcons.checkCircle,
+        );
+      } else {
+        context.showShellSnackBar(
+          l10n.importedClipsPartial(imported, failed),
+          icon: AppIcons.checkCircle,
+        );
       }
     } catch (e) {
       if (mounted) {

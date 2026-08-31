@@ -2027,19 +2027,19 @@ class AppLocalizations {
       'Importer depuis l\'appareil',
       'Nhập từ thiết bị');
   String get chooseAudioFile => _s(
-      'Choose audio file',
-      'آڈیو فائل منتخب کریں',
-      'اختر ملفاً صوتياً',
-      'Kies audiobestand',
-      'Choisir un fichier audio',
+      'Choose audio files',
+      'آڈیو فائلیں منتخب کریں',
+      'اختر ملفات صوتية',
+      'Kies audiobestanden',
+      'Choisir des fichiers audio',
       'Chọn tệp âm thanh');
   String get tapToBrowseAudio => _s(
-      'Tap to browse MP3 or M4A on your device',
-      'اپنے ڈیوائس پر MP3 یا M4A براؤز کرنے کے لیے دبائیں',
-      'اضغط لتصفح MP3 أو M4A',
-      'Tik om MP3 of M4A te bladeren',
-      'Appuyez pour parcourir MP3 ou M4A',
-      'Nhấn để duyệt MP3 hoặc M4A trên thiết bị');
+      'Tap to browse MP3 or M4A — select one or many',
+      'MP3 یا M4A براؤز کریں — ایک یا زیادہ منتخب کریں',
+      'اضغط لتصفح MP3 أو M4A — اختر واحداً أو أكثر',
+      'Tik om MP3 of M4A te kiezen — één of meer',
+      'Appuyez pour parcourir MP3 ou M4A — un ou plusieurs',
+      'Nhấn để duyệt MP3 hoặc M4A — chọn một hoặc nhiều');
   String get audioFile => _s('Audio file', 'آڈیو فائل', 'ملف صوتي',
       'Audiobestand', 'Fichier audio', 'Tệp âm thanh');
   String get importing => _s('Importing…', 'درآمد ہو رہی ہے…',
@@ -2058,6 +2058,20 @@ class AppLocalizations {
       '$title geïmporteerd',
       '$title importé',
       'Đã nhập $title');
+  String importedClipsCount(int count) => _s(
+      'Imported $count clips',
+      '$count کلپس درآمد ہو گئیں',
+      'تم استيراد $count مقاطع',
+      '$count clips geïmporteerd',
+      '$count clips importés',
+      'Đã nhập $count clip');
+  String importedClipsPartial(int ok, int failed) => _s(
+      'Imported $ok clips ($failed failed)',
+      '$ok کلپس درآمد ($failed ناکام)',
+      'تم استيراد $ok ($failed فشل)',
+      '$ok geïmporteerd ($failed mislukt)',
+      '$ok importés ($failed échecs)',
+      'Đã nhập $ok (lỗi $failed)');
 
   String get buildCollection => _s(
       'BUILD A COLLECTION',

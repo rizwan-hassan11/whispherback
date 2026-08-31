@@ -68,7 +68,7 @@ class PlaybackCoordinator {
 
   /// Bump when shipping a manual playback transport fix. Shown in Settings
   /// so QA can confirm the installed APK contains this logic (not a stale build).
-  static const transportBuildId = 'R76-ocean-pause';
+  static const transportBuildId = 'R77-notif-import';
 
   final AppStateRepository _appState;
   final PlaylistRepository _playlists;
@@ -875,8 +875,13 @@ class PlaybackCoordinator {
   }
 
   /// Lock-screen play after [WhisperAudioHandler.play] already resumed
-  /// ExoPlayer — Round 71: share [resume] (same contract as pause).
+  /// ExoPlayer — Round 71/77: share [resume] (same contract as pause).
   Future<void> _handleNotificationPlay() {
+    // Round 77: handler clears the pause latch only when it accepts the
+    // resume. If the latch is still set, this is a stale OEM echo callback.
+    if (_audio.isUserPausedClip) {
+      return Future<void>.value();
+    }
     if (!_userInitiatedPause && _snapshot.isPlaying) {
       return Future<void>.value();
     }
@@ -1800,14 +1805,36 @@ class PlaybackCoordinator {
   }
 
   Future<void> _finishManualPreview() async {
-    _userInitiatedPause = false;
-    final active = await _appState.isActive();
+    // Round 77: park paused at end of clip — keep MediaItem + shade card
+    // (Spotify-like). stop() tore down the notification the moment the
+    // clip finished, which QA reported as "notification disappears while
+    // / right after playing".
+    _userInitiatedPause = true;
     _emit(PlaybackSnapshot(
-      state: active ? AppPlaybackState.activeIdle : AppPlaybackState.inactive,
+      state: AppPlaybackState.manualPlaying,
+      playlistId: _snapshot.playlistId,
+      playlistName: _snapshot.playlistName,
+      clipTitle: _snapshot.clipTitle,
       isPlaying: false,
+      shuffleEnabled: _snapshot.shuffleEnabled,
       modalVisible: false,
+      durationMs: _snapshot.durationMs,
     ));
-    await _audio.stop();
+    try {
+      await _audio.pause();
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint('_finishManualPreview: pause failed: $e\n$st');
+      }
+    }
+    try {
+      // Rewind so shade / mini-player Play replays from the start.
+      await seek(Duration.zero);
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint('_finishManualPreview: seek-zero failed: $e\n$st');
+      }
+    }
   }
 
   Future<void> _drainPendingScheduled() async {
@@ -2196,15 +2223,76 @@ class PlaybackCoordinator {
     List<AudioClip>? queue,
     String? playlistId,
   }) {
+    // Round 77: flip the mini-player / playing UI on the tap frame so
+    // switching clips never feels like "tap ignored while something else
+    // is still playing". The transport body still owns the real bind.
+    _primeOptimisticLibraryPlay(clip, queue: queue, playlistId: playlistId);
     return _serializeTransport(
       (epoch) => _playClipInternal(
         clip,
         queue: queue,
         playlistId: playlistId,
         transportEpoch: epoch,
+        skipSnapshotEmit: true,
       ),
       preempt: true,
     );
+  }
+
+  /// Instant title / queue commit when the user taps a library clip.
+  void _primeOptimisticLibraryPlay(
+    AudioClip clip, {
+    List<AudioClip>? queue,
+    String? playlistId,
+  }) {
+    _userInitiatedPause = false;
+    _playbackGeneration++;
+    unawaited(_claimDartManualSession());
+    final resolvedQueue =
+        (queue == null || queue.isEmpty) ? <AudioClip>[clip] : queue;
+    // Explicit playlistId only — library taps pass null and must leave any
+    // prior playlist session so next/completion don't keep looping it.
+    final effectivePlaylistId = playlistId;
+
+    if (effectivePlaylistId != null && resolvedQueue.isNotEmpty) {
+      _playlistClipCache = resolvedQueue;
+      final idx = resolvedQueue.indexWhere((c) => c.id == clip.id);
+      _playlistClipIndex = idx < 0 ? 0 : idx;
+      _libraryQueue = const [];
+      _libraryIndex = -1;
+    } else {
+      _libraryQueue = resolvedQueue;
+      _libraryIndex = _libraryQueue.indexWhere((c) => c.id == clip.id);
+      if (_libraryIndex < 0) _libraryIndex = 0;
+      _playlistClipCache = const [];
+      _playlistClipIndex = null;
+    }
+
+    _emit(PlaybackSnapshot(
+      state: AppPlaybackState.manualPlaying,
+      playlistId: effectivePlaylistId,
+      playlistName: effectivePlaylistId != null
+          ? (_snapshot.playlistName ?? clip.title)
+          : clip.title,
+      clipTitle: clip.title,
+      isPlaying: true,
+      shuffleEnabled: _snapshot.shuffleEnabled,
+      modalVisible: false,
+      durationMs: clip.durationMs,
+    ));
+
+    // Publish shade title immediately; ExoPlayer bind follows in the body.
+    try {
+      _audio.publishPendingClip(
+        path: clip.filePath,
+        title: clip.title,
+        playlistName:
+            effectivePlaylistId != null ? _snapshot.playlistName : null,
+        subtitle: effectivePlaylistId != null
+            ? RuntimeCopy.l10n.nowPlaying
+            : RuntimeCopy.l10n.libraryPreview,
+      );
+    } catch (_) {}
   }
 
   Future<void> _playClipInternal(

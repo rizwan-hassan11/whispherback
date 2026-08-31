@@ -167,13 +167,23 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   /// PAUSE on the notification shade — that auto-resumed the clip.
   DateTime? _suppressPlayEchoUntil;
 
-  /// Round 75: sticky user-pause latch. While set, MediaSession must stay
+  /// Round 75/77: sticky user-pause latch. While set, MediaSession must stay
   /// paused (no loading→playing upgrade, no OEM play echo). Cleared only
-  /// by an intentional resume / new playFile.
+  /// by an intentional resume (settled pause + echo window expired) or a
+  /// new playFile from app transport.
   bool _userPausedClip = false;
+
+  /// Wall-clock when the user last paused — used to require a brief settle
+  /// before a depth-0 MediaSession PLAY is treated as an intentional resume.
+  DateTime? _userPausedAt;
 
   /// Shade card was swiped away while paused. Next play/resume republishes.
   bool _notificationDismissed = false;
+
+  /// True while the user (shade / in-app) has paused the current clip.
+  bool get isUserPausedClip => _userPausedClip;
+
+  bool get suppressPlayEchoActive => _suppressPlayEchoActive;
 
   set suppressMediaSessionPauseEcho(bool value) {
     if (value) {
@@ -193,8 +203,9 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
       DateTime.now().isBefore(_suppressPlayEchoUntil!);
 
   void _armPlayEchoSuppress() {
-    // Round 76: 3.5s covers slow OEM MediaSession play echoes after pause
+    // Round 76/77: 3.5s covers slow OEM MediaSession play echoes after pause
     // (Samsung One UI / Xiaomi often echo PLAY well after the 2s window).
+    // Re-armed on every ignored echo so continuous OEM echoes never win.
     _suppressPlayEchoUntil =
         DateTime.now().add(const Duration(milliseconds: 3500));
   }
@@ -205,8 +216,24 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
 
   void _clearUserPauseLatch() {
     _userPausedClip = false;
+    _userPausedAt = null;
     _notificationDismissed = false;
     clearPlayEchoSuppress();
+  }
+
+  /// True when a depth-0 MediaSession PLAY should be treated as an OEM echo
+  /// (or unsettled pause) rather than an intentional shade resume.
+  bool get _shouldIgnoreMediaSessionPlay {
+    if (!_userPausedClip) return false;
+    if (_player.playing) return true;
+    if (_suppressPlayEchoActive) return true;
+    final pausedAt = _userPausedAt;
+    if (pausedAt != null &&
+        DateTime.now().difference(pausedAt) <
+            const Duration(milliseconds: 450)) {
+      return true;
+    }
+    return false;
   }
 
   /// Runs [action] without firing coordinator transport callbacks.
@@ -337,6 +364,7 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
       if (_playingClip && _player.playing) {
         _wasPlayingBeforeInterruption = false;
         _userPausedClip = true;
+        _userPausedAt = DateTime.now();
         _armPlayEchoSuppress();
         unawaited(_player.pause());
       }
@@ -1288,17 +1316,17 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> play() async {
     if (!_playingClip) return;
 
-    // Round 74/75/76: OEM MediaSession often echoes PLAY right after PAUSE.
-    // While the user-pause latch is set, ignore depth-0 play during the
-    // echo window and keep the shade on the paused icon. Intentional
-    // in-app resume uses runFromAppTransport (depth > 0) and always wins.
-    if (_appTransportDepth == 0 &&
-        _userPausedClip &&
-        _suppressPlayEchoActive) {
+    // Round 74–77: OEM MediaSession often echoes PLAY after PAUSE (sometimes
+    // repeatedly / late). While the user-pause latch is set, ignore depth-0
+    // play until the echo window expires AND ExoPlayer has settled paused.
+    // Each ignored echo re-arms the window so continuous echoes never win.
+    // Intentional in-app resume uses runFromAppTransport (depth > 0).
+    if (_appTransportDepth == 0 && _shouldIgnoreMediaSessionPlay) {
       if (kDebugMode) {
         debugPrint(
-            'handler.play: ignored MediaSession play echo after pause');
+            'handler.play: ignored MediaSession play under user-pause latch');
       }
+      _armPlayEchoSuppress();
       if (_player.playing) {
         try {
           await _player.pause();
@@ -1428,11 +1456,12 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     _sourceSwapInFlight = false;
     _suppressPauseEchoUntil = null;
     _userPausedClip = true;
-    // Round 76: clear focus-restore arm so an interruption end that
+    _userPausedAt = DateTime.now();
+    // Round 76/77: clear focus-restore arm so an interruption end that
     // races with this pause cannot call `_player.play()` and undo it.
     _wasPlayingBeforeInterruption = false;
-    // Block the immediate MediaSession PLAY echo that follows PAUSE on
-    // many OEMs (QA Round 74/75/76: notification pause auto-resumes).
+    // Block MediaSession PLAY echoes that follow PAUSE on many OEMs
+    // (QA: notification pause auto-resumes / needs two taps).
     _armPlayEchoSuppress();
 
     _publishClipControls(

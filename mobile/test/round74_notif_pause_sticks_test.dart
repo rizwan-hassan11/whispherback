@@ -27,9 +27,12 @@ void main() {
       final playIdx = handler.indexOf('Future<void> play() async');
       final playEnd = handler.indexOf('Future<void> hideClipMediaNotification(', playIdx);
       final playBody = handler.substring(playIdx, playEnd);
-      expect(playBody, contains('_suppressPlayEchoActive'));
+      expect(playBody, contains('_shouldIgnoreMediaSessionPlay'));
       expect(playBody, contains('_appTransportDepth == 0'));
-      expect(playBody, contains('ignored MediaSession play echo after pause'));
+      expect(
+        playBody,
+        contains('ignored MediaSession play under user-pause latch'),
+      );
     });
 
     test('ensureAudible never force-plays after pause invalidate', () {
@@ -53,7 +56,7 @@ void main() {
 
     test('build id stamped R74', () {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
-      expect(coord, contains("transportBuildId = 'R76-ocean-pause'"));
+      expect(coord, contains("transportBuildId = 'R77-notif-import'"));
     });
   });
 }

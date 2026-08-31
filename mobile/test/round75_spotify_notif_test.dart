@@ -60,13 +60,13 @@ void main() {
       final playIdx = handler.indexOf('Future<void> play() async');
       final playEnd = handler.indexOf('Future<void> hideClipMediaNotification(', playIdx);
       final play = handler.substring(playIdx, playEnd < 0 ? playIdx + 1200 : playEnd);
-      expect(play, contains('_userPausedClip'));
-      expect(play, contains('_suppressPlayEchoActive'));
+      expect(play, contains('_shouldIgnoreMediaSessionPlay'));
+      expect(play, contains('_armPlayEchoSuppress()'));
     });
 
-    test('build id stamped R76', () {
+    test('build id stamped R77', () {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
-      expect(coord, contains("transportBuildId = 'R76-ocean-pause'"));
+      expect(coord, contains("transportBuildId = 'R77-notif-import'"));
     });
   });
 }
