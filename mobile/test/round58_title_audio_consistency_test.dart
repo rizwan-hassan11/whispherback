@@ -106,7 +106,8 @@ void main() {
       final playIdx = src.indexOf('Future<void> _handleNotificationPlay()');
       final playEnd = src.indexOf('Future<void> _systemPause()', playIdx);
       final playBody = src.substring(playIdx, playEnd);
-      // Round 71: notification play shares resume() — no skip-title revert.
+      // Round 78: notification play syncs snapshot; resume fallback when latched.
+      expect(playBody, contains('isUserPausedClip'));
       expect(playBody, contains('return resume()'));
       expect(playBody.contains('revertOptimisticSkip: true'), isFalse);
 

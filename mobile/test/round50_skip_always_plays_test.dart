@@ -35,12 +35,13 @@ void main() {
       expect(body, contains('return;'));
     });
 
-    test('notification pause shares in-app pause()', () {
+    test('notification pause syncs without re-entering handler.pause', () {
       final src = _read('lib/services/playback/playback_coordinator.dart');
       final idx = src.indexOf('Future<void> _handleNotificationPause()');
       final end = src.indexOf('Future<void> _handleNotificationPlay()', idx);
       final body = src.substring(idx, end);
-      expect(body, contains('return pause()'));
+      expect(body, contains('invalidateInFlightPlay(forPause: true)'));
+      expect(body.contains('return pause()'), isFalse);
     });
 
     test('guardedSkip ensure-playing after transport when not paused', () {

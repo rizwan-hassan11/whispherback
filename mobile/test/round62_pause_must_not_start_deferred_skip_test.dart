@@ -63,8 +63,9 @@ void main() {
       expect(body.contains('if (_skipInFlight'), isFalse,
           reason: 'Real notification pause must preempt skip, not wait.');
       expect(body.contains('|| _skipInFlight'), isFalse);
-      // Round 71: shade pause shares pause() — immediate, no latch swallow.
-      expect(body, contains('return pause()'));
+      // Round 78: shade pause syncs immediately — handler.pause already ran.
+      expect(body, contains('invalidateInFlightPlay(forPause: true)'));
+      expect(body.contains('return pause()'), isFalse);
       expect(body.contains('ignored OEM echo settle window'), isFalse);
     });
 

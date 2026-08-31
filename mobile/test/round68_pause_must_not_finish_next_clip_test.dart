@@ -25,7 +25,7 @@ void main() {
 
     test('manual pause is immediate and invalidates playFile (Round 70)', () {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
-      expect(coord, contains('R77-notif-import'));
+      expect(coord, contains('R78-notif-transport'));
       final idx = coord.indexOf('Future<void> pause() async');
       final end = coord.indexOf('Future<void> resume() async', idx);
       final body = coord.substring(idx, end);

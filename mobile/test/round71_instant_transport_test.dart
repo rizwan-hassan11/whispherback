@@ -40,22 +40,23 @@ void main() {
         coord.indexOf('Future<void> _handleNotificationPause()'),
         coord.indexOf('Future<void> _handleNotificationPlay()'),
       );
-      expect(pause, contains('return pause()'));
-      expect(pause.contains('ignored OEM echo'), isFalse);
+      expect(pause, contains('invalidateInFlightPlay(forPause: true)'));
+      expect(pause.contains('return pause()'), isFalse);
     });
 
-    test('notification play shares resume()', () {
+    test('notification play syncs snapshot; resume fallback when latched', () {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
       final body = coord.substring(
         coord.indexOf('Future<void> _handleNotificationPlay()'),
         coord.indexOf('Future<void> _systemPause()'),
       );
+      expect(body, contains('isUserPausedClip'));
       expect(body, contains('return resume()'));
     });
 
     test('build id stamped R71', () {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
-      expect(coord, contains("transportBuildId = 'R77-notif-import'"));
+      expect(coord, contains("transportBuildId = 'R78-notif-transport'"));
     });
 
     test('Dart ownership and immediate pause still hold', () {

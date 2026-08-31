@@ -31,7 +31,7 @@ void main() {
       expect(playBody, contains('_appTransportDepth == 0'));
       expect(
         playBody,
-        contains('ignored MediaSession play under user-pause latch'),
+        contains('ignored MediaSession play echo after pause'),
       );
     });
 
@@ -56,7 +56,7 @@ void main() {
 
     test('build id stamped R74', () {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
-      expect(coord, contains("transportBuildId = 'R77-notif-import'"));
+      expect(coord, contains("transportBuildId = 'R78-notif-transport'"));
     });
   });
 }

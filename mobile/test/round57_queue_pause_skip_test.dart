@@ -93,8 +93,9 @@ void main() {
       final idx = src.indexOf('Future<void> _handleNotificationPause()');
       final end = src.indexOf('Future<void> _handleNotificationPlay()', idx);
       final body = src.substring(idx, end);
-      // Round 70: notification pause shares pause() — same sentinel path.
-      expect(body, contains('return pause()'));
+      // Round 78: notification pause syncs state — handler.pause already ran.
+      expect(body, contains('invalidateInFlightPlay(forPause: true)'));
+      expect(body.contains('return pause()'), isFalse);
     });
 
     test('duplicate completion events cannot double-advance queue', () {

@@ -47,17 +47,18 @@ void main() {
       expect(body.contains('_serializeTransport'), isFalse);
     });
 
-    test('notification pause shares in-app pause()', () {
+    test('notification pause syncs coordinator without re-entering handler.pause', () {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
       final idx = coord.indexOf('Future<void> _handleNotificationPause()');
       final end = coord.indexOf('Future<void> _handleNotificationPlay()', idx);
       final body = coord.substring(idx, end);
-      expect(body, contains('return pause()'));
+      expect(body, contains('invalidateInFlightPlay(forPause: true)'));
+      expect(body.contains('return pause()'), isFalse);
     });
 
     test('build id stamped R70', () {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
-      expect(coord, contains("transportBuildId = 'R77-notif-import'"));
+      expect(coord, contains("transportBuildId = 'R78-notif-transport'"));
     });
   });
 }

@@ -68,7 +68,7 @@ class PlaybackCoordinator {
 
   /// Bump when shipping a manual playback transport fix. Shown in Settings
   /// so QA can confirm the installed APK contains this logic (not a stale build).
-  static const transportBuildId = 'R77-notif-import';
+  static const transportBuildId = 'R78-notif-transport';
 
   final AppStateRepository _appState;
   final PlaylistRepository _playlists;
@@ -864,28 +864,54 @@ class PlaybackCoordinator {
   }
 
   /// Lock-screen / audio_service notification already invoked
-  /// [WhisperAudioHandler.pause]. Round 70/71: share [pause] so notification
-  /// and in-app cannot diverge.
+  /// [WhisperAudioHandler.pause]. Round 70/71/78: sync coordinator state
+  /// without re-entering handler.pause (that re-armed echo suppress and
+  /// made shade pause/resume feel like it needed two taps).
   Future<void> _handleNotificationPause() {
-    // Round 51: in-app pause already flipped the snapshot.
     if (_userInitiatedPause && !_snapshot.isPlaying) {
       return Future<void>.value();
     }
-    return pause();
+    _userInitiatedPause = true;
+    _latestTransportPausesPlayback = true;
+    _suppressTransientNotPlaying = false;
+    _pendingSkipNext = null;
+    _audio.suppressMediaSessionPauseEcho = false;
+    ++_transportEpoch;
+    if (_snapshot.isPlaying) {
+      _emit(_snapshot.copyWith(isPlaying: false));
+    }
+
+    if (_nativeOwnsPlayback) {
+      _nativeScheduledActive = true;
+      return NativeAlarmsBridge.instance.pauseNative().catchError((e, st) {
+        if (kDebugMode) {
+          debugPrint('notification pause: native pause failed: $e\n$st');
+        }
+      });
+    }
+
+    _nativeScheduledActive = false;
+    try {
+      _audio.invalidateInFlightPlay(forPause: true);
+    } catch (_) {}
+    // ExoPlayer + user-pause latch were already applied in handler.pause().
+    return Future<void>.value();
   }
 
   /// Lock-screen play after [WhisperAudioHandler.play] already resumed
-  /// ExoPlayer — Round 71/77: share [resume] (same contract as pause).
+  /// ExoPlayer — Round 71/78: sync snapshot only; avoid double handler.play.
   Future<void> _handleNotificationPlay() {
-    // Round 77: handler clears the pause latch only when it accepts the
-    // resume. If the latch is still set, this is a stale OEM echo callback.
+    _userInitiatedPause = false;
+    _audio.clearPlayEchoSuppress();
+    if (!_snapshot.isPlaying && _snapshot.state != AppPlaybackState.inactive) {
+      _emit(_snapshot.copyWith(isPlaying: true));
+    }
+    // handler.play() at depth 0 already started ExoPlayer when accepted.
+    // Only fall back to coordinator.resume (depth-1 play) if still latched.
     if (_audio.isUserPausedClip) {
-      return Future<void>.value();
+      return resume();
     }
-    if (!_userInitiatedPause && _snapshot.isPlaying) {
-      return Future<void>.value();
-    }
-    return resume();
+    return Future<void>.value();
   }
 
   /// Wraps a system-driven pause (sleep mode, prayer pause, scheduled

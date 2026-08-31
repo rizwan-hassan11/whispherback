@@ -14,7 +14,7 @@ String _read(String relPath) {
 
 void main() {
   group('Round 77 — notif pause + import polish', () {
-    test('MediaSession play re-arms echo suppress under user-pause latch', () {
+    test('MediaSession play uses shouldIgnore gate', () {
       final handler = _read('lib/services/audio/whisper_audio_handler.dart');
       expect(handler, contains('_shouldIgnoreMediaSessionPlay'));
       expect(handler, contains('_userPausedAt'));
@@ -22,15 +22,15 @@ void main() {
       final playEnd =
           handler.indexOf('Future<void> hideClipMediaNotification(', playIdx);
       final play = handler.substring(playIdx, playEnd);
-      expect(play, contains('_armPlayEchoSuppress()'));
       expect(play, contains('_shouldIgnoreMediaSessionPlay'));
     });
 
-    test('notification play handler respects user-pause latch', () {
+    test('notification play handler syncs coordinator state', () {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
       final idx = coord.indexOf('Future<void> _handleNotificationPlay()');
       final end = coord.indexOf('Future<void> _systemPause()', idx);
       final body = coord.substring(idx, end);
+      expect(body, contains('_userInitiatedPause = false'));
       expect(body, contains('isUserPausedClip'));
     });
 
@@ -67,9 +67,9 @@ void main() {
       expect(src, contains('AppColors.neonCyan'));
     });
 
-    test('build id stamped R77', () {
+    test('build id stamped R78', () {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
-      expect(coord, contains("transportBuildId = 'R77-notif-import'"));
+      expect(coord, contains("transportBuildId = 'R78-notif-transport'"));
     });
   });
 }

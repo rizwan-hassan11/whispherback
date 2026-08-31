@@ -203,11 +203,10 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
       DateTime.now().isBefore(_suppressPlayEchoUntil!);
 
   void _armPlayEchoSuppress() {
-    // Round 76/77: 3.5s covers slow OEM MediaSession play echoes after pause
-    // (Samsung One UI / Xiaomi often echo PLAY well after the 2s window).
-    // Re-armed on every ignored echo so continuous OEM echoes never win.
+    // Round 78: short burst window — only used for diagnostics / legacy
+    // checks. Intentional shade resume must never be blocked for seconds.
     _suppressPlayEchoUntil =
-        DateTime.now().add(const Duration(milliseconds: 3500));
+        DateTime.now().add(const Duration(milliseconds: 700));
   }
 
   void clearPlayEchoSuppress() {
@@ -222,15 +221,18 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   /// True when a depth-0 MediaSession PLAY should be treated as an OEM echo
-  /// (or unsettled pause) rather than an intentional shade resume.
+  /// (not an intentional shade resume).
+  ///
+  /// Round 78: only block (a) while ExoPlayer is still audibly playing after
+  /// the user paused, or (b) automatic PLAY echoes in the first ~700ms after
+  /// PAUSE. Never block a settled pause — that was preventing one-tap resume.
   bool get _shouldIgnoreMediaSessionPlay {
     if (!_userPausedClip) return false;
     if (_player.playing) return true;
-    if (_suppressPlayEchoActive) return true;
     final pausedAt = _userPausedAt;
     if (pausedAt != null &&
         DateTime.now().difference(pausedAt) <
-            const Duration(milliseconds: 450)) {
+            const Duration(milliseconds: 700)) {
       return true;
     }
     return false;
@@ -1316,17 +1318,15 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> play() async {
     if (!_playingClip) return;
 
-    // Round 74–77: OEM MediaSession often echoes PLAY after PAUSE (sometimes
-    // repeatedly / late). While the user-pause latch is set, ignore depth-0
-    // play until the echo window expires AND ExoPlayer has settled paused.
-    // Each ignored echo re-arms the window so continuous echoes never win.
-    // Intentional in-app resume uses runFromAppTransport (depth > 0).
+    // Round 74–78: OEM MediaSession often echoes PLAY right after PAUSE.
+    // Ignore only while audio is still playing or in the immediate echo
+    // burst (~700ms). Do NOT re-arm the window — that trapped resume for
+    // seconds. In-app resume uses runFromAppTransport (depth > 0).
     if (_appTransportDepth == 0 && _shouldIgnoreMediaSessionPlay) {
       if (kDebugMode) {
         debugPrint(
-            'handler.play: ignored MediaSession play under user-pause latch');
+            'handler.play: ignored MediaSession play echo after pause');
       }
-      _armPlayEchoSuppress();
       if (_player.playing) {
         try {
           await _player.pause();
