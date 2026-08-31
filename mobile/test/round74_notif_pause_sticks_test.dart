@@ -37,7 +37,7 @@ void main() {
       final idx = handler.indexOf('Future<void> _ensureAudible(');
       final end = handler.indexOf('Future<void> _playFileBound(', idx);
       final body = handler.substring(idx, end);
-      expect(body, contains('if (_invalidateForPause)'));
+      expect(body, contains('if (_invalidateForPause || _userPausedClip)'));
       expect(body, contains('await _player.pause()'));
     });
 
@@ -53,7 +53,7 @@ void main() {
 
     test('build id stamped R74', () {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
-      expect(coord, contains("transportBuildId = 'R75-spotify-notif'"));
+      expect(coord, contains("transportBuildId = 'R76-ocean-pause'"));
     });
   });
 }

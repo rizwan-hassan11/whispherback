@@ -112,7 +112,7 @@ class PlaybackModal extends ConsumerWidget {
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
-                        colors: [Color(0xFA081634), Color(0xFA020611)],
+                        colors: [Color(0xFA0D3554), Color(0xFA0A2A43)],
                       ),
                       border:
                           Border(top: BorderSide(color: AppColors.glassBorder)),

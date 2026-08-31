@@ -1,47 +1,43 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  WhisperBack notification icon.
+  WhisperBack notification icon — oceanic soundwave silhouette.
 
   Android notification icons MUST be a flat white silhouette on a fully
-  transparent background. The system applies its own accent colour at
-  paint time (and on Android 13+ a dynamic Material You tint), so any
-  baked-in colour is discarded.
-
-  Earlier versions of this file used a generic "W" path that produced
-  the QA-reported "only a white circle, not the WhisperBack mark" look
-  because the path was too thin and the standard 24dp viewport made it
-  collapse to a blob at notification scale. This rewrite draws the
-  double-curve neon W from `assets/branding/app_logo.png` as bold
-  stroke-style filled paths inside a 24×24 viewport, sized to fill the
-  whole drawable area so the silhouette stays readable on every status
-  bar size (Samsung One UI compact bar through Pixel large bar).
+  transparent background. Shape matches the app logo: seven rounded bars
+  + center ping dot.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="24"
-    android:viewportHeight="24"
-    android:tint="#FFFFFFFF">
-    <!-- Outer left curve (taller arch) -->
+    android:viewportHeight="24">
+    <!-- Outer bars -->
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M3.4,4.2 C3.4,4.2 3.9,16.4 8.1,17.7 C11.4,18.7 12,12.6 12,12.6 L9.6,12.6 C9.6,12.6 9.2,15.6 8.1,15.4 C6.4,15.1 5.9,4.2 5.9,4.2 Z" />
-    <!-- Outer right curve (taller arch, mirrored) -->
+        android:pathData="M1.8,10.2h1.8c0.5,0,0.9,0.4,0.9,0.9v2.8c0,0.5-0.4,0.9-0.9,0.9H1.8c-0.5,0-0.9-0.4-0.9-0.9v-2.8c0-0.5,0.4-0.9,0.9-0.9z"/>
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M20.6,4.2 C20.6,4.2 20.1,16.4 15.9,17.7 C12.6,18.7 12,12.6 12,12.6 L14.4,12.6 C14.4,12.6 14.8,15.6 15.9,15.4 C17.6,15.1 18.1,4.2 18.1,4.2 Z" />
-    <!-- Inner left curve (shorter arch nested inside the outer one) -->
+        android:pathData="M20.4,10.2h1.8c0.5,0,0.9,0.4,0.9,0.9v2.8c0,0.5-0.4,0.9-0.9,0.9h-1.8c-0.5,0-0.9-0.4-0.9-0.9v-2.8c0-0.5,0.4-0.9,0.9-0.9z"/>
+    <!-- Mid-outer bars -->
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M7.4,4.2 C7.4,4.2 7.7,12.2 9.7,12.6 C11.0,12.9 11.5,9.0 11.5,9.0 L10.2,9.0 C10.2,9.0 9.9,10.4 9.5,10.3 C8.7,10.1 8.6,4.2 8.6,4.2 Z" />
-    <!-- Inner right curve (mirror) -->
+        android:pathData="M4.9,8.0h1.8c0.5,0,0.9,0.4,0.9,0.9v7.2c0,0.5-0.4,0.9-0.9,0.9H4.9c-0.5,0-0.9-0.4-0.9-0.9V8.9c0-0.5,0.4-0.9,0.9-0.9z"/>
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M16.6,4.2 C16.6,4.2 16.3,12.2 14.3,12.6 C13.0,12.9 12.5,9.0 12.5,9.0 L13.8,9.0 C13.8,9.0 14.1,10.4 14.5,10.3 C15.3,10.1 15.4,4.2 15.4,4.2 Z" />
-    <!-- Subtle base line (a flat horizontal bar under the W) so the
-         silhouette reads as a logo, not as two disconnected hooks. -->
+        android:pathData="M17.3,8.0h1.8c0.5,0,0.9,0.4,0.9,0.9v7.2c0,0.5-0.4,0.9-0.9,0.9h-1.8c-0.5,0-0.9-0.4-0.9-0.9V8.9c0-0.5,0.4-0.9,0.9-0.9z"/>
+    <!-- Inner flanks -->
     <path
         android:fillColor="#FFFFFFFF"
-        android:fillAlpha="0.55"
-        android:pathData="M4.0,19.6 C8.5,21.3 15.5,21.3 20.0,19.6 L20.0,21.0 C15.5,22.7 8.5,22.7 4.0,21.0 Z" />
+        android:pathData="M8.0,5.6h1.8c0.5,0,0.9,0.4,0.9,0.9v12.0c0,0.5-0.4,0.9-0.9,0.9H8.0c-0.5,0-0.9-0.4-0.9-0.9V6.5c0-0.5,0.4-0.9,0.9-0.9z"/>
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M14.2,5.6h1.8c0.5,0,0.9,0.4,0.9,0.9v12.0c0,0.5-0.4,0.9-0.9,0.9h-1.8c-0.5,0-0.9-0.4-0.9-0.9V6.5c0-0.5,0.4-0.9,0.9-0.9z"/>
+    <!-- Center bar -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M11.1,3.8h1.8c0.5,0,0.9,0.4,0.9,0.9v15.6c0,0.5-0.4,0.9-0.9,0.9h-1.8c-0.5,0-0.9-0.4-0.9-0.9V4.7c0-0.5,0.4-0.9,0.9-0.9z"/>
+    <!-- Ping dot -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,1.55m-1.05,0a1.05,1.05 0,1,1 2.1,0a1.05,1.05 0,1,1 -2.1,0"/>
 </vector>

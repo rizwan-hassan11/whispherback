@@ -68,7 +68,7 @@ class PlaybackCoordinator {
 
   /// Bump when shipping a manual playback transport fix. Shown in Settings
   /// so QA can confirm the installed APK contains this logic (not a stale build).
-  static const transportBuildId = 'R75-spotify-notif';
+  static const transportBuildId = 'R76-ocean-pause';
 
   final AppStateRepository _appState;
   final PlaylistRepository _playlists;

@@ -244,9 +244,9 @@ void main() {
       );
       expect(
         src,
-        contains('color: const Color(0xFF2E8BFF),'),
+        contains('color: const Color(0xFF5DD5E8),'),
         reason: 'Brand accent colour must be pinned so the silhouette '
-            'reads as WhisperBack blue, not the system default.',
+            'reads as WhisperBack cyan, not the system default.',
       );
     });
 

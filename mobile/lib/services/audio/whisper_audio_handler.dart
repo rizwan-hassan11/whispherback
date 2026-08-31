@@ -77,7 +77,10 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     );
     _player.positionStream.listen(
       (_) {
-        if (_playingClip && _player.playing) {
+        // Round 76: never upgrade the shade to "playing" while the user
+        // pause latch is set — position ticks after a forced OEM resume
+        // were flipping the icon back to pause and looking like auto-resume.
+        if (_playingClip && _player.playing && !_userPausedClip) {
           _publishClipControls(
             playing: true,
             processing: _player.processingState,
@@ -190,9 +193,10 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
       DateTime.now().isBefore(_suppressPlayEchoUntil!);
 
   void _armPlayEchoSuppress() {
-    // 2s covers slow OEM MediaSession play echoes after pause.
+    // Round 76: 3.5s covers slow OEM MediaSession play echoes after pause
+    // (Samsung One UI / Xiaomi often echo PLAY well after the 2s window).
     _suppressPlayEchoUntil =
-        DateTime.now().add(const Duration(milliseconds: 2000));
+        DateTime.now().add(const Duration(milliseconds: 3500));
   }
 
   void clearPlayEchoSuppress() {
@@ -292,7 +296,11 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
             break;
           case AudioInterruptionType.pause:
           case AudioInterruptionType.unknown:
-            if (_playingClip && _player.playing) {
+            // Round 76: never arm auto-resume if the user already paused
+            // via the shade / lock-screen — OEM focus churn around
+            // MediaSession PAUSE was setting this flag and then
+            // `_player.play()`ing straight through the pause latch.
+            if (_playingClip && _player.playing && !_userPausedClip) {
               _wasPlayingBeforeInterruption = true;
               unawaited(_player.pause());
             }
@@ -306,9 +314,14 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
             }
             break;
           case AudioInterruptionType.pause:
-            if (_wasPlayingBeforeInterruption && _playingClip) {
+            // Round 76: user-pause latch always wins over focus restore.
+            if (_wasPlayingBeforeInterruption &&
+                _playingClip &&
+                !_userPausedClip) {
               _wasPlayingBeforeInterruption = false;
               unawaited(_player.play());
+            } else {
+              _wasPlayingBeforeInterruption = false;
             }
             break;
           case AudioInterruptionType.unknown:
@@ -323,6 +336,8 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     session.becomingNoisyEventStream.listen((_) {
       if (_playingClip && _player.playing) {
         _wasPlayingBeforeInterruption = false;
+        _userPausedClip = true;
+        _armPlayEchoSuppress();
         unawaited(_player.pause());
       }
     });
@@ -694,8 +709,8 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
         await _pauseIfInvalidatedForPause(playGen);
         return;
       }
-      // Round 74: user pause invalidated this load — never force play().
-      if (_invalidateForPause) {
+      // Round 74/76: user pause invalidated this load — never force play().
+      if (_invalidateForPause || _userPausedClip) {
         try {
           await _player.pause();
         } catch (_) {}
@@ -709,7 +724,7 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
         await _pauseIfInvalidatedForPause(playGen);
         return;
       }
-      if (_invalidateForPause) {
+      if (_invalidateForPause || _userPausedClip) {
         try {
           await _player.pause();
         } catch (_) {}
@@ -1273,15 +1288,21 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> play() async {
     if (!_playingClip) return;
 
-    // Round 74/75: OEM MediaSession often echoes PLAY right after PAUSE.
+    // Round 74/75/76: OEM MediaSession often echoes PLAY right after PAUSE.
     // While the user-pause latch is set, ignore depth-0 play during the
-    // echo window and keep the shade on the paused icon.
+    // echo window and keep the shade on the paused icon. Intentional
+    // in-app resume uses runFromAppTransport (depth > 0) and always wins.
     if (_appTransportDepth == 0 &&
         _userPausedClip &&
         _suppressPlayEchoActive) {
       if (kDebugMode) {
         debugPrint(
             'handler.play: ignored MediaSession play echo after pause');
+      }
+      if (_player.playing) {
+        try {
+          await _player.pause();
+        } catch (_) {}
       }
       _publishClipControls(
         playing: false,
@@ -1407,8 +1428,11 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     _sourceSwapInFlight = false;
     _suppressPauseEchoUntil = null;
     _userPausedClip = true;
+    // Round 76: clear focus-restore arm so an interruption end that
+    // races with this pause cannot call `_player.play()` and undo it.
+    _wasPlayingBeforeInterruption = false;
     // Block the immediate MediaSession PLAY echo that follows PAUSE on
-    // many OEMs (QA Round 74/75: notification pause auto-resumes).
+    // many OEMs (QA Round 74/75/76: notification pause auto-resumes).
     _armPlayEchoSuppress();
 
     _publishClipControls(
@@ -1666,9 +1690,14 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   /// Broadcasts state to the system notification + lock screen (official pattern).
   void _broadcastState(PlaybackEvent event) {
     if (!_playingClip) return;
-    // Round 75: user pause wins over every transient player event.
+    // Round 75/76: user pause wins over every transient player event.
+    // If ExoPlayer was force-started by an OEM focus restore / play echo
+    // that bypassed [play], yank it back to paused so audio matches UI.
     if (_userPausedClip) {
       _sourceSwapInFlight = false;
+      if (_player.playing) {
+        unawaited(_player.pause());
+      }
       _publishClipControls(
         playing: false,
         processing: _player.processingState,

@@ -54,9 +54,9 @@ void main() {
       expect(body, contains('_ensureMediaNotificationVisible()'));
     });
 
-    test('play echo window is 2s and gated on user-pause latch', () {
+    test('play echo window is 3.5s and gated on user-pause latch', () {
       final handler = _read('lib/services/audio/whisper_audio_handler.dart');
-      expect(handler, contains('Duration(milliseconds: 2000)'));
+      expect(handler, contains('Duration(milliseconds: 3500)'));
       final playIdx = handler.indexOf('Future<void> play() async');
       final playEnd = handler.indexOf('Future<void> hideClipMediaNotification(', playIdx);
       final play = handler.substring(playIdx, playEnd < 0 ? playIdx + 1200 : playEnd);
@@ -64,9 +64,9 @@ void main() {
       expect(play, contains('_suppressPlayEchoActive'));
     });
 
-    test('build id stamped R75', () {
+    test('build id stamped R76', () {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
-      expect(coord, contains("transportBuildId = 'R75-spotify-notif'"));
+      expect(coord, contains("transportBuildId = 'R76-ocean-pause'"));
     });
   });
 }

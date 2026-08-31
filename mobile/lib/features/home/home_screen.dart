@@ -12,6 +12,7 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_icons.dart';
 import '../../core/theme/app_radii.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/whisper_wordmark.dart';
 import '../../domain/playback/playback_state.dart';
 import '../../l10n/app_localizations.dart';
 import '../../providers/playback_providers.dart';
@@ -368,15 +369,11 @@ class _HomeHeader extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'WhisperBack',
-          style: GoogleFonts.fraunces(
-            fontSize: 22,
-            fontWeight: FontWeight.w600,
-            letterSpacing: -0.4,
-            color: theme.foreground,
-          ),
+        const WhisperWordmark(
+          titleFontSize: 24,
+          compact: true,
         ),
+        const SizedBox(height: 2),
         Text(
           DateFormat('EEEE, MMM d', locale).format(now),
           style: TextStyle(fontSize: 12, color: theme.muted),

@@ -242,7 +242,7 @@ class NotificationService {
         // ignore the channel-level icon in favour of the per-notification
         // override.
         icon: 'ic_notification',
-        color: const Color(0xFF2E8BFF),
+        color: const Color(0xFF5DD5E8),
         styleInformation: upcomingSummary != null
             ? BigTextStyleInformation(
                 upcomingSummary,
@@ -458,7 +458,7 @@ class NotificationService {
         category: AndroidNotificationCategory.alarm,
         fullScreenIntent: true,
         icon: 'ic_notification',
-        color: const Color(0xFF2E8BFF),
+        color: const Color(0xFF5DD5E8),
         actions: [
           AndroidNotificationAction(
             'schedule_play_now',

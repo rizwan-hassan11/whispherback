@@ -36,7 +36,9 @@ class AppleLogo extends StatelessWidget {
   }
 }
 
-/// WhisperBack brand mark for use inside the app (splash, about, headers…).
+/// WhisperBack soundwave brand mark (oceanic logo).
+///
+/// Prefers the crisp SVG mark; falls back to the PNG launcher asset.
 class WhisperBackLogo extends StatelessWidget {
   const WhisperBackLogo({super.key, this.size = 96, this.borderRadius});
 
@@ -45,13 +47,20 @@ class WhisperBackLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final radius = borderRadius ?? BorderRadius.circular(size * 0.22);
     return ClipRRect(
-      borderRadius: borderRadius ?? BorderRadius.circular(size * 0.22),
-      child: Image.asset(
-        'assets/branding/app_logo.png',
+      borderRadius: radius,
+      child: SvgPicture.asset(
+        'assets/branding/logo_mark.svg',
         width: size,
         height: size,
         fit: BoxFit.cover,
+        placeholderBuilder: (_) => Image.asset(
+          'assets/branding/app_logo.png',
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+        ),
       ),
     );
   }

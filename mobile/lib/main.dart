@@ -75,7 +75,7 @@ Future<void> main() async {
               androidNotificationIcon: 'drawable/ic_notification',
               androidNotificationClickStartsActivity: true,
               androidShowNotificationBadge: true,
-              notificationColor: const Color(0xFF2E8BFF),
+              notificationColor: const Color(0xFF5DD5E8),
               artDownscaleWidth: 256,
               artDownscaleHeight: 256,
             ),

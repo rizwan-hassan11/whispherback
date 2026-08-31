@@ -11,19 +11,19 @@ class PlaylistCoverPalette {
   const PlaylistCoverPalette._();
 
   static final List<List<Color>> _darkPalettes = [
-    [AppColors.brandDark, AppColors.brandLight],
+    [AppColors.neonDeep, AppColors.neonCyan],
     [AppColors.deep2, AppColors.inkSecondary],
-    [const Color(0xFF0A2048), AppColors.gold.withValues(alpha: 0.85)],
-    [const Color(0xFF3D5A80), const Color(0xFF5B8FC4)],
+    [const Color(0xFF0D3554), AppColors.neon.withValues(alpha: 0.85)],
+    [const Color(0xFF124A6E), const Color(0xFF34B3E4)],
     [AppColors.neon.withValues(alpha: 0.35), AppColors.brand],
   ];
 
   static final List<List<Color>> _lightPalettes = [
-    [AppColors.ink, AppColors.inkSecondary],
-    [const Color(0xFF0A2048), AppColors.ink],
-    [const Color(0xFF1E3A5F), const Color(0xFF3D5A80)],
-    [AppColors.inkSecondary, const Color(0xFF0A2048)],
-    [AppColors.brand, AppColors.brandLight],
+    [AppColors.deep, AppColors.neonDeep],
+    [const Color(0xFF0A2A43), AppColors.ink],
+    [const Color(0xFF124A6E), const Color(0xFF186CA8)],
+    [AppColors.inkSecondary, const Color(0xFF0A2A43)],
+    [AppColors.neonCyan, AppColors.neon],
   ];
 
   static List<Color> colorsForIndex(int index, {required bool isDark}) {
