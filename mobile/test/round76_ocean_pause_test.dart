@@ -72,7 +72,7 @@ void main() {
 
     test('build id stamped R76', () {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
-      expect(coord, contains("transportBuildId = 'R78-notif-transport'"));
+      expect(coord, contains("transportBuildId = 'R79-scheduled-no-autopause'"));
     });
   });
 }

@@ -29,7 +29,7 @@ void main() {
 
     test('transport build id stamped for QA (Round 70)', () {
       final coord = _read('lib/services/playback/playback_coordinator.dart');
-      expect(coord, contains("transportBuildId = 'R78-notif-transport'"));
+      expect(coord, contains("transportBuildId = 'R79-scheduled-no-autopause'"));
       final settings = _read('lib/features/settings/settings_screen.dart');
       expect(settings, contains('PlaybackCoordinator.transportBuildId'));
     });

@@ -68,7 +68,7 @@ class PlaybackCoordinator {
 
   /// Bump when shipping a manual playback transport fix. Shown in Settings
   /// so QA can confirm the installed APK contains this logic (not a stale build).
-  static const transportBuildId = 'R78-notif-transport';
+  static const transportBuildId = 'R79-scheduled-no-autopause';
 
   final AppStateRepository _appState;
   final PlaylistRepository _playlists;
@@ -202,7 +202,10 @@ class PlaybackCoordinator {
     }
     final nativeActive = _nativeOwnsPlayback;
     if (nativeActive) {
-      if (revertOptimisticSkip) {
+      // Round 79: only honor an explicit user pause/dismiss on native
+      // scheduled audio. Soft skip preemption must not call pauseNative —
+      // that was auto-pausing mid-clip when library play raced the gate.
+      if (revertOptimisticSkip && _latestTransportPausesPlayback) {
         try {
           await NativeAlarmsBridge.instance.pauseNative();
         } catch (_) {}
@@ -592,6 +595,15 @@ class PlaybackCoordinator {
         // FIRST transition into native play should stamp lastFired /
         // suspend silence / emit the scheduledPlaying frame.
         //
+        // Round 79: a new native scheduled fire must clear a parked manual-
+        // preview pause latch — otherwise we ignored PLAYING ticks, never
+        // suspended ExoPlayer, and stale audio_service PAUSE routed to
+        // pauseNative() mid-schedule (premature auto-pause).
+        final firstStart = !_nativeScheduledActive;
+        if (firstStart) {
+          _userInitiatedPause = false;
+        }
+        //
         // Round 41: if the user just tapped pause, ignore PLAYING ticks
         // until native reports paused (or they tap resume). The progress
         // ticker kept broadcasting PLAYING for up to ~500ms after the
@@ -623,7 +635,6 @@ class PlaybackCoordinator {
               _ensurePlaylistCache(native.playlistId ?? _snapshot.playlistId));
           return;
         }
-        final firstStart = !_nativeScheduledActive;
         final wasPaused = _nativeScheduledActive && !_snapshot.isPlaying;
         _nativeScheduledActive = true;
         if (firstStart) {
@@ -882,6 +893,11 @@ class PlaybackCoordinator {
     }
 
     if (_nativeOwnsPlayback) {
+      // Round 79: stale audio_service MediaSession must not pause native
+      // scheduled playback — only the native shade / in-app pause may.
+      if (!_audio.isPlayingClip) {
+        return Future<void>.value();
+      }
       _nativeScheduledActive = true;
       return NativeAlarmsBridge.instance.pauseNative().catchError((e, st) {
         if (kDebugMode) {

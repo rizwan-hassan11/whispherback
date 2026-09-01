@@ -529,6 +529,49 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
     }
   }
 
+  /// Round 79 — tear down a parked manual ExoPlayer session so native
+  /// scheduled playback is the only live MediaSession. `_finishManualPreview`
+  /// leaves `_playingClip` true; returning early here let a stale
+  /// audio_service card route shade PAUSE to `pauseNative()` mid-schedule.
+  Future<void> _parkClipForNativeTakeover() async {
+    _playingClip = false;
+    _standalonePlayback = false;
+    _userPausedClip = false;
+    _invalidateForPause = false;
+    _exoBoundPath = null;
+    _clipTitle = null;
+    _sourceSwapInFlight = false;
+    _startWatchdog?.cancel();
+    _startWatchdog = null;
+    try {
+      await _player.stop();
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint('parkClipForNative: stop failed: $e\n$st');
+      }
+    }
+    _keepAliveRunning = false;
+    try {
+      playbackState.add(
+        PlaybackState(
+          controls: const [],
+          systemActions: const {},
+          processingState: AudioProcessingState.idle,
+          playing: false,
+          updatePosition: Duration.zero,
+          bufferedPosition: Duration.zero,
+          speed: 1.0,
+        ),
+      );
+      mediaItem.add(null);
+      queue.add(const []);
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint('parkClipForNative: clear notification failed: $e\n$st');
+      }
+    }
+  }
+
   /// Round 27 — pause the inaudible silence loop while native scheduled
   /// playback owns the media stream. Leaves `_keepAlive` / the FG
   /// binding intent intact so [resumeSilenceAfterExternalPlayback] can
@@ -537,7 +580,10 @@ class WhisperAudioHandler extends BaseAudioHandler with SeekHandler {
   /// ExoPlayer mid-clip and the native MediaPlayer pauses.
   Future<void> suspendSilenceForExternalPlayback() async {
     _silenceSuspendedForExternal = true;
-    if (_playingClip) return;
+    if (_playingClip) {
+      await _parkClipForNativeTakeover();
+      return;
+    }
     try {
       if (_player.playing) {
         await _player.pause();
